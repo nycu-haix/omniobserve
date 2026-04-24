@@ -2,14 +2,9 @@
 	"name": "project",
 	"type": "module",
 	"scripts": {
-		"astro": "astro",
-		"build": "astro build",
-		"dev": "astro dev",
-		"preview": "astro preview",
-		"test": "astro check",
+		"format": "prettier --write .",
 		"preinstall": "npx only-allow pnpm",
-		"prepare": "sh -c 'command -v git >/dev/null 2>&1 && [ -d .git ] && git config core.hooksPath .githooks || exit 0'",
-		"format": "prettier --write ."
+		"prepare": "sh -c 'command -v git >/dev/null 2>&1 && [ -d .git ] && git config core.hooksPath .githooks || exit 0'"
 	},
 	"devDependencies": {
 		"prettier": "^3.8.3",
