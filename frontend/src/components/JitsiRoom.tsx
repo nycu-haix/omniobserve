@@ -90,6 +90,9 @@ export function JitsiRoom({
         }}
         configOverwrite={{
           prejoinPageEnabled: false,
+          prejoinConfig: {
+            enabled: false,
+          },
           startWithAudioMuted: true,
           startWithVideoMuted: true,
           toolbarButtons: [],
