@@ -17,9 +17,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Mic, MicOff, Radio } from "lucide-react";
-import { Button } from "./ui/Button";
 import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
+import { Button } from "./ui/Button";
+import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
 
@@ -38,8 +39,6 @@ const INITIAL_ITEMS: SurvivalItem[] = [
 ];
 
 const jitsiMeetingUrl = import.meta.env.VITE_JITSI_MEETING_URL as string | undefined;
-const jitsiDisplayName =
-  (import.meta.env.VITE_JITSI_DISPLAY_NAME as string | undefined) || "OmniObserve User";
 
 function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -72,6 +71,7 @@ function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
 export default function MeetingRoom() {
   const [micMode, setMicMode] = useState<MicMode>("off");
   const [items, setItems] = useState(INITIAL_ITEMS);
+  const { displayName } = useParticipantIdentity();
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -101,11 +101,7 @@ export default function MeetingRoom() {
     <main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:grid-cols-[minmax(0,1fr)_560px]">
       <section className="grid min-w-0 grid-rows-[minmax(320px,1fr)_auto_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground">
         <div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-          <JitsiRoom
-            meetingUrl={jitsiMeetingUrl}
-            displayName={jitsiDisplayName}
-            micMode={micMode}
-          />
+          <JitsiRoom meetingUrl={jitsiMeetingUrl} displayName={displayName} micMode={micMode} />
         </div>
 
         <section className="min-h-[260px] rounded-lg border p-3" aria-label="Survival ranking task">
