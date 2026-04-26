@@ -19,8 +19,7 @@ export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
     summary: "氧氣筒應該排第一，因為直接影響生存時間",
     aiSummary:
       "氧氣被視為最直接的生存限制。若沒有氧氣，其他資源無法發揮作用，因此多數成員傾向把氧氣放在最高優先級。",
-    transcript:
-      "氧氣一定要在前面吧，因為沒有氧氣的話，就算我們有地圖或食物也沒有時間使用。",
+    transcript: "氧氣一定要在前面吧，因為沒有氧氣的話，就算我們有地圖或食物也沒有時間使用。",
     transcriptLineId: "t2",
     expanded: false,
     status: "ready",

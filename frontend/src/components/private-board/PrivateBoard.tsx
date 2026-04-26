@@ -166,7 +166,9 @@ export function PrivateBoard({ roomId }: PrivateBoardProps) {
             </Button>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
+            <span
+              className={`h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`}
+            />
             <Button aria-label="Add idea block" size="icon" onClick={addBlock}>
               <Plus className="h-4 w-4" />
             </Button>

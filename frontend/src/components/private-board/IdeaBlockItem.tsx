@@ -32,7 +32,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle }: IdeaBl
       ) : (
         <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       )}
-      <span className="min-w-0 flex-1 truncate">{isGenerating ? "正在生成..." : block.summary}</span>
+      <span className="min-w-0 flex-1 truncate">
+        {isGenerating ? "正在生成..." : block.summary}
+      </span>
       {!isGenerating && (
         <Button
           aria-label="Edit idea block"

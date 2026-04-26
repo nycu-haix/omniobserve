@@ -18,6 +18,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { Button } from "./ui/Button";
+import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
@@ -35,6 +36,10 @@ const INITIAL_ITEMS: SurvivalItem[] = [
   { id: "radio", label: "無線電", rank: 4 },
   { id: "food", label: "濃縮食物", rank: 5 },
 ];
+
+const jitsiMeetingUrl = import.meta.env.VITE_JITSI_MEETING_URL as string | undefined;
+const jitsiDisplayName =
+  (import.meta.env.VITE_JITSI_DISPLAY_NAME as string | undefined) || "OmniObserve User";
 
 function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -96,12 +101,11 @@ export default function MeetingRoom() {
     <main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:grid-cols-[minmax(0,1fr)_560px]">
       <section className="grid min-w-0 grid-rows-[minmax(320px,1fr)_auto_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground">
         <div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-          <div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
-            <div className="text-center">
-              <div className="text-lg font-semibold text-foreground">Public Meeting</div>
-              <div className="text-sm">Jitsi iframe placeholder</div>
-            </div>
-          </div>
+          <JitsiRoom
+            meetingUrl={jitsiMeetingUrl}
+            displayName={jitsiDisplayName}
+            micMode={micMode}
+          />
         </div>
 
         <section className="min-h-[260px] rounded-lg border p-3" aria-label="Survival ranking task">
@@ -109,8 +113,15 @@ export default function MeetingRoom() {
             <h2 className="text-base font-semibold">月球生存排序</h2>
             <span className="text-sm text-muted-foreground">協作中</span>
           </header>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={items.map((item) => item.id)}
+              strategy={verticalListSortingStrategy}
+            >
               <div className="grid gap-2">
                 {items.map((item) => (
                   <SortableSurvivalItem key={item.id} item={item} />
