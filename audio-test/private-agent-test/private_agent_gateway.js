@@ -2,22 +2,11 @@ const VAD_WS_URL =
   window.AGENT_API_WS_URL ||
   "ws://localhost:8000/ws/audio";
 
-// REST API base URL
-const AUDIO_SEGMENT_API_BASE_URL =
-  window.AGENT_API_BASE_URL ||
-  "http://localhost:8000";
-
 const SAMPLE_RATE = 16000;
 const SEND_CHUNK_SIZE = 512;
 
-// REST audio segment settings
-const AUDIO_SEGMENT_MS = 5000;
-const AUDIO_SEGMENT_SAMPLES = Math.floor(SAMPLE_RATE * (AUDIO_SEGMENT_MS / 1000));
-const AUDIO_SEGMENT_FILE_FORMAT = "wav";
-const MIN_UPLOAD_SAMPLES = Math.floor(SAMPLE_RATE * 0.2); // avoid uploading extremely tiny final chunks
-
-const DEBUG = true;
-const SHOW_RMS = true;
+const DEBUG = false;
+const SHOW_RMS = false;
 
 let audioContext = null;
 let micStream = null;
@@ -28,10 +17,6 @@ let vadWs = null;
 
 let pendingPcm = new Float32Array(0);
 let sentChunkCount = 0;
-
-// REST upload buffer
-let pendingUploadPcm = new Float32Array(0);
-let currentSegmentStartedAt = null;
 
 let hasStartedAgent = false;
 let isStoppingAgent = false;
@@ -83,12 +68,6 @@ function getRoomName() {
   return roomNameInput?.value?.trim() || window.AGENT_ROOM_NAME || "unknown_room";
 }
 
-// session_id is required in:
-// POST /sessions/{session_id}/audio-segments
-function getSessionId() {
-  return window.AGENT_SESSION_ID || getRoomName();
-}
-
 if (startBtn) {
   startBtn.addEventListener("click", () => {
     startPrivateAgent();
@@ -101,7 +80,7 @@ if (stopBtn) {
   });
 }
 
-log("✅ private_agent_gateway.js loaded");
+// log("✅ private_agent_gateway.js loaded");
 
 async function startPrivateAgent() {
   if (hasStartedAgent) return;
@@ -112,10 +91,6 @@ async function startPrivateAgent() {
 
   sentChunkCount = 0;
   pendingPcm = new Float32Array(0);
-
-  pendingUploadPcm = new Float32Array(0);
-  currentSegmentStartedAt = null;
-
   audioSamples = 0;
   wallStart = null;
   lastLevelLogTime = 0;
@@ -128,9 +103,7 @@ async function startPrivateAgent() {
     log(`Private User ID: ${getUserId()}`);
     log(`Display Name: ${getDisplayName()}`);
     log(`Room Name: ${getRoomName()}`);
-    log(`Session ID: ${getSessionId()}`);
     log(`API WebSocket: ${VAD_WS_URL}`);
-    log(`Audio Segment REST API: ${AUDIO_SEGMENT_API_BASE_URL}/sessions/${getSessionId()}/audio-segments`);
 
     log("Connecting to backend...");
     await connectVadWebSocket();
@@ -156,7 +129,7 @@ async function startPrivateAgent() {
 
     startMicPipeline();
 
-    log(`✅ Private Agent started, browser sampleRate=${audioContext.sampleRate}`);
+    // log(`✅ Private Agent started, browser sampleRate=${audioContext.sampleRate}`);
   } catch (err) {
     log("❌ Failed to start private agent: " + (err.message || err));
     console.error(err);
@@ -178,9 +151,6 @@ async function stopPrivateAgent() {
 
   if (startBtn) startBtn.disabled = false;
   if (stopBtn) stopBtn.disabled = true;
-
-  // Upload the final remaining audio segment, if there is any.
-  await flushPendingUploadSegment();
 
   if (processor) {
     try {
@@ -248,9 +218,6 @@ async function stopPrivateAgent() {
   pendingPcm = new Float32Array(0);
   sentChunkCount = 0;
 
-  pendingUploadPcm = new Float32Array(0);
-  currentSegmentStartedAt = null;
-
   log("✅ Private Agent stopped");
 }
 
@@ -297,7 +264,7 @@ function connectVadWebSocket() {
     };
 
     vadWs.onmessage = (event) => {
-      log("Backend: " + event.data);
+      // log("Backend: " + event.data);
     };
 
     vadWs.onclose = () => {
@@ -382,11 +349,7 @@ function startMicPipeline() {
       log("✅ 成功接收到 private microphone input");
     }
 
-    // 原本 WebSocket PCM 傳送：保留
     appendAndSendContinuousPcm(downsampled);
-
-    // 新增 REST multipart audio segment 上傳：符合 API 格式
-    appendAndUploadAudioSegment(downsampled);
   };
 }
 
@@ -479,179 +442,4 @@ function appendAndSendContinuousPcm(newPcm) {
   }
 
   pendingPcm = merged.slice(offset);
-}
-
-function appendAndUploadAudioSegment(newPcm) {
-  if (!newPcm || newPcm.length === 0) return;
-
-  if (!currentSegmentStartedAt) {
-    currentSegmentStartedAt = new Date();
-  }
-
-  const merged = new Float32Array(pendingUploadPcm.length + newPcm.length);
-
-  merged.set(pendingUploadPcm, 0);
-  merged.set(newPcm, pendingUploadPcm.length);
-
-  let offset = 0;
-
-  while (offset + AUDIO_SEGMENT_SAMPLES <= merged.length) {
-    const segmentPcm = merged.slice(offset, offset + AUDIO_SEGMENT_SAMPLES);
-
-    const startedAt = currentSegmentStartedAt;
-    const durationMs = Math.round((segmentPcm.length / SAMPLE_RATE) * 1000);
-    const endedAt = new Date(startedAt.getTime() + durationMs);
-
-    currentSegmentStartedAt = endedAt;
-
-    const audioBlob = float32PcmToWavBlob(segmentPcm, SAMPLE_RATE);
-
-    uploadAudioSegment({
-      sessionId: getSessionId(),
-      participantId: getUserId(),
-      micMode: "private",
-      audioBlob,
-      fileFormat: AUDIO_SEGMENT_FILE_FORMAT,
-      startedAt: startedAt.toISOString(),
-      endedAt: endedAt.toISOString()
-    })
-      .then((result) => {
-        log(
-          `✅ uploaded audio segment: ${result.id}, ` +
-          `duration_ms=${result.duration_ms ?? durationMs}`
-        );
-      })
-      .catch((err) => {
-        log("❌ upload audio segment failed: " + (err.message || err));
-        console.error(err);
-      });
-
-    offset += AUDIO_SEGMENT_SAMPLES;
-  }
-
-  pendingUploadPcm = merged.slice(offset);
-}
-
-async function flushPendingUploadSegment() {
-  if (!pendingUploadPcm || pendingUploadPcm.length < MIN_UPLOAD_SAMPLES) {
-    pendingUploadPcm = new Float32Array(0);
-    currentSegmentStartedAt = null;
-    return;
-  }
-
-  const segmentPcm = pendingUploadPcm;
-  const startedAt = currentSegmentStartedAt || new Date();
-  const durationMs = Math.round((segmentPcm.length / SAMPLE_RATE) * 1000);
-  const endedAt = new Date(startedAt.getTime() + durationMs);
-
-  pendingUploadPcm = new Float32Array(0);
-  currentSegmentStartedAt = null;
-
-  const audioBlob = float32PcmToWavBlob(segmentPcm, SAMPLE_RATE);
-
-  try {
-    const result = await uploadAudioSegment({
-      sessionId: getSessionId(),
-      participantId: getUserId(),
-      micMode: "private",
-      audioBlob,
-      fileFormat: AUDIO_SEGMENT_FILE_FORMAT,
-      startedAt: startedAt.toISOString(),
-      endedAt: endedAt.toISOString()
-    });
-
-    log(
-      `✅ uploaded final audio segment: ${result.id}, ` +
-      `duration_ms=${result.duration_ms ?? durationMs}`
-    );
-  } catch (err) {
-    log("❌ upload final audio segment failed: " + (err.message || err));
-    console.error(err);
-  }
-}
-
-async function uploadAudioSegment({
-  sessionId,
-  participantId,
-  micMode,
-  audioBlob,
-  fileFormat,
-  startedAt,
-  endedAt,
-  retryOf = null,
-}) {
-  const formData = new FormData();
-
-  formData.append("participant_id", participantId);
-  formData.append("mic_mode", micMode); // "public" or "private"
-  formData.append("file_format", fileFormat); // "wav" / "webm" / "mp3" / "m4a"
-  formData.append("started_at", startedAt);
-  formData.append("ended_at", endedAt);
-  formData.append("audioFile", audioBlob, `segment.${fileFormat}`);
-
-  if (retryOf) {
-    formData.append("retry_of", retryOf);
-  }
-
-  const response = await fetch(
-    `${AUDIO_SEGMENT_API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/audio-segments`,
-    {
-      method: "POST",
-      body: formData,
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Upload failed: ${response.status} ${errorText}`);
-  }
-
-  return await response.json();
-}
-
-function float32PcmToWavBlob(float32Array, sampleRate) {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const bytesPerSample = bitsPerSample / 8;
-  const blockAlign = numChannels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = float32Array.length * bytesPerSample;
-
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  writeString(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(view, 8, "WAVE");
-
-  writeString(view, 12, "fmt ");
-  view.setUint32(16, 16, true); // PCM header size
-  view.setUint16(20, 1, true); // PCM format
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-
-  writeString(view, 36, "data");
-  view.setUint32(40, dataSize, true);
-
-  let offset = 44;
-
-  for (let i = 0; i < float32Array.length; i++, offset += 2) {
-    const sample = Math.max(-1, Math.min(1, float32Array[i]));
-    const intSample = sample < 0
-      ? sample * 0x8000
-      : sample * 0x7fff;
-
-    view.setInt16(offset, intSample, true);
-  }
-
-  return new Blob([buffer], { type: "audio/wav" });
-}
-
-function writeString(view, offset, string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
 }
