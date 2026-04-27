@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Private Audio Agent</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 16px;
+    }
+
+    button {
+      padding: 8px 14px;
+      margin-right: 8px;
+      margin-bottom: 12px;
+    }
+
+    input {
+      padding: 6px;
+      margin: 4px 0;
+      width: 260px;
+    }
+
+    label {
+      display: block;
+      margin-top: 8px;
+    }
+
+    pre {
+      background: #111;
+      color: #eee;
+      padding: 12px;
+      white-space: pre-wrap;
+      min-height: 300px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Private Audio Agent</h1>
+
+  <label>
+    User ID:
+    <input id="userIdInput" value="user_001" />
+  </label>
+
+  <label>
+    Display Name:
+    <input id="displayNameInput" value="User 001" />
+  </label>
+
+  <label>
+    Room Name:
+    <input id="roomNameInput" value="skyishandsome" />
+  </label>
+
+  <button id="startBtn">Start Private Agent</button>
+  <button id="stopBtn" disabled>Stop Private Agent</button>
+
+  <pre id="log"></pre>
+
+  <script>
+    (() => {
+      const pageParams = new URLSearchParams(window.location.search);
+
+      window.AGENT_API_WS_URL =
+        pageParams.get("apiWsUrl") ||
+        "ws://localhost:8000/ws/audio";
+
+      window.AGENT_USER_ID =
+        pageParams.get("userId") ||
+        "user_001";
+
+      window.AGENT_DISPLAY_NAME =
+        pageParams.get("displayName") ||
+        "User 001";
+
+      window.AGENT_ROOM_NAME =
+        pageParams.get("roomName") ||
+        "skyishandsome";
+
+      const userIdInput = document.getElementById("userIdInput");
+      const displayNameInput = document.getElementById("displayNameInput");
+      const roomNameInput = document.getElementById("roomNameInput");
+
+      userIdInput.value = window.AGENT_USER_ID;
+      displayNameInput.value = window.AGENT_DISPLAY_NAME;
+      roomNameInput.value = window.AGENT_ROOM_NAME;
+
+      const agentScript = document.createElement("script");
+      agentScript.src = "./private_agent_gateway.js?v=" + Date.now();
+
+      agentScript.onerror = () => {
+        const logBox = document.getElementById("log");
+        logBox.textContent += "\nFailed to load private_agent_gateway.js";
+      };
+
+      document.body.appendChild(agentScript);
+    })();
+  </script>
+</body>
+</html>
