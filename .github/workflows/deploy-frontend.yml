@@ -7,7 +7,6 @@ on:
     paths:
       - "frontend/**"
       - ".github/workflows/deploy-frontend.yml"
-  workflow_dispatch:
 
 concurrency:
   group: deploy-frontend-main
@@ -15,63 +14,13 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS]
 
     steps:
-      - name: Prepare SSH
-        shell: bash
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-        run: |
-          set -euo pipefail
-
-          : "${DEPLOY_SSH_KEY:?DEPLOY_SSH_KEY is missing}"
-          : "${DEPLOY_HOST:?DEPLOY_HOST is missing}"
-          : "${DEPLOY_USER:?DEPLOY_USER is missing}"
-
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
-
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-
-          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
-          cat > ~/.ssh/config <<EOF
-          Host deploy-target
-            HostName $DEPLOY_HOST
-            User $DEPLOY_USER
-            Port $DEPLOY_PORT
-            IdentityFile ~/.ssh/deploy_key
-            StrictHostKeyChecking accept-new
-            ServerAliveInterval 30
-          EOF
-
-          chmod 600 ~/.ssh/config
-
-          echo "Testing TCP reachability..."
-          nc -vz "$DEPLOY_HOST" "$DEPLOY_PORT"
-
-          echo "Testing SSH login..."
-          ssh deploy-target "whoami && hostname && pwd"
-
-      - name: Build frontend on server
+      - name: Build frontend
         shell: bash
         run: |
           set -euo pipefail
-
-          ssh deploy-target <<'REMOTE'
-          set -euo pipefail
-
-          export PATH="$HOME/Library/pnpm:$HOME/.local/share/pnpm:$PATH"
-
-          if [ -s "$HOME/.nvm/nvm.sh" ]; then
-            . "$HOME/.nvm/nvm.sh"
-            nvm use --lts >/dev/null || true
-          fi
 
           cd /Users/skyhong/Documents/omniobserve/frontend
 
@@ -79,4 +28,3 @@ jobs:
 
           pnpm i
           pnpm build
-          REMOTE
