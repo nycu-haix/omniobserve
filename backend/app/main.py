@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text as sql_text
 
-from .config import CORS_ALLOWED_ORIGINS, SKIP_DB_STARTUP, logger
+from .config import CORS_ALLOW_CREDENTIALS, CORS_ALLOWED_ORIGINS, SKIP_DB_STARTUP, logger
 from .db import engine
 from .error_handlers import register_exception_handlers
 from .models import Base
@@ -13,7 +13,7 @@ app = FastAPI(title="OmniObserve API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

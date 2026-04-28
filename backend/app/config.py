@@ -14,10 +14,11 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "*",
     ).split(",")
     if origin.strip()
 ]
+CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "").lower() in {"1", "true", "yes", "on"}
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
