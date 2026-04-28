@@ -183,6 +183,30 @@ async def generate_and_save_idea_blocks(
     return list(result.scalars().all())
 
 
+async def generate_idea_blocks_from_stream_transcripts(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    participant_id: str,
+    visibility: Visibility,
+    transcripts: list[Any],
+) -> list[IdeaBlock]:
+    transcript_text = "\n".join(str(item.text) for item in transcripts if getattr(item, "text", None)).strip()
+    if not transcript_text:
+        return []
+
+    idea_blocks = await generate_and_save_idea_blocks(
+        db,
+        session_id=session_id,
+        participant_id=participant_id,
+        visibility=visibility,
+        source_transcript_ids=[str(item.segment_id) for item in transcripts if getattr(item, "segment_id", None)],
+        transcript_text=transcript_text,
+    )
+    await db.commit()
+    return idea_blocks
+
+
 def _build_mock_idea_blocks(transcript_text: str) -> list[dict[str, Any]] | None:
     llm_mock_flag = os.getenv("LLM_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
     mock_text = os.getenv("IDEA_BLOCK_MOCK_TEXT", "").strip()
