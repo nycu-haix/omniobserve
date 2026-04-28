@@ -1,104 +1,100 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <title>Public Audio Agent</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 16px;
-    }
+	<head>
+		<meta charset="UTF-8" />
+		<title>Public Audio Agent</title>
+		<style>
+			body {
+				font-family: Arial, sans-serif;
+				padding: 16px;
+			}
 
-    button {
-      padding: 8px 14px;
-      margin-bottom: 12px;
-    }
+			button {
+				padding: 8px 14px;
+				margin-bottom: 12px;
+			}
 
-    pre {
-      background: #111;
-      color: #eee;
-      padding: 12px;
-      white-space: pre-wrap;
-      min-height: 300px;
-      max-height: 600px;
-      overflow-y: auto;
-    }
-  </style>
-</head>
-<body>
-  <h1>Public Audio Agent</h1>
+			pre {
+				background: #111;
+				color: #eee;
+				padding: 12px;
+				white-space: pre-wrap;
+				min-height: 300px;
+				max-height: 600px;
+				overflow-y: auto;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Public Audio Agent</h1>
 
-  <button id="startBtn">Start Public Agent</button>
-  <button id="stopBtn" disabled>Stop Public Agent</button>
+		<button id="startBtn">Start Public Agent</button>
+		<button id="stopBtn" disabled>Stop Public Agent</button>
 
-  <pre id="log"></pre>
+		<pre id="log"></pre>
 
-  <script>
-    (() => {
-      const pageLogBox = document.getElementById("log");
+		<script>
+			(() => {
+				const pageLogBox = document.getElementById("log");
 
-      function pageLog(message) {
-        console.log(message);
-        pageLogBox.textContent += "\n" + message;
-        pageLogBox.scrollTop = pageLogBox.scrollHeight;
-      }
-      window.pageLog = pageLog;
+				function pageLog(message) {
+					console.log(message);
+					pageLogBox.textContent += "\n" + message;
+					pageLogBox.scrollTop = pageLogBox.scrollHeight;
+				}
+				window.pageLog = pageLog;
 
-      window.addEventListener("error", (event) => {
-        pageLog("❌ JS error: " + event.message);
-      });
+				window.addEventListener("error", event => {
+					pageLog("❌ JS error: " + event.message);
+				});
 
-      window.addEventListener("unhandledrejection", (event) => {
-        pageLog("❌ Promise error: " + (event.reason?.message || event.reason));
-      });
+				window.addEventListener("unhandledrejection", event => {
+					pageLog("❌ Promise error: " + (event.reason?.message || event.reason));
+				});
 
-      const pageParams = new URLSearchParams(window.location.search);
+				const pageParams = new URLSearchParams(window.location.search);
 
-      const finalJitsiUrl =
-        pageParams.get("jitsiUrl") ||
-        "https://omni.elvismao.com/skyishandsome";
+				const finalJitsiUrl = pageParams.get("jitsiUrl") || "https://omni.elvismao.com/skyishandsome";
 
-      const finalApiWsUrl =
-        pageParams.get("apiWsUrl") ||
-        "ws://localhost:8000/ws/audio";
+				const finalApiWsUrl = pageParams.get("apiWsUrl") || "ws://localhost:8000/ws/audio";
 
-      window.AGENT_JITSI_URL = finalJitsiUrl;
-      window.AGENT_API_WS_URL = finalApiWsUrl;
+				window.AGENT_JITSI_URL = finalJitsiUrl;
+				window.AGENT_API_WS_URL = finalApiWsUrl;
 
-      const jitsiDomain = new URL(finalJitsiUrl).hostname;
-      const jitsiScript = document.createElement("script");
-      jitsiScript.src = `https://${jitsiDomain}/libs/lib-jitsi-meet.min.js`;
+				const jitsiDomain = new URL(finalJitsiUrl).hostname;
+				const jitsiScript = document.createElement("script");
+				jitsiScript.src = `https://${jitsiDomain}/libs/lib-jitsi-meet.min.js`;
 
-      jitsiScript.onload = () => {
-        const configScript = document.createElement("script");
-        configScript.src = `https://${jitsiDomain}/config.js`;
+				jitsiScript.onload = () => {
+					const configScript = document.createElement("script");
+					configScript.src = `https://${jitsiDomain}/config.js`;
 
-        configScript.onload = () => {
-          // pageLog("✅ Jitsi config.js loaded");
+					configScript.onload = () => {
+						// pageLog("✅ Jitsi config.js loaded");
 
-          const agentScript = document.createElement("script");
-          agentScript.src = "./public_agent_gateway.js?v=" + Date.now();
+						const agentScript = document.createElement("script");
+						agentScript.src = "./public_agent_gateway.js?v=" + Date.now();
 
-          agentScript.onerror = () => {
-            pageLog("Failed to load public_agent_gateway.js");
-          };
+						agentScript.onerror = () => {
+							pageLog("Failed to load public_agent_gateway.js");
+						};
 
-          document.body.appendChild(agentScript);
-        };
+						document.body.appendChild(agentScript);
+					};
 
-        configScript.onerror = () => {
-          pageLog("❌ Failed to load Jitsi config.js from " + configScript.src);
-        };
+					configScript.onerror = () => {
+						pageLog("❌ Failed to load Jitsi config.js from " + configScript.src);
+					};
 
-        document.head.appendChild(configScript);
-      };
+					document.head.appendChild(configScript);
+				};
 
-      jitsiScript.onerror = () => {
-        pageLog("Failed to load lib-jitsi-meet from " + jitsiScript.src);
-      };
+				jitsiScript.onerror = () => {
+					pageLog("Failed to load lib-jitsi-meet from " + jitsiScript.src);
+				};
 
-      document.head.appendChild(jitsiScript);
-    })();
-  </script>
-</body>
+				document.head.appendChild(jitsiScript);
+			})();
+		</script>
+	</body>
 </html>

@@ -1,8 +1,8 @@
-import MeetingRoom from "./components/MeetingRoom";
 import "./App.css";
+import MeetingRoom from "./components/MeetingRoom";
 
 function App() {
-  return <MeetingRoom />;
+	return <MeetingRoom />;
 }
 
 export default App;

@@ -147,10 +147,10 @@ Expected client message:
 
 ```json
 {
-  "type": "ranking_move",
-  "itemId": "oxygen",
-  "toIndex": 2,
-  "baseRevision": 0
+	"type": "ranking_move",
+	"itemId": "oxygen",
+	"toIndex": 2,
+	"baseRevision": 0
 }
 ```
 
@@ -158,10 +158,10 @@ Expected server broadcast:
 
 ```json
 {
-  "type": "ranking_state",
-  "revision": 1,
-  "items": ["water", "map", "oxygen", "radio", "food"],
-  "updatedBy": "1"
+	"type": "ranking_state",
+	"revision": 1,
+	"items": ["water", "map", "oxygen", "radio", "food"],
+	"updatedBy": "1"
 }
 ```
 

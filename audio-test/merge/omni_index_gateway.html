@@ -1,314 +1,327 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <title>OmniObserve Audio Agent</title>
+	<head>
+		<meta charset="UTF-8" />
+		<title>OmniObserve Audio Agent</title>
 
-  <style>
-    body {
-      margin: 0;
-      background: #f5f5f5;
-      font-family: Arial, sans-serif;
-      color: #222;
-    }
+		<style>
+			body {
+				margin: 0;
+				background: #f5f5f5;
+				font-family: Arial, sans-serif;
+				color: #222;
+			}
 
-    #omniAgentRoot {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 16px;
-    }
+			#omniAgentRoot {
+				max-width: 1180px;
+				margin: 0 auto;
+				padding: 16px;
+			}
 
-    h1 {
-      margin: 0 0 12px;
-    }
+			h1 {
+				margin: 0 0 12px;
+			}
 
-    .omni-layout {
-      display: grid;
-      grid-template-columns: minmax(340px, 420px) minmax(420px, 1fr);
-      gap: 16px;
-      align-items: start;
-    }
+			.omni-layout {
+				display: grid;
+				grid-template-columns: minmax(340px, 420px) minmax(420px, 1fr);
+				gap: 16px;
+				align-items: start;
+			}
 
-    @media (max-width: 900px) {
-      .omni-layout {
-        grid-template-columns: 1fr;
-      }
-    }
+			@media (max-width: 900px) {
+				.omni-layout {
+					grid-template-columns: 1fr;
+				}
+			}
 
-    .omni-card {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      padding: 14px;
-      margin-bottom: 12px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }
+			.omni-card {
+				background: #fff;
+				border: 1px solid #ddd;
+				border-radius: 12px;
+				padding: 14px;
+				margin-bottom: 12px;
+				box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+			}
 
-    .omni-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
+			.omni-grid {
+				display: grid;
+				grid-template-columns: 1fr;
+				gap: 10px;
+			}
 
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
+			label {
+				display: block;
+				font-size: 13px;
+				font-weight: bold;
+				margin-bottom: 4px;
+			}
 
-    input {
-      box-sizing: border-box;
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 14px;
-    }
+			input {
+				box-sizing: border-box;
+				width: 100%;
+				padding: 8px;
+				border: 1px solid #ccc;
+				border-radius: 8px;
+				font-size: 14px;
+			}
 
-    button {
-      padding: 8px 12px;
-      margin: 4px 6px 4px 0;
-      border: 1px solid #bbb;
-      border-radius: 8px;
-      background: #fafafa;
-      cursor: pointer;
-      font-size: 14px;
-    }
+			button {
+				padding: 8px 12px;
+				margin: 4px 6px 4px 0;
+				border: 1px solid #bbb;
+				border-radius: 8px;
+				background: #fafafa;
+				cursor: pointer;
+				font-size: 14px;
+			}
 
-    button:hover:not(:disabled) {
-      background: #f0f0f0;
-    }
+			button:hover:not(:disabled) {
+				background: #f0f0f0;
+			}
 
-    button:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
+			button:disabled {
+				opacity: 0.45;
+				cursor: not-allowed;
+			}
 
-    .primary {
-      background: #e8f0fe;
-      border-color: #adc7ff;
-    }
+			.primary {
+				background: #e8f0fe;
+				border-color: #adc7ff;
+			}
 
-    .danger {
-      background: #fde8e8;
-      border-color: #f5b7b1;
-    }
+			.danger {
+				background: #fde8e8;
+				border-color: #f5b7b1;
+			}
 
-    .private-btn {
-      background: #f3e8ff;
-      border-color: #d8b4fe;
-    }
+			.private-btn {
+				background: #f3e8ff;
+				border-color: #d8b4fe;
+			}
 
-    .public-btn {
-      background: #e8f7ed;
-      border-color: #a8dab5;
-    }
+			.public-btn {
+				background: #e8f7ed;
+				border-color: #a8dab5;
+			}
 
-    .omni-pill {
-      display: inline-block;
-      padding: 3px 9px;
-      border-radius: 999px;
-      font-size: 12px;
-      margin: 2px 4px 2px 0;
-      background: #eee;
-      color: #444;
-    }
+			.omni-pill {
+				display: inline-block;
+				padding: 3px 9px;
+				border-radius: 999px;
+				font-size: 12px;
+				margin: 2px 4px 2px 0;
+				background: #eee;
+				color: #444;
+			}
 
-    .omni-pill.running,
-    .omni-pill.public {
-      background: #e8f7ed;
-      color: #137333;
-    }
+			.omni-pill.running,
+			.omni-pill.public {
+				background: #e8f7ed;
+				color: #137333;
+			}
 
-    .omni-pill.private {
-      background: #f3e8ff;
-      color: #6b21a8;
-    }
+			.omni-pill.private {
+				background: #f3e8ff;
+				color: #6b21a8;
+			}
 
-    .omni-pill.stopped {
-      background: #f1f3f4;
-      color: #5f6368;
-    }
+			.omni-pill.stopped {
+				background: #f1f3f4;
+				color: #5f6368;
+			}
 
-    .status-row {
-      line-height: 1.9;
-      font-size: 14px;
-      word-break: break-all;
-    }
+			.status-row {
+				line-height: 1.9;
+				font-size: 14px;
+				word-break: break-all;
+			}
 
-    #jitsiContainer {
-      width: 100%;
-      min-height: 560px;
-      background: #111;
-      border-radius: 12px;
-      overflow: hidden;
-    }
+			#jitsiContainer {
+				width: 100%;
+				min-height: 560px;
+				background: #111;
+				border-radius: 12px;
+				overflow: hidden;
+			}
 
-    pre {
-      background: #111;
-      color: #eee;
-      padding: 12px;
-      white-space: pre-wrap;
-      min-height: 220px;
-      max-height: 320px;
-      overflow-y: auto;
-      border-radius: 10px;
-      font-size: 13px;
-    }
+			pre {
+				background: #111;
+				color: #eee;
+				padding: 12px;
+				white-space: pre-wrap;
+				min-height: 220px;
+				max-height: 320px;
+				overflow-y: auto;
+				border-radius: 10px;
+				font-size: 13px;
+			}
 
-    .hint {
-      font-size: 13px;
-      color: #555;
-      line-height: 1.5;
-    }
+			.hint {
+				font-size: 13px;
+				color: #555;
+				line-height: 1.5;
+			}
 
-    code {
-      background: #f1f3f4;
-      padding: 1px 4px;
-      border-radius: 4px;
-    }
+			code {
+				background: #f1f3f4;
+				padding: 1px 4px;
+				border-radius: 4px;
+			}
 
-    .small-code {
-      display: block;
-      background: #f1f3f4;
-      border-radius: 8px;
-      padding: 8px;
-      font-size: 12px;
-      line-height: 1.5;
-      word-break: break-all;
-    }
-  </style>
-</head>
+			.small-code {
+				display: block;
+				background: #f1f3f4;
+				border-radius: 8px;
+				padding: 8px;
+				font-size: 12px;
+				line-height: 1.5;
+				word-break: break-all;
+			}
+		</style>
+	</head>
 
-<body>
-  <div id="omniAgentRoot">
-    <h1>OmniObserve Audio Agent</h1>
+	<body>
+		<div id="omniAgentRoot">
+			<h1>OmniObserve Audio Agent</h1>
 
-    <div class="omni-layout">
-      <div>
-        <div class="omni-card">
-          <h3>Config</h3>
+			<div class="omni-layout">
+				<div>
+					<div class="omni-card">
+						<h3>Config</h3>
 
-          <div class="omni-grid">
-            <div>
-              <label for="roomNameInput">Room Name / Session ID</label>
-              <input id="roomNameInput" />
-            </div>
+						<div class="omni-grid">
+							<div>
+								<label for="roomNameInput">Room Name / Session ID</label>
+								<input id="roomNameInput" />
+							</div>
 
-            <div>
-              <label for="jitsiUrlInput">Jitsi URL</label>
-              <input id="jitsiUrlInput" />
-            </div>
+							<div>
+								<label for="jitsiUrlInput">Jitsi URL</label>
+								<input id="jitsiUrlInput" />
+							</div>
 
-            <div>
-              <label for="apiWsUrlInput">Audio WebSocket URL</label>
-              <input id="apiWsUrlInput" placeholder="Leave blank to auto-generate from roomName + userId" />
-            </div>
+							<div>
+								<label for="apiWsUrlInput">Audio WebSocket URL</label>
+								<input id="apiWsUrlInput" placeholder="Leave blank to auto-generate from roomName + userId" />
+							</div>
 
-            <div>
-              <label for="userIdInput">User ID / Participant ID</label>
-              <input id="userIdInput" />
-            </div>
+							<div>
+								<label for="userIdInput">User ID / Participant ID</label>
+								<input id="userIdInput" />
+							</div>
 
-            <div>
-              <label for="displayNameInput">Display Name</label>
-              <input id="displayNameInput" />
-            </div>
-          </div>
+							<div>
+								<label for="displayNameInput">Display Name</label>
+								<input id="displayNameInput" />
+							</div>
+						</div>
 
-          <p class="hint">
-            如果 <code>Audio WebSocket URL</code> 留空，自動使用：
-            <span id="computedWsUrl" class="small-code"></span>
-          </p>
-        </div>
+						<p class="hint">
+							如果
+							<code>Audio WebSocket URL</code>
+							留空，自動使用：
+							<span id="computedWsUrl" class="small-code"></span>
+						</p>
+					</div>
 
-        <div class="omni-card">
-          <h3>Status</h3>
+					<div class="omni-card">
+						<h3>Status</h3>
 
-          <div class="status-row">
-            Current:
-            <span id="currentInfo"></span>
-          </div>
+						<div class="status-row">
+							Current:
+							<span id="currentInfo"></span>
+						</div>
 
-          <div class="status-row">
-            Mode:
-            <span id="modeStatus" class="omni-pill public">public</span>
-          </div>
+						<div class="status-row">
+							Mode:
+							<span id="modeStatus" class="omni-pill public">public</span>
+						</div>
 
-          <div class="status-row">
-            Jitsi:
-            <span id="jitsiStatus" class="omni-pill stopped">not joined</span>
-          </div>
+						<div class="status-row">
+							Jitsi:
+							<span id="jitsiStatus" class="omni-pill stopped">not joined</span>
+						</div>
 
-          <div class="status-row">
-            Jitsi Mic:
-            <span id="jitsiMicStatus" class="omni-pill stopped">muted</span>
-          </div>
+						<div class="status-row">
+							Jitsi Mic:
+							<span id="jitsiMicStatus" class="omni-pill stopped">muted</span>
+						</div>
 
-          <div class="status-row">
-            Browser Mic Agent:
-            <span id="agentStatus" class="omni-pill stopped">stopped</span>
-          </div>
-        </div>
+						<div class="status-row">
+							Browser Mic Agent:
+							<span id="agentStatus" class="omni-pill stopped">stopped</span>
+						</div>
+					</div>
 
-        <div class="omni-card">
-          <h3>Controls</h3>
+					<div class="omni-card">
+						<h3>Controls</h3>
 
-          <button id="applyConfigBtn">Apply Settings</button>
-          <button id="joinBtn" class="primary">Join Jitsi Meeting</button>
-          <button id="leaveBtn" class="danger" disabled>Leave Meeting</button>
+						<button id="applyConfigBtn">Apply Settings</button>
+						<button id="joinBtn" class="primary">Join Jitsi Meeting</button>
+						<button id="leaveBtn" class="danger" disabled>Leave Meeting</button>
 
-          <hr />
+						<hr />
 
-          <button id="publicModeBtn" class="public-btn">Switch to Public Mode</button>
-          <button id="privateModeBtn" class="private-btn">Switch to Private Mode</button>
+						<button id="publicModeBtn" class="public-btn">Switch to Public Mode</button>
+						<button id="privateModeBtn" class="private-btn">Switch to Private Mode</button>
 
-          <hr />
+						<hr />
 
-          <button id="refreshMicBtn">Refresh Jitsi Mic Status</button>
-          <button id="stopAgentBtn" disabled>Stop Browser Mic Agent</button>
-          <button id="clearLogBtn">Clear Log</button>
+						<button id="refreshMicBtn">Refresh Jitsi Mic Status</button>
+						<button id="stopAgentBtn" disabled>Stop Browser Mic Agent</button>
+						<button id="clearLogBtn">Clear Log</button>
 
-          <p class="hint">
-            Public mode：不從 Jitsi 取得音訊，而是把這個參與者的 <code>browser microphone</code>
-            送成 <code>source=browser_public</code>、<code>scope=public</code>。只有當 Jitsi 麥克風是開啟狀態才會送。<br />
-            Private mode：會自動 mute Jitsi 麥克風，並把這個參與者的 <code>browser microphone</code>
-            送成 <code>source=browser_private</code>、<code>scope=private</code>。
-          </p>
-        </div>
-      </div>
+						<p class="hint">
+							Public mode：不從 Jitsi 取得音訊，而是把這個參與者的
+							<code>browser microphone</code>
+							送成
+							<code>source=browser_public</code>
+							、
+							<code>scope=public</code>
+							。只有當 Jitsi 麥克風是開啟狀態才會送。
+							<br />
+							Private mode：會自動 mute Jitsi 麥克風，並把這個參與者的
+							<code>browser microphone</code>
+							送成
+							<code>source=browser_private</code>
+							、
+							<code>scope=private</code>
+							。
+						</p>
+					</div>
+				</div>
 
-      <div>
-        <div class="omni-card">
-          <h3>Jitsi Meeting</h3>
-          <div id="jitsiContainer"></div>
-        </div>
+				<div>
+					<div class="omni-card">
+						<h3>Jitsi Meeting</h3>
+						<div id="jitsiContainer"></div>
+					</div>
 
-        <div class="omni-card">
-          <h3>Log</h3>
-          <pre id="log"></pre>
-        </div>
-      </div>
-    </div>
-  </div>
+					<div class="omni-card">
+						<h3>Log</h3>
+						<pre id="log"></pre>
+					</div>
+				</div>
+			</div>
+		</div>
 
-  <script>
-    window.OMNI_DEFAULTS = {
-      roomName: "omniobserveaudiotest0427",
-      jitsiUrl: "https://meet.jit.si/omniobserveaudiotest0427",
+		<script>
+			window.OMNI_DEFAULTS = {
+				roomName: "omniobserveaudiotest0427",
+				jitsiUrl: "https://meet.jit.si/omniobserveaudiotest0427",
 
-      // ws://localhost:8000/sessions/{roomName}/audio-stream?participant_id={userId}
-      apiBaseWsUrl: "ws://localhost:8000",
+				// ws://localhost:8000/sessions/{roomName}/audio-stream?participant_id={userId}
+				apiBaseWsUrl: "ws://localhost:8000",
 
-      userId: "user_001",
-      displayName: "User 001",
+				userId: "user_001",
+				displayName: "User 001",
 
-      mode: "public",
-      autoJoin: true
-    };
-  </script>
+				mode: "public",
+				autoJoin: true
+			};
+		</script>
 
-  <script src="./omni_agent_gateway.js"></script>
-</body>
+		<script src="./omni_agent_gateway.js"></script>
+	</body>
 </html>

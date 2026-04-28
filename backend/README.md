@@ -12,13 +12,13 @@ For local testing, replace `wss://meet.omni.elvismao.com` with `ws://localhost:8
 
 ## Endpoint Summary
 
-| Endpoint | Purpose | Client data | Server delivery |
-| --- | --- | --- | --- |
-| `/ws/sessions/{session_id}/audio?participant_id=` | Private/public audio stream to STT | JSON control + binary PCM | Sends transcript only to the same participant |
-| `/ws/sessions/{session_id}/board?participant_id=` | Board state sync, ranking moves, block updates | JSON | Broadcasts board/ranking updates to the same session |
-| `/ws/sessions/{session_id}/cue?participant_id=` | Similarity cue channel | JSON | Sends cue messages to targeted participant |
-| `/ws/sessions/{session_id}/presence?participant_id=` | Presence and ambient activity | JSON | Broadcasts presence/activity to the same session |
-| `/sessions/{session_id}/audio-stream?participant_id=` | Legacy audio stream endpoint | JSON start/stop + binary Float32 PCM | Sends transcript updates to the same connection |
+| Endpoint                                              | Purpose                                        | Client data                          | Server delivery                                      |
+| ----------------------------------------------------- | ---------------------------------------------- | ------------------------------------ | ---------------------------------------------------- |
+| `/ws/sessions/{session_id}/audio?participant_id=`     | Private/public audio stream to STT             | JSON control + binary PCM            | Sends transcript only to the same participant        |
+| `/ws/sessions/{session_id}/board?participant_id=`     | Board state sync, ranking moves, block updates | JSON                                 | Broadcasts board/ranking updates to the same session |
+| `/ws/sessions/{session_id}/cue?participant_id=`       | Similarity cue channel                         | JSON                                 | Sends cue messages to targeted participant           |
+| `/ws/sessions/{session_id}/presence?participant_id=`  | Presence and ambient activity                  | JSON                                 | Broadcasts presence/activity to the same session     |
+| `/sessions/{session_id}/audio-stream?participant_id=` | Legacy audio stream endpoint                   | JSON start/stop + binary Float32 PCM | Sends transcript updates to the same connection      |
 
 ## 1. Audio WebSocket
 
@@ -36,10 +36,10 @@ Initial join message:
 
 ```json
 {
-  "type": "join",
-  "participant_id": "1",
-  "sample_rate": 16000,
-  "mic_mode": "private"
+	"type": "join",
+	"participant_id": "1",
+	"sample_rate": 16000,
+	"mic_mode": "private"
 }
 ```
 
@@ -58,28 +58,28 @@ Server messages:
 
 ```json
 {
-  "type": "joined",
-  "session_id": "mars-survival-001",
-  "participant_id": "1"
+	"type": "joined",
+	"session_id": "mars-survival-001",
+	"participant_id": "1"
 }
 ```
 
 ```json
 {
-  "type": "transcript",
-  "participant_id": "1",
-  "mic_mode": "private",
-  "text": "transcribed text",
-  "segment_id": "seg_123",
-  "timestamp_ms": 1714300000000
+	"type": "transcript",
+	"participant_id": "1",
+	"mic_mode": "private",
+	"text": "transcribed text",
+	"segment_id": "seg_123",
+	"timestamp_ms": 1714300000000
 }
 ```
 
 ```json
 {
-  "type": "transcript_error",
-  "segment_id": null,
-  "reason": "stt_error"
+	"type": "transcript_error",
+	"segment_id": null,
+	"reason": "stt_error"
 }
 ```
 
@@ -109,8 +109,8 @@ Initial join message:
 
 ```json
 {
-  "type": "join",
-  "participant_id": "1"
+	"type": "join",
+	"participant_id": "1"
 }
 ```
 
@@ -125,10 +125,10 @@ Ranking move:
 
 ```json
 {
-  "type": "ranking_move",
-  "itemId": "oxygen",
-  "toIndex": 2,
-  "baseRevision": 12
+	"type": "ranking_move",
+	"itemId": "oxygen",
+	"toIndex": 2,
+	"baseRevision": 12
 }
 ```
 
@@ -136,11 +136,11 @@ Block publish:
 
 ```json
 {
-  "type": "block_publish",
-  "block_id": "blk_007",
-  "participant_id": "1",
-  "content": "Public idea content",
-  "linked_cue_id": "cue_003"
+	"type": "block_publish",
+	"block_id": "blk_007",
+	"participant_id": "1",
+	"content": "Public idea content",
+	"linked_cue_id": "cue_003"
 }
 ```
 
@@ -148,9 +148,9 @@ Block discard:
 
 ```json
 {
-  "type": "block_discard",
-  "block_id": "blk_007",
-  "participant_id": "1"
+	"type": "block_discard",
+	"block_id": "blk_007",
+	"participant_id": "1"
 }
 ```
 
@@ -158,10 +158,10 @@ Block edit:
 
 ```json
 {
-  "type": "block_edit",
-  "block_id": "blk_007",
-  "participant_id": "1",
-  "content": "Updated private idea content"
+	"type": "block_edit",
+	"block_id": "blk_007",
+	"participant_id": "1",
+	"content": "Updated private idea content"
 }
 ```
 
@@ -169,31 +169,31 @@ Server messages:
 
 ```json
 {
-  "type": "joined",
-  "session_id": "mars-survival-001",
-  "participant_id": "1"
+	"type": "joined",
+	"session_id": "mars-survival-001",
+	"participant_id": "1"
 }
 ```
 
 ```json
 {
-  "type": "board_state",
-  "session_id": "mars-survival-001",
-  "revision": 12,
-  "ranking": {
-    "items": ["oxygen", "water", "map", "radio", "food"]
-  },
-  "public_blocks": [],
-  "private_blocks": []
+	"type": "board_state",
+	"session_id": "mars-survival-001",
+	"revision": 12,
+	"ranking": {
+		"items": ["oxygen", "water", "map", "radio", "food"]
+	},
+	"public_blocks": [],
+	"private_blocks": []
 }
 ```
 
 ```json
 {
-  "type": "ranking_state",
-  "revision": 13,
-  "items": ["water", "oxygen", "map", "radio", "food"],
-  "updatedBy": "1"
+	"type": "ranking_state",
+	"revision": 13,
+	"items": ["water", "oxygen", "map", "radio", "food"],
+	"updatedBy": "1"
 }
 ```
 
@@ -229,8 +229,8 @@ Initial join message:
 
 ```json
 {
-  "type": "join",
-  "participant_id": "1"
+	"type": "join",
+	"participant_id": "1"
 }
 ```
 
@@ -245,11 +245,11 @@ Cue response:
 
 ```json
 {
-  "type": "cue_response",
-  "cue_id": "cue_003",
-  "participant_id": "1",
-  "response": "support",
-  "timestamp_ms": 1714300002000
+	"type": "cue_response",
+	"cue_id": "cue_003",
+	"participant_id": "1",
+	"response": "support",
+	"timestamp_ms": 1714300002000
 }
 ```
 
@@ -257,16 +257,16 @@ Current server responses:
 
 ```json
 {
-  "type": "joined",
-  "session_id": "mars-survival-001",
-  "participant_id": "1"
+	"type": "joined",
+	"session_id": "mars-survival-001",
+	"participant_id": "1"
 }
 ```
 
 ```json
 {
-  "type": "cue_response_recorded",
-  "cue_id": "cue_003"
+	"type": "cue_response_recorded",
+	"cue_id": "cue_003"
 }
 ```
 
@@ -292,8 +292,8 @@ Initial join message:
 
 ```json
 {
-  "type": "join",
-  "participant_id": "1"
+	"type": "join",
+	"participant_id": "1"
 }
 ```
 
@@ -308,9 +308,9 @@ Activity message:
 
 ```json
 {
-  "type": "activity",
-  "participant_id": "1",
-  "context": "private_board"
+	"type": "activity",
+	"participant_id": "1",
+	"context": "private_board"
 }
 ```
 
@@ -318,32 +318,32 @@ Server messages:
 
 ```json
 {
-  "type": "presence_state",
-  "session_id": "mars-survival-001",
-  "participants": ["1", "2"]
+	"type": "presence_state",
+	"session_id": "mars-survival-001",
+	"participants": ["1", "2"]
 }
 ```
 
 ```json
 {
-  "type": "participant_joined",
-  "participant_id": "2",
-  "total": 2
+	"type": "participant_joined",
+	"participant_id": "2",
+	"total": 2
 }
 ```
 
 ```json
 {
-  "type": "participant_left",
-  "participant_id": "2",
-  "total": 1
+	"type": "participant_left",
+	"participant_id": "2",
+	"total": 1
 }
 ```
 
 ```json
 {
-  "type": "someone_typing",
-  "context": "private_board"
+	"type": "someone_typing",
+	"context": "private_board"
 }
 ```
 
@@ -365,11 +365,11 @@ The first message must be:
 
 ```json
 {
-  "type": "start",
-  "scope": "private",
-  "sampleRate": 16000,
-  "channels": 1,
-  "encoding": "float32"
+	"type": "start",
+	"scope": "private",
+	"sampleRate": 16000,
+	"channels": 1,
+	"encoding": "float32"
 }
 ```
 
@@ -377,7 +377,7 @@ Then send Float32 PCM binary messages. To flush and close:
 
 ```json
 {
-  "type": "stop"
+	"type": "stop"
 }
 ```
 
@@ -385,10 +385,10 @@ Server transcript messages use:
 
 ```json
 {
-  "type": "transcript_update",
-  "transcript_segment_id": "seg_123",
-  "text": "transcribed text",
-  "is_final": false
+	"type": "transcript_update",
+	"transcript_segment_id": "seg_123",
+	"text": "transcribed text",
+	"is_final": false
 }
 ```
 
