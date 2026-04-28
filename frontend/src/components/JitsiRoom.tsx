@@ -6,6 +6,7 @@ import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
 	meetingDomain?: string;
+	roomName?: string;
 	displayName?: string;
 	micMode: MicMode;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
@@ -30,11 +31,6 @@ function parseJitsiDomain(meetingDomain?: string): string | null {
 	}
 }
 
-function getRoomNameFromSearch(search: string): string | null {
-	const roomName = new URLSearchParams(search).get("room")?.trim();
-	return roomName || null;
-}
-
 function renderJitsiError(title: string, message: string) {
 	return (
 		<div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
@@ -57,23 +53,22 @@ async function setJitsiAudioMuted(api: IJitsiMeetExternalApi | null, muted: bool
 	}
 }
 
-export function JitsiRoom({ meetingDomain, displayName = "OmniObserve User", micMode, onApiReady }: JitsiRoomProps) {
+export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const [isReady, setIsReady] = useState(false);
+	const domain = parseJitsiDomain(meetingDomain);
+	const normalizedRoomName = roomName?.trim();
 
 	useEffect(() => {
 		void setJitsiAudioMuted(apiRef.current, micMode !== "public");
 	}, [micMode]);
 
-	if (!meeting) {
-		return (
-			<div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
-				<div className="text-center">
-					<div className="text-lg font-semibold text-foreground">Public Meeting</div>
-					<div className="text-sm">Set room_name or VITE_DEFAULT_ROOM_NAME to show Jitsi</div>
-				</div>
-			</div>
-		);
+	if (!domain) {
+		return renderJitsiError("Jitsi Unavailable", "Set VITE_JITSI_BASE_URL to show Jitsi");
+	}
+
+	if (!normalizedRoomName) {
+		return renderJitsiError("Public Meeting", "Set room_name or VITE_DEFAULT_ROOM_NAME to show Jitsi");
 	}
 
 	return (
@@ -85,7 +80,7 @@ export function JitsiRoom({ meetingDomain, displayName = "OmniObserve User", mic
 			)}
 			<JitsiMeeting
 				domain={domain}
-				roomName={roomName}
+				roomName={normalizedRoomName}
 				userInfo={{
 					displayName,
 					email: ""
