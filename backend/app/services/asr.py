@@ -1,33 +1,41 @@
 import asyncio
+import io
+import wave
 
 from ..config import logger
-from ..schemas import ApiError
 
 try:
     from breeze_asr import transcribe
 except ImportError:
-    # Fallback stub so this module imports cleanly even before ASR wiring is installed.
+
     def transcribe(audio_bytes: bytes) -> str:
         raise RuntimeError("Breeze ASR integration is not available")
 
 
-async def transcribe_audio(audio_bytes: bytes) -> str:
+def pcm16_to_wav_bytes(*, pcm16_bytes: bytes, sample_rate: int, channels: int) -> bytes:
+    with io.BytesIO() as wav_buffer:
+        with wave.open(wav_buffer, "wb") as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm16_bytes)
+        return wav_buffer.getvalue()
+
+
+async def transcribe_ws_chunk(*, pcm16_bytes: bytes, sample_rate: int, channels: int) -> str | None:
+    if not pcm16_bytes:
+        return None
+
+    wav_bytes = pcm16_to_wav_bytes(
+        pcm16_bytes=pcm16_bytes,
+        sample_rate=sample_rate,
+        channels=channels,
+    )
+
     try:
-        text = await asyncio.to_thread(transcribe, audio_bytes)
+        transcript_text = await asyncio.to_thread(transcribe, wav_bytes)
     except Exception as exc:
-        raise ApiError(422, "STT_FAILED", "Audio could not be transcribed") from exc
-
-    if not text or not text.strip():
-        raise ApiError(422, "STT_FAILED", "Audio could not be transcribed")
-
-    return text.strip()
-
-
-async def transcribe_ws_chunk(chunk_bytes: bytes) -> str | None:
-    try:
-        transcript_text = await asyncio.to_thread(transcribe, chunk_bytes)
-    except Exception as exc:
-        logger.exception("transcribe() failed during WebSocket streaming: %s", exc)
+        logger.exception("Breeze-ASR failed during WebSocket streaming: %s", exc)
         return None
 
     if not transcript_text or not transcript_text.strip():

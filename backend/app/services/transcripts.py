@@ -10,33 +10,6 @@ from ..schemas import StreamTranscript
 from ..utils import utc_now
 
 
-async def create_transcript_segment_record(
-    db: AsyncSession,
-    *,
-    session_id: str,
-    participant_id: str,
-    visibility: Visibility,
-    text: str,
-    source_audio_id: str | None,
-    started_at: datetime,
-    ended_at: datetime,
-) -> TranscriptSegment:
-    transcript = TranscriptSegment(
-        id=str(uuid4()),
-        session_id=session_id,
-        participant_id=participant_id,
-        visibility=visibility,
-        text=text,
-        source_audio_id=source_audio_id,
-        started_at=started_at,
-        ended_at=ended_at,
-        created_at=utc_now(),
-    )
-    db.add(transcript)
-    await db.flush()
-    return transcript
-
-
 async def save_ws_transcript_segment(
     db: AsyncSession,
     *,
@@ -53,7 +26,6 @@ async def save_ws_transcript_segment(
         participant_id=participant_id,
         visibility=visibility,
         text=transcript_text,
-        source_audio_id=None,
         started_at=started_at,
         ended_at=ended_at,
         created_at=utc_now(),
