@@ -68,7 +68,7 @@ export function JitsiRoom({
       <div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
         <div className="text-center">
           <div className="text-lg font-semibold text-foreground">Public Meeting</div>
-          <div className="text-sm">Set VITE_JITSI_MEETING_URL to show Jitsi</div>
+          <div className="text-sm">Set room_name or VITE_DEFAULT_ROOM_NAME to show Jitsi</div>
         </div>
       </div>
     );

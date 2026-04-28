@@ -5,6 +5,35 @@ bun.lockb
 
 .vscode
 
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python caches and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+htmlcov/
+*.egg-info/
+pip-wheel-metadata/
+
+# Local backend/runtime output
+storage/
+backend/storage/
+audio-test/vad-backend/segments/
+audio-test/vad-backend/transcripts.jsonl
+audio-test/vad-backend/models/
+
+# Local compile/check scratch
+.pycache-check/
+
 # i18n
 astro_tmp_pages_*
 
@@ -87,7 +116,9 @@ web_modules/
 # dotenv environment variable files
 .env
 .env.*
+!frontend/.env
 !.env.example
+!frontend/.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache

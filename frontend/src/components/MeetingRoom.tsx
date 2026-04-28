@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   closestCenter,
   DndContext,
@@ -21,6 +21,7 @@ import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
+import { useWebSocket } from "../hooks/useWebSocket";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
 
@@ -38,7 +39,47 @@ const INITIAL_ITEMS: SurvivalItem[] = [
   { id: "food", label: "濃縮食物", rank: 5 },
 ];
 
-const jitsiMeetingUrl = import.meta.env.VITE_JITSI_MEETING_URL as string | undefined;
+const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
+
+const ITEM_LABELS = INITIAL_ITEMS.reduce<Record<string, string>>((labels, item) => {
+  labels[item.id] = item.label;
+  return labels;
+}, {});
+
+function createRankedItems(itemIds: string[]): SurvivalItem[] {
+  return itemIds.map((id, index) => ({
+    id,
+    label: ITEM_LABELS[id] ?? id,
+    rank: index + 1,
+  }));
+}
+
+function isRankingStateMessage(
+  message: object | null,
+): message is { type: "ranking_state"; revision: number; items: string[] } {
+  return (
+    !!message &&
+    "type" in message &&
+    message.type === "ranking_state" &&
+    "items" in message &&
+    Array.isArray(message.items)
+  );
+}
+
+function isBoardStateMessage(
+  message: object | null,
+): message is { type: "board_state"; revision: number; ranking: { items: string[] } } {
+  return (
+    !!message &&
+    "type" in message &&
+    message.type === "board_state" &&
+    "ranking" in message &&
+    typeof message.ranking === "object" &&
+    message.ranking !== null &&
+    "items" in message.ranking &&
+    Array.isArray(message.ranking.items)
+  );
+}
 
 function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -71,7 +112,13 @@ function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
 export default function MeetingRoom() {
   const [micMode, setMicMode] = useState<MicMode>("off");
   const [items, setItems] = useState(INITIAL_ITEMS);
-  const { displayName } = useParticipantIdentity();
+  const [rankingRevision, setRankingRevision] = useState(0);
+  const isDraggingRef = useRef(false);
+  const pendingRankingRef = useRef<{ revision: number; items: string[] } | null>(null);
+  const { participantId, displayName, roomName } = useParticipantIdentity();
+  const sessionId = roomName;
+  const jitsiMeetingUrl = `${jitsiBaseUrl.replace(/\/+$/, "")}/${encodeURIComponent(roomName)}`;
+  const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -82,20 +129,68 @@ export default function MeetingRoom() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
+    isDraggingRef.current = false;
+    pendingRankingRef.current = null;
+
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
     }
 
+    const oldIndex = items.findIndex((item) => item.id === active.id);
+    const newIndex = items.findIndex((item) => item.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) {
+      return;
+    }
+
+    sendMessage({
+      type: "ranking_move",
+      itemId: String(active.id),
+      toIndex: newIndex,
+      baseRevision: rankingRevision,
+    });
+
     setItems((current) => {
-      const oldIndex = current.findIndex((item) => item.id === active.id);
-      const newIndex = current.findIndex((item) => item.id === over.id);
-      return arrayMove(current, oldIndex, newIndex).map((item, index) => ({
+      const currentOldIndex = current.findIndex((item) => item.id === active.id);
+      const currentNewIndex = current.findIndex((item) => item.id === over.id);
+      if (currentOldIndex < 0 || currentNewIndex < 0) {
+        return current;
+      }
+      return arrayMove(current, currentOldIndex, currentNewIndex).map((item, index) => ({
         ...item,
         rank: index + 1,
       }));
     });
   };
+
+  useEffect(() => {
+    if (isBoardStateMessage(lastMessage)) {
+      const nextRanking = {
+        revision: lastMessage.revision,
+        items: lastMessage.ranking.items,
+      };
+      if (isDraggingRef.current) {
+        pendingRankingRef.current = nextRanking;
+        return;
+      }
+      setRankingRevision(nextRanking.revision);
+      setItems(createRankedItems(nextRanking.items));
+      return;
+    }
+
+    if (isRankingStateMessage(lastMessage)) {
+      const nextRanking = {
+        revision: lastMessage.revision,
+        items: lastMessage.items,
+      };
+      if (isDraggingRef.current) {
+        pendingRankingRef.current = nextRanking;
+        return;
+      }
+      setRankingRevision(nextRanking.revision);
+      setItems(createRankedItems(nextRanking.items));
+    }
+  }, [lastMessage]);
 
   return (
     <main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:grid-cols-[minmax(0,1fr)_560px]">
@@ -112,6 +207,17 @@ export default function MeetingRoom() {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
+            onDragStart={() => {
+              isDraggingRef.current = true;
+            }}
+            onDragCancel={() => {
+              isDraggingRef.current = false;
+              if (pendingRankingRef.current) {
+                setRankingRevision(pendingRankingRef.current.revision);
+                setItems(createRankedItems(pendingRankingRef.current.items));
+                pendingRankingRef.current = null;
+              }
+            }}
             onDragEnd={handleDragEnd}
           >
             <SortableContext
@@ -150,7 +256,7 @@ export default function MeetingRoom() {
       </section>
 
       <aside className="min-h-0">
-        <PrivateBoard roomId="mars-survival-001" />
+        <PrivateBoard roomId={sessionId} lastMessage={lastMessage} isConnected={isConnected} />
       </aside>
     </main>
   );

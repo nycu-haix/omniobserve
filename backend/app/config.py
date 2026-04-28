@@ -8,6 +8,7 @@ logging.basicConfig(level=logging.INFO)
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/omniobserve"
 )
+SKIP_DB_STARTUP = os.getenv("SKIP_DB_STARTUP", "").lower() in {"1", "true", "yes", "on"}
 AUDIO_STORAGE_DIR = Path(os.getenv("AUDIO_STORAGE_DIR", "./storage/audio"))
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

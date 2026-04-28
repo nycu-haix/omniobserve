@@ -5,7 +5,6 @@ import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
-import { useWebSocket } from "../../hooks/useWebSocket";
 import {
   ENABLE_PRIVATE_BOARD_MOCK_DATA,
   MOCK_IDEA_BLOCKS,
@@ -21,6 +20,8 @@ import type {
 
 interface PrivateBoardProps {
   roomId: string;
+  lastMessage: object | null;
+  isConnected: boolean;
 }
 
 type BoardMessage =
@@ -48,7 +49,7 @@ const fallbackBlock = (): IdeaBlock => ({
   status: "generating",
 });
 
-export function PrivateBoard({ roomId }: PrivateBoardProps) {
+export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardProps) {
   const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
   const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(
     ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : [],
@@ -61,41 +62,43 @@ export function PrivateBoard({ roomId }: PrivateBoardProps) {
     ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : [],
   );
   const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const { lastMessage, isConnected } = useWebSocket(roomId);
-
   useEffect(() => {
     if (!isBoardMessage(lastMessage)) {
       return;
     }
 
-    if (lastMessage.type === "new_idea_block") {
-      setIdeaBlocks((prev) => [...prev, lastMessage.payload]);
-    }
+    const timer = window.setTimeout(() => {
+      if (lastMessage.type === "new_idea_block") {
+        setIdeaBlocks((prev) => [...prev, lastMessage.payload]);
+      }
 
-    if (lastMessage.type === "update_idea_block") {
-      setIdeaBlocks((prev) =>
-        prev.map((block) =>
-          block.id === lastMessage.payload.id
-            ? { ...block, ...lastMessage.payload, status: "ready" }
-            : block,
-        ),
-      );
-    }
+      if (lastMessage.type === "update_idea_block") {
+        setIdeaBlocks((prev) =>
+          prev.map((block) =>
+            block.id === lastMessage.payload.id
+              ? { ...block, ...lastMessage.payload, status: "ready" }
+              : block,
+          ),
+        );
+      }
 
-    if (lastMessage.type === "new_transcript_line") {
-      setTranscriptLines((prev) => [...prev, lastMessage.payload]);
-    }
+      if (lastMessage.type === "new_transcript_line") {
+        setTranscriptLines((prev) => [...prev, lastMessage.payload]);
+      }
 
-    if (lastMessage.type === "similarity_cue") {
-      setCues((prev) => [...prev, lastMessage.payload]);
-      setIdeaBlocks((prev) =>
-        prev.map((block) =>
-          block.id === lastMessage.payload.blockId
-            ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary }
-            : block,
-        ),
-      );
-    }
+      if (lastMessage.type === "similarity_cue") {
+        setCues((prev) => [...prev, lastMessage.payload]);
+        setIdeaBlocks((prev) =>
+          prev.map((block) =>
+            block.id === lastMessage.payload.blockId
+              ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary }
+              : block,
+          ),
+        );
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [lastMessage]);
 
   useEffect(() => {
