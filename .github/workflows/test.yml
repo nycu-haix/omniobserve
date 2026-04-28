@@ -1,0 +1,18 @@
+name: Test self-hosted runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Check runner
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "whoami=$(whoami)"
+          echo "hostname=$(hostname)"
+          echo "pwd=$(pwd)"
+          uname -a
