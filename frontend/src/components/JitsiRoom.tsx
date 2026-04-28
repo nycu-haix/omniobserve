@@ -90,8 +90,8 @@ export function JitsiRoom({
   const roomName = getRoomNameFromSearch(window.location.search);
   if (!roomName) {
     return renderJitsiError(
-      "Missing room name",
-      "Open this page with ?room=roomname to join a meeting.",
+      "缺少 room name",
+      "請用 ?room=roomname 的網址格式開啟此頁面加入會議。",
     );
   }
 
