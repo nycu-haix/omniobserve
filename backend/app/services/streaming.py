@@ -10,9 +10,9 @@ from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
-from ..utils import utc_now
+from ..utils import to_iso_z, utc_now
 from .asr import transcribe_ws_chunk
-from .idea_blocks import generate_idea_blocks_from_stream_transcripts
+from .idea_blocks import generate_and_save_idea_blocks
 from .transcripts import save_ws_transcript_segment
 
 
@@ -47,13 +47,25 @@ def parse_stream_start_message(raw_text: str) -> StreamContext:
     if client_id is not None:
         client_id = str(client_id)
 
+    encoding_raw = payload.get("encoding")
+    encoding = str(encoding_raw).lower() if encoding_raw is not None else "float32_pcm"
+    if encoding == "float32":
+        encoding = "float32_pcm"
+    if encoding == "int16":
+        encoding = "int16_pcm"
+    if encoding not in {"float32_pcm", "int16_pcm"}:
+        raise ValueError("start.encoding must be float32_pcm or int16_pcm")
+
+    if channels != 1:
+        raise ValueError("start.channels must be 1 (mono)")
+
     return StreamContext(
         scope=scope,
         sample_rate=sample_rate,
         client_id=client_id,
         source=str(payload.get("source")) if payload.get("source") is not None else None,
         agent_type=str(payload.get("agentType")) if payload.get("agentType") is not None else None,
-        encoding=str(payload.get("encoding")) if payload.get("encoding") is not None else None,
+        encoding=encoding,
         channels=channels,
         start_message=payload,
     )
@@ -101,7 +113,11 @@ async def handle_audio_stream_websocket(
                     seconds=chunk_samples / max(stream_context.sample_rate, 1)
                 )
 
-                transcript_text = await transcribe_ws_chunk(chunk.tobytes())
+                transcript_text = await transcribe_ws_chunk(
+                    pcm16_bytes=chunk.tobytes(),
+                    sample_rate=stream_context.sample_rate,
+                    channels=stream_context.channels,
+                )
                 if transcript_text:
                     saved_segment = await save_ws_transcript_segment(
                         db,
@@ -129,6 +145,14 @@ async def handle_audio_stream_websocket(
         try:
             first_message = await websocket.receive_text()
             stream_context = parse_stream_start_message(first_message)
+            logger.info(
+                "Audio stream started session_id=%s participant_id=%s encoding=%s sample_rate=%s channels=%s",
+                session_id,
+                participant_id,
+                stream_context.encoding,
+                stream_context.sample_rate,
+                stream_context.channels,
+            )
         except WebSocketDisconnect:
             return
         except Exception as exc:
@@ -150,15 +174,23 @@ async def handle_audio_stream_websocket(
 
                 raw_bytes = message.get("bytes")
                 if raw_bytes is not None:
-                    if len(raw_bytes) < 4:
+                    if stream_context is None:
                         continue
 
-                    aligned_size = len(raw_bytes) - (len(raw_bytes) % 4)
+                    bytes_per_sample = 4 if stream_context.encoding == "float32_pcm" else 2
+                    if len(raw_bytes) < bytes_per_sample:
+                        continue
+
+                    aligned_size = len(raw_bytes) - (len(raw_bytes) % bytes_per_sample)
                     if aligned_size <= 0:
                         continue
 
-                    float32_array = np.frombuffer(raw_bytes[:aligned_size], dtype=np.float32)
-                    int16_array = (float32_array * 32767).clip(-32768, 32767).astype(np.int16)
+                    if stream_context.encoding == "float32_pcm":
+                        float32_array = np.frombuffer(raw_bytes[:aligned_size], dtype="<f4")
+                        int16_array = (float32_array * 32767).clip(-32768, 32767).astype(np.int16)
+                    else:
+                        int16_array = np.frombuffer(raw_bytes[:aligned_size], dtype="<i2")
+
                     if int16_array.size == 0:
                         continue
 
@@ -187,13 +219,32 @@ async def handle_audio_stream_websocket(
                 if payload.get("type") == "stop":
                     stop_received = True
                     await flush_buffer(force=True)
-                    await generate_idea_blocks_from_stream_transcripts(
-                        db,
-                        session_id=session_id,
-                        participant_id=participant_id,
-                        visibility=stream_context.scope,
-                        transcripts=transcript_segments,
-                    )
+                    transcript_text_all = "\n".join(item.text for item in transcript_segments if item.text).strip()
+                    idea_blocks_payload: list[dict[str, Any]] = []
+                    if transcript_text_all:
+                        generated_blocks = await generate_and_save_idea_blocks(
+                            db,
+                            session_id=session_id,
+                            participant_id=participant_id,
+                            visibility=stream_context.scope,
+                            source_transcript_ids=[item.segment_id for item in transcript_segments],
+                            transcript_text=transcript_text_all,
+                        )
+                        await db.commit()
+                        idea_blocks_payload = [
+                            {
+                                "id": block.id,
+                                "session_id": block.session_id,
+                                "participant_id": block.participant_id,
+                                "visibility": block.visibility.value,
+                                "content": block.content,
+                                "summary": block.summary,
+                                "transcript": block.transcript,
+                                "created_at": to_iso_z(block.created_at),
+                                "updated_at": to_iso_z(block.updated_at),
+                            }
+                            for block in generated_blocks
+                        ]
 
                     last_segment_id = transcript_segments[-1].segment_id if transcript_segments else None
                     last_text = transcript_segments[-1].text if transcript_segments else ""
@@ -204,6 +255,13 @@ async def handle_audio_stream_websocket(
                             "transcript_segment_id": last_segment_id,
                             "text": last_text,
                             "is_final": True,
+                        },
+                    )
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "idea_blocks_update",
+                            "idea_blocks": idea_blocks_payload,
                         },
                     )
                     if websocket.client_state == WebSocketState.CONNECTED:

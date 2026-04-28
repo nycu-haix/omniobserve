@@ -1,41 +1,51 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { JitsiMeeting } from "@jitsi/react-sdk";
 import type IJitsiMeetExternalApi from "@jitsi/react-sdk/lib/types/IJitsiMeetExternalApi";
 import { Loader2 } from "lucide-react";
 import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
-  meetingUrl?: string;
+  meetingDomain?: string;
   displayName?: string;
   micMode: MicMode;
   onApiReady?: (api: IJitsiMeetExternalApi) => void;
 }
 
-interface ParsedJitsiUrl {
-  domain: string;
-  roomName: string;
-}
-
-function parseJitsiUrl(meetingUrl?: string): ParsedJitsiUrl | null {
-  if (!meetingUrl) {
+function parseJitsiDomain(meetingDomain?: string): string | null {
+  if (!meetingDomain) {
     return null;
   }
 
   try {
-    const url = new URL(meetingUrl);
-    const roomName = url.pathname.replace(/^\/+/, "");
+    const normalizedDomain = meetingDomain.includes("://")
+      ? meetingDomain
+      : `https://${meetingDomain}`;
+    const url = new URL(normalizedDomain);
 
-    if (!url.hostname || !roomName) {
+    if (!url.hostname) {
       return null;
     }
 
-    return {
-      domain: url.hostname,
-      roomName,
-    };
+    return url.hostname;
   } catch {
     return null;
   }
+}
+
+function getRoomNameFromSearch(search: string): string | null {
+  const roomName = new URLSearchParams(search).get("room")?.trim();
+  return roomName || null;
+}
+
+function renderJitsiError(title: string, message: string) {
+  return (
+    <div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
+      <div className="text-center">
+        <div className="text-lg font-semibold text-foreground">{title}</div>
+        <div className="text-sm">{message}</div>
+      </div>
+    </div>
+  );
 }
 
 async function setJitsiAudioMuted(api: IJitsiMeetExternalApi | null, muted: boolean) {
@@ -50,14 +60,13 @@ async function setJitsiAudioMuted(api: IJitsiMeetExternalApi | null, muted: bool
 }
 
 export function JitsiRoom({
-  meetingUrl,
+  meetingDomain,
   displayName = "OmniObserve User",
   micMode,
   onApiReady,
 }: JitsiRoomProps) {
   const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
   const [isReady, setIsReady] = useState(false);
-  const meeting = useMemo(() => parseJitsiUrl(meetingUrl), [meetingUrl]);
 
   useEffect(() => {
     void setJitsiAudioMuted(apiRef.current, micMode !== "public");
@@ -82,8 +91,8 @@ export function JitsiRoom({
         </div>
       )}
       <JitsiMeeting
-        domain={meeting.domain}
-        roomName={meeting.roomName}
+        domain={domain}
+        roomName={roomName}
         userInfo={{
           displayName,
           email: "",

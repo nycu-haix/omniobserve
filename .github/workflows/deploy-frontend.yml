@@ -1,0 +1,57 @@
+name: Deploy frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+
+concurrency:
+  group: deploy-frontend-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    env:
+      GIT_TERMINAL_PROMPT: "0"
+      GIT_ASKPASS: "/bin/false"
+      SSH_ASKPASS: "/bin/false"
+      GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+
+    steps:
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "whoami=$(whoami)"
+          echo "HOME=$HOME"
+          echo "SHELL=$SHELL"
+          git --version
+          pnpm --version || true
+          node --version || true
+
+          cd /Users/skyhong/Documents/omniobserve/frontend
+
+          echo "Remote:"
+          git remote -v
+
+          echo "Status:"
+          git status --short --branch
+
+          echo "Test GitHub auth:"
+          git ls-remote origin main
+
+          echo "Fetch latest:"
+          git fetch --prune origin main
+
+          echo "Reset to origin/main:"
+          git reset --hard origin/main
+
+          pnpm i
+          pnpm build

@@ -196,7 +196,11 @@ export default function MeetingRoom() {
     <main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:grid-cols-[minmax(0,1fr)_560px]">
       <section className="grid min-w-0 grid-rows-[minmax(320px,1fr)_auto_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground">
         <div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-          <JitsiRoom meetingUrl={jitsiMeetingUrl} displayName={displayName} micMode={micMode} />
+          <JitsiRoom
+            meetingDomain={jitsiMeetingDomain}
+            displayName={displayName}
+            micMode={micMode}
+          />
         </div>
 
         <section className="min-h-[260px] rounded-lg border p-3" aria-label="Survival ranking task">

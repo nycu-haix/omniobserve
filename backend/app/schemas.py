@@ -1,24 +1,33 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from .models import Visibility
 
 
-class TranscriptCreateRequest(BaseModel):
-    participant_id: str
-    visibility: Visibility
-    text: str
-    source_audio_id: str | None = None
-    started_at: str
-    ended_at: str
-
-
 class IdeaBlockGenerateRequest(BaseModel):
     participant_id: str
     visibility: Visibility
-    source_transcript_ids: list[str] = Field(min_length=1)
+    transcript_text: str | None = Field(
+        default=None,
+        description="Transcript content to be processed by LLM",
+    )
+    use_mock_transcript: bool = Field(
+        default=False,
+        description="When true, ignore transcript_text and use backend mock transcript",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "participant_id": "p1",
+                "visibility": "public",
+                "transcript_text": "大家好，今天要確認 API 設計方向。",
+                "use_mock_transcript": False,
+            }
+        }
+    }
 
 
 @dataclass
@@ -39,9 +48,39 @@ class StreamTranscript:
     text: str
 
 
+class IdeaBlockResponse(BaseModel):
+    id: str
+    session_id: str
+    participant_id: str
+    visibility: Literal["public", "private"]
+    content: str
+    summary: str | None
+    transcript: str | None
+    source_transcript_ids: list[str]
+    created_at: str
+    updated_at: str
+
+
+class IdeaBlockGenerateResponse(BaseModel):
+    idea_blocks: list[IdeaBlockResponse]
+
+
+class ErrorResponse(BaseModel):
+    error_code: str
+    message: str
+    details: Any | None = None
+
+
 class ApiError(Exception):
-    def __init__(self, status_code: int, error_code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        error_code: str,
+        message: str,
+        details: Any | None = None,
+    ):
         self.status_code = status_code
         self.error_code = error_code
         self.message = message
+        self.details = details
         super().__init__(message)

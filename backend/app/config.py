@@ -1,6 +1,5 @@
 import logging
 import os
-from pathlib import Path
 
 logger = logging.getLogger("omniobserve")
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +14,21 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 STREAM_CHUNK_SAMPLES = 16000
+MOCK_TRANSCRIPT_TEXT = os.getenv(
+    "MOCK_TRANSCRIPT_TEXT",
+    """[00:00] Host:
+大家好，今天這場會議主要是要確認 OmniObserve 的即時音訊處理 API 要怎麼設計。前端目前希望可以把 Float32 PCM 音訊即時傳到後端，後端負責做語音轉文字，接著再把 transcript 接到 Private Board 或 Public Board。今天我們先聚焦三個重點：第一，前端音訊格式和 WebSocket API；第二，後端 STT pipeline；第三，逐字稿和 idea blocks 要怎麼接到 board 上。
+
+[00:50] Jason:
+我先確認一下目前的狀況。原本的 API spec 裡有 REST 的 `/audio-segments`，這個比較像是每隔幾秒上傳一段完整音檔，例如 wav 或 webm。但現在前端說會傳 Float32 PCM，所以這比較適合走 WebSocket，也就是 `/sessions/{session_id}/audio-stream`。前端會一直送 binary chunks，後端收到後累積或分段處理。
+
+[01:35] Engineer A:
+對，前端這邊目前比較偏向用 AudioWorklet 拿到 Float32Array。這些資料不是 wav 檔，也沒有 header，所以後端需要知道 sample rate 和 channels。前端可以在 WebSocket URL 上帶 query params，例如 `encoding=float32_pcm`、`sample_rate=48000`、`channels=1`。每次送出的 binary message 就是 Float32Array 的 ArrayBuffer。
+
+[02:20] Engineer B:
+這裡有一個重要點，STT model 通常不會直接吃 Float32 PCM bytes，尤其如果是一般 whisper 或其他 ASR pipeline，多半需要 wav file 或至少是正確格式的 audio array。所以後端收到 Float32 PCM 後，要先做格式轉換。最基本的做法是把 Float32 sample clip 到 -1 到 1，轉成 int16 PCM，然後包成 wav，再丟給 STT model。
+""",
+)
 
 IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 <Role Assignment>
@@ -24,7 +38,10 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 
 <Task>
 閱讀 <Context> 標籤中的逐字稿內容，並根據 <Principle> 中定義的準則將其分割成獨立的 idea blocks。
-每個 idea block 應代表一個完整的想法或觀點，並對其生成 summary、bullet_points 與 tags。
+每個 idea block 應代表一個完整的想法或觀點，並輸出：
+1) content：一句短總結（給前端顯示）
+2) summary：詳細解釋 content（不要混入原逐字稿內容）
+3) transcript：該 idea block 對應的逐字稿原文片段
 </Task>
 
 <Principle>
@@ -81,19 +98,14 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 
 [
   {{
-    "content": "完整描述這個 idea block 的核心想法（一到兩句話）",
-    "summary": "3到5個字的標題",
-    "bullet_points": [
-      "重點一",
-      "重點二"
-    ],
-    "tags": ["tag1", "tag2"]
+    "content": "一句短總結（前端顯示用）",
+    "summary": "詳細解釋 content（不包含逐字稿原文）",
+    "transcript": "對應逐字稿原文片段"
   }},
   {{
     "content": "...",
     "summary": "...",
-    "bullet_points": ["...", "..."],
-    "tags": ["..."]
+    "transcript": "..."
   }}
 ]
 </Formatting>
