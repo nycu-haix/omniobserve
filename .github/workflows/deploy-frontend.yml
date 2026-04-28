@@ -17,12 +17,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Prepare SSH key
+      - name: Prepare SSH
         shell: bash
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
           set -euo pipefail
+
+          : "${DEPLOY_SSH_KEY:?DEPLOY_SSH_KEY is missing}"
+          : "${DEPLOY_HOST:?DEPLOY_HOST is missing}"
+          : "${DEPLOY_USER:?DEPLOY_USER is missing}"
+
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -30,23 +39,30 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            Port $DEPLOY_PORT
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking accept-new
+            ServerAliveInterval 30
+          EOF
+
+          chmod 600 ~/.ssh/config
+
+          echo "Testing TCP reachability..."
+          nc -vz "$DEPLOY_HOST" "$DEPLOY_PORT"
+
+          echo "Testing SSH login..."
+          ssh deploy-target "whoami && hostname && pwd"
+
       - name: Build frontend on server
         shell: bash
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
           set -euo pipefail
 
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
-
-          ssh \
-            -i ~/.ssh/deploy_key \
-            -p "$DEPLOY_PORT" \
-            -o StrictHostKeyChecking=accept-new \
-            -o ServerAliveInterval=30 \
-            "$DEPLOY_USER@$DEPLOY_HOST" <<'REMOTE'
+          ssh deploy-target <<'REMOTE'
           set -euo pipefail
 
           export PATH="$HOME/Library/pnpm:$HOME/.local/share/pnpm:$PATH"
