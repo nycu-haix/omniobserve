@@ -217,13 +217,11 @@
 							</div>
 						</div>
 
-						<p class="hint">
-							如果
-							<code>Audio WebSocket URL</code>
-							留空，自動使用：
-							<span id="computedWsUrl" class="small-code"></span>
-						</p>
-					</div>
+          <p class="hint">
+            如果 <code>Audio WebSocket URL</code> 留空，前端會自動使用：
+            <span id="computedWsUrl" class="small-code"></span>
+          </p>
+        </div>
 
 					<div class="omni-card">
 						<h3>Status</h3>
@@ -306,16 +304,21 @@
 			</div>
 		</div>
 
-		<script>
-			window.OMNI_DEFAULTS = {
-				roomName: "omniobserveaudiotest0427",
-				jitsiUrl: "https://meet.jit.si/omniobserveaudiotest0427",
+  <script>
+    window.OMNI_DEFAULTS = {
+      roomName: "omniobserveaudiotest0427",
+      jitsiBaseUrl: "https://meet.omni.elvismao.com",
 
-				// ws://localhost:8000/sessions/{roomName}/audio-stream?participant_id={userId}
-				apiBaseWsUrl: "ws://localhost:8000",
+      // ws://localhost:8000/sessions/{roomName}/audio-stream?participant_id={userId}
+    //   apiBaseWsUrl: "ws://localhost:8000",
 
-				userId: "user_001",
-				displayName: "User 001",
+    apiBaseWsUrl:
+      location.protocol === "https:"
+        ? "wss://omni.elvismao.com"
+        : "ws://localhost:8000",
+        
+      userId: "user_001",
+      displayName: "User 001",
 
 				mode: "public",
 				autoJoin: true

@@ -1,0 +1,8 @@
+#!C:\Users\09116\omniobserve\audio-test\vad-backend\venv_funasr\Scripts\python.exe
+# -*- coding: UTF-8 -*-
+from __future__ import print_function, division, absolute_import
+
+from numba.misc.numba_entry import main
+
+if __name__ == "__main__":
+    main()
