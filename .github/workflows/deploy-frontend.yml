@@ -26,14 +26,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+
+          echo "Testing SSH reachability..."
+          nc -vz "$DEPLOY_HOST" "$DEPLOY_PORT"
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
-          printf '%s' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
-          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+          echo "Adding host key..."
+          ssh-keyscan -T 10 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Build frontend on server
         shell: bash
