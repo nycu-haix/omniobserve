@@ -4,7 +4,7 @@ services:
     working_dir: /site
     command: python -m http.server 3000 --bind 0.0.0.0
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - .:/site:ro
     depends_on:
