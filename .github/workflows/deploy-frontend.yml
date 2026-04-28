@@ -17,28 +17,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Prepare SSH
+      - name: Prepare SSH key
         shell: bash
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
           set -euo pipefail
-
-          DEPLOY_PORT="${DEPLOY_PORT:-22}"
-
-          echo "Testing SSH reachability..."
-          nc -vz "$DEPLOY_HOST" "$DEPLOY_PORT"
 
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
           printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-
-          echo "Adding host key..."
-          ssh-keyscan -T 10 -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Build frontend on server
         shell: bash
@@ -51,7 +41,12 @@ jobs:
 
           DEPLOY_PORT="${DEPLOY_PORT:-22}"
 
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" <<'REMOTE'
+          ssh \
+            -i ~/.ssh/deploy_key \
+            -p "$DEPLOY_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o ServerAliveInterval=30 \
+            "$DEPLOY_USER@$DEPLOY_HOST" <<'REMOTE'
           set -euo pipefail
 
           export PATH="$HOME/Library/pnpm:$HOME/.local/share/pnpm:$PATH"
