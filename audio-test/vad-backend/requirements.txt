@@ -1,0 +1,7 @@
+fastapi
+funasr
+numpy
+opencc-python-reimplemented
+torch
+uvicorn[standard]
+websockets

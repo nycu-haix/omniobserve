@@ -1,0 +1,26 @@
+services:
+  frontend:
+    image: python:3.11-slim
+    working_dir: /site
+    command: python -m http.server 3000 --bind 0.0.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/site:ro
+    depends_on:
+      - vad-backend
+
+  vad-backend:
+    build:
+      context: ./vad-backend
+    command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./vad-backend:/app
+      - model-cache:/root/.cache
+    environment:
+      PYTHONUNBUFFERED: "1"
+
+volumes:
+  model-cache:
