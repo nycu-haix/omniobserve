@@ -315,7 +315,7 @@
     apiBaseWsUrl:
       location.protocol === "https:"
         ? "wss://omni.elvismao.com"
-        : "ws://localhost:8000",
+        : "ws://" + window.location.hostname + ":8001",
         
       userId: "user_001",
       displayName: "User 001",

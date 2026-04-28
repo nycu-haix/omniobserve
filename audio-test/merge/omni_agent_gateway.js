@@ -40,7 +40,7 @@
     );
 
   const DEFAULT_API_BASE_WS_URL =
-    APP_DEFAULTS.apiBaseWsUrl || "ws://localhost:8000";
+    APP_DEFAULTS.apiBaseWsUrl || "ws://" + window.location.hostname + ":8001";
 
   const SAMPLE_RATE = 16000;
   const SEND_CHUNK_SIZE = 512;
@@ -1108,7 +1108,7 @@
     }
 
   function buildDefaultApiWsUrl(roomName, participantId) {
-    const base = String(DEFAULT_API_BASE_WS_URL || "ws://localhost:8000")
+    const base = String(DEFAULT_API_BASE_WS_URL || "ws://" + window.location.hostname + ":8001")
       .trim()
       .replace(/\/+$/g, "");
 

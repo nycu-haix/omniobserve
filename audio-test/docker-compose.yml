@@ -15,7 +15,7 @@ services:
       context: ./vad-backend
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - ./vad-backend:/app
       - model-cache:/root/.cache

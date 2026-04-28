@@ -2,7 +2,7 @@ const params = new URLSearchParams(window.location.search);
 
 const JITSI_URL = params.get("jitsiUrl") || window.AGENT_JITSI_URL || "https://meet.jit.si/heiohkwnjr";
 
-const VAD_WS_URL = params.get("apiWsUrl") || window.AGENT_API_WS_URL || "ws://localhost:8000/ws/audio";
+const VAD_WS_URL = params.get("apiWsUrl") || window.AGENT_API_WS_URL || "ws://" + window.location.hostname + ":8001/ws/audio";
 
 const AUTO_START = params.get("autoStart") === "true";
 

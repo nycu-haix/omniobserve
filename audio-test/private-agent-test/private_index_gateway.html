@@ -64,7 +64,7 @@
 			(() => {
 				const pageParams = new URLSearchParams(window.location.search);
 
-				window.AGENT_API_WS_URL = pageParams.get("apiWsUrl") || "ws://localhost:8000/ws/audio";
+				window.AGENT_API_WS_URL = pageParams.get("apiWsUrl") || "ws://" + window.location.hostname + ":8001/ws/audio";
 
 				window.AGENT_USER_ID = pageParams.get("userId") || "user_001";
 

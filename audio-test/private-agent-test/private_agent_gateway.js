@@ -1,4 +1,4 @@
-const VAD_WS_URL = window.AGENT_API_WS_URL || "ws://localhost:8000/ws/audio";
+const VAD_WS_URL = window.AGENT_API_WS_URL || "ws://" + window.location.hostname + ":8001/ws/audio";
 
 const SAMPLE_RATE = 16000;
 const SEND_CHUNK_SIZE = 512;
