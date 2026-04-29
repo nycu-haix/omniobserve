@@ -65,6 +65,28 @@ class IdeaBlockGenerateResponse(BaseModel):
     idea_blocks: list[IdeaBlockResponse]
 
 
+class FrontendBoardBlockCreateRequest(BaseModel):
+    roomId: str
+    participantId: str | None = None
+    transcript_text: str | None = Field(
+        default=None,
+        description="Optional transcript override. If omitted, backend frontend-mock transcript is used.",
+    )
+    use_mock_transcript: bool = Field(
+        default=True,
+        description="When true and transcript_text is empty, use backend's frontend mock transcript.",
+    )
+    visibility: Visibility = Field(
+        default=Visibility.PRIVATE,
+        description="Generated idea block visibility.",
+    )
+
+
+class FrontendBoardBlockCreateResponse(BaseModel):
+    accepted: bool
+    generated_count: int
+
+
 class ErrorResponse(BaseModel):
     error_code: str
     message: str
