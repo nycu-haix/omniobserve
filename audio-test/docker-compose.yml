@@ -21,6 +21,12 @@ services:
       - model-cache:/root/.cache
     environment:
       PYTHONUNBUFFERED: "1"
+      XDG_CACHE_HOME: /root/.cache
+      TORCH_HOME: /root/.cache/torch
+      MODELSCOPE_CACHE: /root/.cache/modelscope
+      HF_HOME: /root/.cache/huggingface
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
       test:
         [
@@ -32,7 +38,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 120s
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
   model-cache:
