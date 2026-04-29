@@ -21,6 +21,18 @@ services:
       - model-cache:/root/.cache
     environment:
       PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
 
 volumes:
   model-cache:
