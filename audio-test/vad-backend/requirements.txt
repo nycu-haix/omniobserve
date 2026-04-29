@@ -6,3 +6,4 @@ torch
 torchaudio
 uvicorn[standard]
 websockets
+huggingface_hub
