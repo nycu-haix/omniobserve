@@ -16,9 +16,8 @@ from transcript_normalizer import to_traditional
 
 app = FastAPI()
 
-
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
+@app.get("/health")
+async def health_check():
     return {"status": "ok"}
 
 # =========================
