@@ -152,6 +152,7 @@ asr_model = AutoModel(
     punc_model="ct-punc",
     device=asr_device,
     disable_update=True,
+    hub="hf",
 )
 
 print(f"FunASR loaded on {asr_device}")
