@@ -21,7 +21,6 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      - ./vad-backend:/app
       - model-cache:/root/.cache
     environment:
       PYTHONUNBUFFERED: "1"
