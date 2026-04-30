@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OmniObserve Audio Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f9;
+        --panel: #ffffff;
+        --text: #1f2933;
+        --muted: #667085;
+        --border: #d8dee8;
+        --primary: #2563eb;
+        --primary-dark: #1e40af;
+        --danger: #b42318;
+        --ok: #027a48;
+        --warn: #b54708;
+        --code: #101828;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Arial, "Noto Sans TC", sans-serif;
+      }
+
+      main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .status-pill {
+        min-width: 128px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 7px 12px;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 14px;
+        text-align: center;
+      }
+
+      .status-pill.running {
+        border-color: #9ed5b5;
+        color: var(--ok);
+        background: #ecfdf3;
+      }
+
+      .status-pill.error {
+        border-color: #fecdca;
+        color: var(--danger);
+        background: #fef3f2;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 380px minmax(0, 1fr);
+        gap: 16px;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 9px 10px;
+        color: var(--text);
+        background: #fff;
+        font-size: 14px;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 4px;
+      }
+
+      button {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 9px 13px;
+        background: #fff;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+      }
+
+      button.primary:hover:not(:disabled) {
+        background: var(--primary-dark);
+      }
+
+      button.danger {
+        color: var(--danger);
+        border-color: #fecdca;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.52;
+      }
+
+      .meter {
+        height: 12px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #eef2f6;
+      }
+
+      .meter-fill {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(90deg, #16a34a, #eab308, #dc2626);
+        transition: width 80ms linear;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .stat {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px;
+        background: #fbfcfe;
+      }
+
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 4px;
+      }
+
+      .stat strong {
+        font-size: 15px;
+      }
+
+      .transcript {
+        min-height: 112px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+        background: #fbfcfe;
+        font-size: 20px;
+        line-height: 1.55;
+      }
+
+      .placeholder {
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      pre {
+        min-height: 360px;
+        max-height: 520px;
+        overflow: auto;
+        margin: 12px 0 0;
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--code);
+        color: #f9fafb;
+        font-size: 13px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .section-title h2 {
+        margin: 0;
+        font-size: 17px;
+      }
+
+      .tiny {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 860px) {
+        main {
+          padding: 16px;
+        }
+
+        header,
+        .layout {
+          display: block;
+        }
+
+        .status-pill {
+          margin-top: 12px;
+        }
+
+        section {
+          margin-bottom: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>OmniObserve Audio Test</h1>
+          <p>開啟麥克風後會把 16kHz mono Float32 PCM 串到後端，並顯示 VAD、切段、ASR 逐字稿與錯誤事件。</p>
+        </div>
+        <div id="statusPill" class="status-pill">Idle</div>
+      </header>
+
+      <div class="layout">
+        <section>
+          <div class="section-title">
+            <h2>Connection</h2>
+            <span class="tiny">/ws/audio</span>
+          </div>
+          <div class="controls">
+            <label>
+              WebSocket URL
+              <input id="wsUrlInput" autocomplete="off" />
+            </label>
+            <label>
+              Session / roomName
+              <input id="roomInput" autocomplete="off" value="audio-diagnostic" />
+            </label>
+            <label>
+              Participant ID
+              <input id="participantInput" autocomplete="off" value="diagnostic_user" />
+            </label>
+            <label>
+              Display Name
+              <input id="displayNameInput" autocomplete="off" value="Diagnostic User" />
+            </label>
+            <label>
+              Scope
+              <select id="scopeInput">
+                <option value="private">private</option>
+                <option value="public">public</option>
+              </select>
+            </label>
+
+            <div class="button-row">
+              <button id="startBtn" class="primary" type="button">Start microphone</button>
+              <button id="stopBtn" class="danger" type="button" disabled>Stop</button>
+              <button id="clearBtn" type="button">Clear log</button>
+            </div>
+
+            <div class="meter" aria-label="PCM level">
+              <div id="meterFill" class="meter-fill"></div>
+            </div>
+
+            <div class="stats">
+              <div class="stat">
+                <span>WebSocket</span>
+                <strong id="wsState">closed</strong>
+              </div>
+              <div class="stat">
+                <span>PCM chunks</span>
+                <strong id="chunkCount">0</strong>
+              </div>
+              <div class="stat">
+                <span>RMS</span>
+                <strong id="rmsValue">0.000000</strong>
+              </div>
+              <div class="stat">
+                <span>Peak</span>
+                <strong id="peakValue">0.000000</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">
+            <h2>Latest Transcript</h2>
+            <span id="lastEvent" class="tiny">no events yet</span>
+          </div>
+          <div id="transcriptBox" class="transcript">
+            <span class="placeholder">按 Start 後說 2-5 秒中文，停頓約 1.2 秒，這裡會顯示最新逐字稿。</span>
+          </div>
+          <pre id="logBox"></pre>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const SAMPLE_RATE = 16000;
+      const SEND_CHUNK_SIZE = 512;
+
+      const wsUrlInput = document.getElementById("wsUrlInput");
+      const roomInput = document.getElementById("roomInput");
+      const participantInput = document.getElementById("participantInput");
+      const displayNameInput = document.getElementById("displayNameInput");
+      const scopeInput = document.getElementById("scopeInput");
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const clearBtn = document.getElementById("clearBtn");
+      const statusPill = document.getElementById("statusPill");
+      const wsState = document.getElementById("wsState");
+      const chunkCount = document.getElementById("chunkCount");
+      const rmsValue = document.getElementById("rmsValue");
+      const peakValue = document.getElementById("peakValue");
+      const meterFill = document.getElementById("meterFill");
+      const transcriptBox = document.getElementById("transcriptBox");
+      const lastEvent = document.getElementById("lastEvent");
+      const logBox = document.getElementById("logBox");
+
+      let ws = null;
+      let audioContext = null;
+      let micStream = null;
+      let micSource = null;
+      let processor = null;
+      let silentGain = null;
+      let pendingPcm = new Float32Array(0);
+      let sentChunks = 0;
+      let running = false;
+
+      function defaultWsUrl() {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const host = window.location.host || "localhost:8000";
+        return `${protocol}//${host}/ws/audio`;
+      }
+
+      function log(message, data) {
+        const stamp = new Date().toLocaleTimeString();
+        const suffix = data ? " " + JSON.stringify(data) : "";
+        logBox.textContent += `[${stamp}] ${message}${suffix}\n`;
+        logBox.scrollTop = logBox.scrollHeight;
+        lastEvent.textContent = message;
+      }
+
+      function setStatus(text, state) {
+        statusPill.textContent = text;
+        statusPill.className = `status-pill ${state || ""}`.trim();
+      }
+
+      function updateWsState() {
+        const stateNames = ["connecting", "open", "closing", "closed"];
+        wsState.textContent = ws ? stateNames[ws.readyState] || String(ws.readyState) : "closed";
+      }
+
+      function setControls(isRunning) {
+        startBtn.disabled = isRunning;
+        stopBtn.disabled = !isRunning;
+        wsUrlInput.disabled = isRunning;
+        roomInput.disabled = isRunning;
+        participantInput.disabled = isRunning;
+        displayNameInput.disabled = isRunning;
+        scopeInput.disabled = isRunning;
+      }
+
+      function buildStartMessage() {
+        const scope = scopeInput.value;
+        const participantId = participantInput.value.trim() || "diagnostic_user";
+
+        return {
+          type: "start",
+          source: "browser_diagnostic",
+          scope,
+          agentType: "diagnostic_browser",
+          roomName: roomInput.value.trim() || "audio-diagnostic",
+          participantId,
+          userId: participantId,
+          displayName: displayNameInput.value.trim() || participantId,
+          sampleRate: SAMPLE_RATE,
+          channels: 1,
+          encoding: "float32",
+          format: "float32"
+        };
+      }
+
+      function downsampleTo16k(buffer, inputSampleRate) {
+        if (inputSampleRate === SAMPLE_RATE) {
+          return new Float32Array(buffer);
+        }
+
+        const ratio = inputSampleRate / SAMPLE_RATE;
+        const newLength = Math.round(buffer.length / ratio);
+        const result = new Float32Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+
+        while (offsetResult < result.length) {
+          const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+          let accum = 0;
+          let count = 0;
+
+          for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+            accum += buffer[i];
+            count += 1;
+          }
+
+          result[offsetResult] = count > 0 ? accum / count : 0;
+          offsetResult += 1;
+          offsetBuffer = nextOffsetBuffer;
+        }
+
+        return result;
+      }
+
+      function stats(buffer) {
+        if (!buffer || buffer.length === 0) {
+          return { rms: 0, peak: 0 };
+        }
+
+        let sum = 0;
+        let peak = 0;
+
+        for (let i = 0; i < buffer.length; i++) {
+          const value = buffer[i];
+          const abs = Math.abs(value);
+          sum += value * value;
+          if (abs > peak) peak = abs;
+        }
+
+        return { rms: Math.sqrt(sum / buffer.length), peak };
+      }
+
+      function appendAndSendPcm(newPcm) {
+        const merged = new Float32Array(pendingPcm.length + newPcm.length);
+        merged.set(pendingPcm, 0);
+        merged.set(newPcm, pendingPcm.length);
+
+        let offset = 0;
+
+        while (offset + SEND_CHUNK_SIZE <= merged.length) {
+          const chunk = merged.slice(offset, offset + SEND_CHUNK_SIZE);
+
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const safeChunk = new Float32Array(chunk);
+            ws.send(safeChunk.buffer);
+            sentChunks += 1;
+            chunkCount.textContent = String(sentChunks);
+          }
+
+          offset += SEND_CHUNK_SIZE;
+        }
+
+        pendingPcm = merged.slice(offset);
+      }
+
+      function handleServerMessage(event) {
+        if (typeof event.data !== "string") {
+          log("Backend binary message ignored");
+          return;
+        }
+
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          log("Backend text", event.data);
+          return;
+        }
+
+        if (data.type === "vad") {
+          log("VAD event", data.event);
+          return;
+        }
+
+        if (data.type === "segment_saved") {
+          log("Segment saved", {
+            start: data.start,
+            end: data.end,
+            duration: data.duration,
+            reason: data.reason
+          });
+          return;
+        }
+
+        if (data.type === "transcript" || data.type === "transcript.final") {
+          transcriptBox.textContent = data.text || "";
+          log("Transcript", {
+            scope: data.scope,
+            displayName: data.displayName,
+            text: data.text
+          });
+          return;
+        }
+
+        if (data.type === "asr_error" || data.type === "transcript_error") {
+          setStatus("ASR error", "error");
+          log("ASR error", data);
+          return;
+        }
+
+        log(`Backend ${data.type || "message"}`, data);
+      }
+
+      function connectWebSocket() {
+        return new Promise((resolve, reject) => {
+          ws = new WebSocket(wsUrlInput.value.trim() || defaultWsUrl());
+          ws.binaryType = "arraybuffer";
+          updateWsState();
+
+          const timeout = window.setTimeout(() => {
+            reject(new Error("WebSocket connection timeout"));
+          }, 8000);
+
+          ws.onopen = () => {
+            window.clearTimeout(timeout);
+            updateWsState();
+            ws.send(JSON.stringify(buildStartMessage()));
+            log("WebSocket connected");
+            resolve();
+          };
+
+          ws.onerror = () => {
+            window.clearTimeout(timeout);
+            updateWsState();
+            reject(new Error("WebSocket error"));
+          };
+
+          ws.onmessage = handleServerMessage;
+          ws.onclose = () => {
+            updateWsState();
+            if (running) {
+              setStatus("Disconnected", "error");
+              log("WebSocket closed");
+            } else {
+              setControls(false);
+              setStatus("Idle", "");
+            }
+          };
+        });
+      }
+
+      function startAudioPipeline() {
+        micSource = audioContext.createMediaStreamSource(micStream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+        silentGain = audioContext.createGain();
+        silentGain.gain.value = 0.00001;
+
+        micSource.connect(processor);
+        processor.connect(silentGain);
+        silentGain.connect(audioContext.destination);
+
+        processor.onaudioprocess = (event) => {
+          if (!running) return;
+
+          const input = event.inputBuffer.getChannelData(0);
+          const downsampled = downsampleTo16k(input, audioContext.sampleRate);
+          const level = stats(downsampled);
+
+          rmsValue.textContent = level.rms.toFixed(6);
+          peakValue.textContent = level.peak.toFixed(6);
+          meterFill.style.width = `${Math.min(100, level.peak * 180)}%`;
+
+          appendAndSendPcm(downsampled);
+        };
+      }
+
+      async function start() {
+        if (running) return;
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setStatus("No microphone API", "error");
+          log("Browser does not support getUserMedia");
+          return;
+        }
+
+        try {
+          setControls(true);
+          setStatus("Connecting", "");
+          sentChunks = 0;
+          pendingPcm = new Float32Array(0);
+          chunkCount.textContent = "0";
+          transcriptBox.innerHTML = '<span class="placeholder">等待後端回傳逐字稿...</span>';
+
+          await connectWebSocket();
+
+          setStatus("Requesting mic", "");
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            },
+            video: false
+          });
+
+          audioContext = new AudioContext();
+          await audioContext.resume();
+          running = true;
+          startAudioPipeline();
+          setStatus("Running", "running");
+          log(`Microphone started, browser sampleRate=${audioContext.sampleRate}`);
+        } catch (error) {
+          log("Start failed", { error: error.message || String(error) });
+          setStatus("Start failed", "error");
+          await stop();
+        }
+      }
+
+      async function stop() {
+        const wasRunning = running;
+        running = false;
+        setControls(false);
+
+        if (processor) {
+          try { processor.onaudioprocess = null; processor.disconnect(); } catch {}
+          processor = null;
+        }
+
+        if (micSource) {
+          try { micSource.disconnect(); } catch {}
+          micSource = null;
+        }
+
+        if (silentGain) {
+          try { silentGain.disconnect(); } catch {}
+          silentGain = null;
+        }
+
+        if (micStream) {
+          try { micStream.getTracks().forEach((track) => track.stop()); } catch {}
+          micStream = null;
+        }
+
+        if (audioContext) {
+          try { await audioContext.close(); } catch {}
+          audioContext = null;
+        }
+
+        let waitingForBackend = false;
+
+        if (ws) {
+          try {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "stop" }));
+              setStatus("Waiting ASR", "");
+              log("Stop sent, waiting for backend transcript");
+              waitingForBackend = true;
+            }
+          } catch {}
+
+          window.setTimeout(() => {
+            if (ws && ws.readyState !== WebSocket.CLOSED) {
+              try { ws.close(); } catch {}
+              log("WebSocket closed after wait timeout");
+            }
+          }, 45000);
+        }
+
+        meterFill.style.width = "0%";
+        if (wasRunning) log("Microphone stopped");
+        if (waitingForBackend) {
+          startBtn.disabled = true;
+          stopBtn.disabled = true;
+        } else {
+          setControls(false);
+          setStatus("Idle", "");
+        }
+      }
+
+      wsUrlInput.value = defaultWsUrl();
+      startBtn.addEventListener("click", start);
+      stopBtn.addEventListener("click", stop);
+      clearBtn.addEventListener("click", () => {
+        logBox.textContent = "";
+        lastEvent.textContent = "log cleared";
+      });
+      updateWsState();
+    </script>
+  </body>
+</html>

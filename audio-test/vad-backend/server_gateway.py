@@ -10,13 +10,24 @@ from typing import Optional
 import numpy as np
 import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import HTMLResponse
 # from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from funasr import AutoModel
 from transcript_normalizer import to_traditional
 
 app = FastAPI()
 
-@app.get("/health")
+# =========================
+# Paths
+# =========================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+@app.get("/", response_class=HTMLResponse)
+async def diagnostic_index():
+    return HTMLResponse((BASE_DIR / "diagnostic_index.html").read_text(encoding="utf-8"))
+
+
 @app.get("/healthz")
 async def health_check():
     return {"status": "ok"}
@@ -44,12 +55,6 @@ PRE_BUFFER_CHUNKS = int((PRE_BUFFER_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 
 RMS_SILENCE_THRESHOLD = 0.00005
 MIN_SAVE_DURATION_SEC = 0.8
-
-# =========================
-# Paths
-# =========================
-
-BASE_DIR = Path(__file__).resolve().parent
 
 SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)

@@ -110,15 +110,40 @@ async def receive_messages(ws):
     """
     Print messages returned by server_gateway.py.
     """
-    # try:
-    #     async for message in ws:
-    #         print("SERVER:", message)
-    # except websockets.exceptions.ConnectionClosed:
-    #     pass
-    # except asyncio.CancelledError:
-    #     raise
-    # except Exception as e:
-    #     print("Receiver error:", e)
+    saw_transcript = False
+    saw_asr_error = False
+
+    try:
+        async for message in ws:
+            print("SERVER:", message)
+
+            if not isinstance(message, str):
+                continue
+
+            try:
+                payload = json.loads(message)
+            except json.JSONDecodeError:
+                continue
+
+            message_type = payload.get("type")
+            if message_type in ("transcript", "transcript.final"):
+                saw_transcript = True
+                print("SMOKE_RESULT: transcript")
+            elif message_type in ("asr_error", "transcript_error"):
+                saw_asr_error = True
+                print(f"SMOKE_RESULT: {message_type}")
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        print("Receiver error:", e)
+
+    return {
+        "saw_transcript": saw_transcript,
+        "saw_asr_error": saw_asr_error,
+    }
 
 
 async def send_audio_array(
@@ -170,6 +195,7 @@ async def stream_wav_to_gateway(
     realtime: bool,
     tail_silence_ms: int,
     wait_after_stop_sec: int,
+    reset_outputs: bool,
 ):
     audio, input_sr = read_wav_as_float32_mono(wav_path)
 
@@ -192,12 +218,13 @@ async def stream_wav_to_gateway(
     print(f"Wait after stop: {wait_after_stop_sec}s")
 
     async with websockets.connect(ws_url, max_size=None) as ws:
-        await ws.send(json.dumps({
-            "type": "reset_outputs"
-        }))
+        if reset_outputs:
+            await ws.send(json.dumps({
+                "type": "reset_outputs"
+            }))
 
-        reset_response = await ws.recv()
-        # print("SERVER:", reset_response)
+            reset_response = await ws.recv()
+            print("SERVER:", reset_response)
 
         start_msg = {
             "type": "start",
@@ -251,8 +278,10 @@ async def stream_wav_to_gateway(
 
         print("Waiting for backend ASR result until server closes websocket...")
 
+        receiver_result = None
+
         try:
-            await asyncio.wait_for(receiver_task, timeout=wait_after_stop_sec)
+            receiver_result = await asyncio.wait_for(receiver_task, timeout=wait_after_stop_sec)
 
         except asyncio.TimeoutError:
             print(f"Timeout after {wait_after_stop_sec}s. Closing client websocket.")
@@ -260,9 +289,17 @@ async def stream_wav_to_gateway(
             receiver_task.cancel()
 
             try:
-                await receiver_task
+                receiver_result = await receiver_task
             except asyncio.CancelledError:
                 pass
+
+        if receiver_result:
+            if receiver_result["saw_transcript"]:
+                print("Smoke test completed: transcript received.")
+            elif receiver_result["saw_asr_error"]:
+                print("Smoke test completed: ASR error received.")
+            else:
+                print("Smoke test completed: no transcript or ASR error received.")
 
     print("Done.")
 
@@ -333,6 +370,12 @@ def main():
         help="Send as fast as possible instead of real-time"
     )
 
+    parser.add_argument(
+        "--reset-outputs",
+        action="store_true",
+        help="Ask the backend to delete existing output wav/transcript files before sending audio."
+    )
+
     args = parser.parse_args()
 
     wav_path = Path(args.wav)
@@ -351,6 +394,7 @@ def main():
             realtime=not args.no_realtime,
             tail_silence_ms=args.tail_silence_ms,
             wait_after_stop_sec=args.wait_after_stop_sec,
+            reset_outputs=args.reset_outputs,
         )
     )
 
