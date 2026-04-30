@@ -1,6 +1,7 @@
 services:
   frontend:
     image: python:3.11-slim
+    restart: unless-stopped
     working_dir: /site
     command: python -m http.server 3000 --bind 0.0.0.0
     ports:
@@ -9,10 +10,13 @@ services:
       - .:/site:ro
     depends_on:
       - vad-backend
+    networks:
+      - dokploy-network
 
   vad-backend:
     build:
       context: ./vad-backend
+    restart: unless-stopped
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
     ports:
       - "8001:8000"
@@ -48,6 +52,12 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    networks:
+      - dokploy-network
 
 volumes:
   model-cache:
+
+networks:
+  dokploy-network:
+    external: true
