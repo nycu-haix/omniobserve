@@ -1,3 +1,5 @@
 *.pyc
 __pycache__/
 .venv/
+/audio-test/vad-backend/segments
+.DS_Store
