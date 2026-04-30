@@ -87,6 +87,41 @@ class FrontendBoardBlockCreateResponse(BaseModel):
     generated_count: int
 
 
+class IdeaBlockUpdateRequest(BaseModel):
+    summary: str | None = Field(
+        default=None,
+        description="Editable block summary shown in board list. Maps to backend content.",
+    )
+    aiSummary: str | None = Field(
+        default=None,
+        description="Optional AI summary text shown in details tab.",
+    )
+    transcript: str | None = Field(
+        default=None,
+        description="Optional transcript text shown in details tab.",
+    )
+
+
+class IdeaBlockUpdateResponse(BaseModel):
+    updated: bool
+    idea_block: IdeaBlockResponse
+
+
+class FrontendMockBoardSeedRequest(BaseModel):
+    roomId: str
+    participantId: str | None = None
+    visibility: Visibility = Field(
+        default=Visibility.PRIVATE,
+        description="Generated idea block visibility for mock board seed.",
+    )
+
+
+class FrontendMockBoardSeedResponse(BaseModel):
+    accepted: bool
+    transcript_count: int
+    generated_count: int
+
+
 class ErrorResponse(BaseModel):
     error_code: str
     message: str

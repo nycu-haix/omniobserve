@@ -207,6 +207,52 @@ async def generate_idea_blocks_from_stream_transcripts(
     return idea_blocks
 
 
+async def update_idea_block_fields(
+    db: AsyncSession,
+    *,
+    block_id: str,
+    fields: dict[str, Any],
+) -> IdeaBlock:
+    result = await db.execute(select(IdeaBlock).where(IdeaBlock.id == block_id))
+    block = result.scalar_one_or_none()
+    if block is None:
+        raise ApiError(
+            404,
+            "IDEA_BLOCK_NOT_FOUND",
+            "Idea block not found",
+            details={"field": "block_id", "value": block_id},
+        )
+
+    if "content" in fields:
+        content = str(fields["content"] or "").strip()
+        if not content:
+            raise ApiError(
+                400,
+                "INVALID_PAYLOAD",
+                "summary cannot be empty",
+                details={"field": "summary"},
+            )
+        block.content = content
+
+    if "summary" in fields:
+        raw_summary = fields["summary"]
+        if raw_summary is None:
+            block.summary = None
+        else:
+            block.summary = str(raw_summary).strip() or None
+
+    if "transcript" in fields:
+        raw_transcript = fields["transcript"]
+        if raw_transcript is None:
+            block.transcript = None
+        else:
+            block.transcript = str(raw_transcript).strip() or None
+
+    block.updated_at = utc_now()
+    await db.flush()
+    return block
+
+
 def _build_mock_idea_blocks(transcript_text: str) -> list[dict[str, Any]] | None:
     llm_mock_flag = os.getenv("LLM_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
     mock_text = os.getenv("IDEA_BLOCK_MOCK_TEXT", "").strip()
