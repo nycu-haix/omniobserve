@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import time
 import wave
 from collections import deque
@@ -144,17 +145,55 @@ print("Silero VAD loaded")
 # # Avoid multiple ASR tasks using Breeze at the same time.
 # ASR_GLOBAL_LOCK = asyncio.Lock()
 
+def resolve_asr_device() -> str:
+    configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
+
+    if configured_device in ("", "auto"):
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+
+    if configured_device == "cuda":
+        return "cuda:0"
+
+    return configured_device
+
+
+def log_torch_runtime():
+    print(
+        "Torch runtime: "
+        f"version={torch.__version__}, "
+        f"cuda_build={torch.version.cuda}, "
+        f"cuda_available={torch.cuda.is_available()}"
+    )
+
+    if not torch.cuda.is_available():
+        return
+
+    try:
+        capability = torch.cuda.get_device_capability(0)
+        print(
+            "CUDA device: "
+            f"name={torch.cuda.get_device_name(0)}, "
+            f"capability=sm_{capability[0]}{capability[1]}, "
+            f"supported_arches={torch.cuda.get_arch_list()}"
+        )
+    except Exception as e:
+        print(f"Failed to inspect CUDA device: {e}")
+
+
 # =========================
 # Load FunASR
 # =========================
 
-asr_device = "cuda:0" if torch.cuda.is_available() else "cpu"
+log_torch_runtime()
+
+asr_device = resolve_asr_device()
+punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
 
 print(f"Loading FunASR on {asr_device}...")
 
 asr_model = AutoModel(
     model="paraformer-zh",
-    punc_model="ct-punc",
+    punc_model=punc_model,
     device=asr_device,
     disable_update=True,
     hub="hf",

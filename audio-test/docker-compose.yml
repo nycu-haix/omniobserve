@@ -25,6 +25,8 @@ services:
       TORCH_HOME: /root/.cache/torch
       MODELSCOPE_CACHE: /root/.cache/modelscope
       HF_HOME: /root/.cache/huggingface
+      ASR_DEVICE: ${ASR_DEVICE:-auto}
+      FUNASR_DISABLE_PUNC: ${FUNASR_DISABLE_PUNC:-0}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:

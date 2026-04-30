@@ -542,6 +542,7 @@
 
         if (data.type === "asr_error" || data.type === "transcript_error") {
           setStatus("ASR error", "error");
+          transcriptBox.textContent = `ASR error: ${data.error || data.reason || "unknown error"}`;
           log("ASR error", data);
           return;
         }

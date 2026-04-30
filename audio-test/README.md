@@ -45,6 +45,15 @@ Static test pages:       http://localhost:3001/
 
 The compose file requests an Nvidia GPU device for `vad-backend`. On macOS Docker Desktop, prefer the direct Python setup above unless you remove or override the GPU reservation.
 
+The Docker image uses `vad-backend/requirements.cuda-v100.txt`, which pins PyTorch and torchaudio to CUDA 11.8 wheels for V100 compatibility:
+
+```text
+torch==2.4.1+cu118
+torchaudio==2.4.1+cu118
+```
+
+After rebuilding on the V100 host, backend startup logs should include `supported_arches` with `sm_70`.
+
 ## Browser Diagnostic Test
 
 Use the diagnostic page to test the whole pipeline manually:
@@ -171,6 +180,41 @@ Expected:
 ```
 
 A healthy `/healthz` only proves the FastAPI process is alive. To verify the real audio service, use the browser diagnostic page or the CLI WAV smoke test.
+
+## ASR Device Settings
+
+The backend selects the ASR device with `ASR_DEVICE`:
+
+```text
+ASR_DEVICE=auto    # default; use cuda:0 if torch detects CUDA, otherwise cpu
+ASR_DEVICE=cpu     # force CPU
+ASR_DEVICE=cuda:0  # force first CUDA device
+```
+
+For quick tests, the punctuation model can be disabled:
+
+```text
+FUNASR_DISABLE_PUNC=1
+```
+
+If deployment on an older Nvidia GPU such as V100 returns:
+
+```text
+CUDA error: no kernel image is available for execution on the device
+```
+
+then the installed PyTorch/CUDA wheel is not compatible with that GPU architecture. The fastest recovery is to redeploy with `ASR_DEVICE=cpu` to confirm ASR correctness. The proper GPU fix is to rebuild the image with a PyTorch CUDA wheel that still supports the V100 target.
+
+For the provided Docker setup, rebuild the backend image after pulling the latest files:
+
+```bash
+cd audio-test
+docker compose build --no-cache vad-backend
+docker compose up -d vad-backend
+docker compose logs -f vad-backend
+```
+
+Confirm the logs show a V100 device with `capability=sm_70` and that `supported_arches` includes `sm_70`.
 
 ## Runtime Output Files
 

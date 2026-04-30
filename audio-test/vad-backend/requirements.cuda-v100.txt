@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+fastapi
+funasr
+numpy
+opencc-python-reimplemented
+torch==2.4.1+cu118
+torchaudio==2.4.1+cu118
+uvicorn[standard]
+websockets
+huggingface_hub
