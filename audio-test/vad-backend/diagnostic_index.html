@@ -376,11 +376,37 @@
       let pendingPcm = new Float32Array(0);
       let sentChunks = 0;
       let running = false;
+      let stopWaitTimeoutId = null;
+
+      function normalizedBrowserHost() {
+        const host = window.location.host || "localhost:8000";
+        if (window.location.hostname === "0.0.0.0") {
+          return host.replace("0.0.0.0", "localhost");
+        }
+        return host;
+      }
+
+      function redirectBindAddressOrigin() {
+        if (window.location.hostname !== "0.0.0.0") return false;
+
+        const target = new URL(window.location.href);
+        target.hostname = "localhost";
+        window.location.replace(target.toString());
+        return true;
+      }
 
       function defaultWsUrl() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.host || "localhost:8000";
+        const host = normalizedBrowserHost();
         return `${protocol}//${host}/ws/audio`;
+      }
+
+      function microphoneApiFailureMessage() {
+        if (!window.isSecureContext || window.location.hostname === "0.0.0.0") {
+          return "Microphone requires HTTPS or localhost. Open http://localhost:8000/ instead of http://0.0.0.0:8000/.";
+        }
+
+        return "Browser does not support getUserMedia";
       }
 
       function log(message, data) {
@@ -399,6 +425,13 @@
       function updateWsState() {
         const stateNames = ["connecting", "open", "closing", "closed"];
         wsState.textContent = ws ? stateNames[ws.readyState] || String(ws.readyState) : "closed";
+      }
+
+      function clearStopWaitTimeout() {
+        if (stopWaitTimeoutId !== null) {
+          window.clearTimeout(stopWaitTimeoutId);
+          stopWaitTimeoutId = null;
+        }
       }
 
       function setControls(isRunning) {
@@ -552,30 +585,39 @@
 
       function connectWebSocket() {
         return new Promise((resolve, reject) => {
-          ws = new WebSocket(wsUrlInput.value.trim() || defaultWsUrl());
-          ws.binaryType = "arraybuffer";
+          clearStopWaitTimeout();
+
+          const socket = new WebSocket(wsUrlInput.value.trim() || defaultWsUrl());
+          ws = socket;
+          socket.binaryType = "arraybuffer";
           updateWsState();
 
           const timeout = window.setTimeout(() => {
             reject(new Error("WebSocket connection timeout"));
           }, 8000);
 
-          ws.onopen = () => {
+          socket.onopen = () => {
+            if (ws !== socket) return;
             window.clearTimeout(timeout);
             updateWsState();
-            ws.send(JSON.stringify(buildStartMessage()));
+            socket.send(JSON.stringify(buildStartMessage()));
             log("WebSocket connected");
             resolve();
           };
 
-          ws.onerror = () => {
+          socket.onerror = () => {
+            if (ws !== socket) return;
             window.clearTimeout(timeout);
             updateWsState();
             reject(new Error("WebSocket error"));
           };
 
-          ws.onmessage = handleServerMessage;
-          ws.onclose = () => {
+          socket.onmessage = (event) => {
+            if (ws === socket) handleServerMessage(event);
+          };
+          socket.onclose = () => {
+            if (ws !== socket) return;
+            clearStopWaitTimeout();
             updateWsState();
             if (running) {
               setStatus("Disconnected", "error");
@@ -618,7 +660,7 @@
 
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           setStatus("No microphone API", "error");
-          log("Browser does not support getUserMedia");
+          log(microphoneApiFailureMessage());
           return;
         }
 
@@ -689,19 +731,25 @@
         let waitingForBackend = false;
 
         if (ws) {
+          const socketToClose = ws;
+
           try {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "stop" }));
+            if (socketToClose.readyState === WebSocket.OPEN) {
+              socketToClose.send(JSON.stringify({ type: "stop" }));
               setStatus("Waiting ASR", "");
               log("Stop sent, waiting for backend transcript");
               waitingForBackend = true;
             }
           } catch {}
 
-          window.setTimeout(() => {
-            if (ws && ws.readyState !== WebSocket.CLOSED) {
-              try { ws.close(); } catch {}
+          clearStopWaitTimeout();
+          stopWaitTimeoutId = window.setTimeout(() => {
+            if (ws === socketToClose && socketToClose.readyState !== WebSocket.CLOSED) {
+              try { socketToClose.close(); } catch {}
               log("WebSocket closed after wait timeout");
+            }
+            if (ws === socketToClose) {
+              stopWaitTimeoutId = null;
             }
           }, 45000);
         }
@@ -717,7 +765,9 @@
         }
       }
 
-      wsUrlInput.value = defaultWsUrl();
+      if (!redirectBindAddressOrigin()) {
+        wsUrlInput.value = defaultWsUrl();
+      }
       startBtn.addEventListener("click", start);
       stopBtn.addEventListener("click", stop);
       clearBtn.addEventListener("click", () => {

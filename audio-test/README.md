@@ -19,6 +19,8 @@ The recommended test entrypoint is now the backend diagnostic page:
 http://localhost:8000/
 ```
 
+Use `localhost` or `127.0.0.1` in the browser. `0.0.0.0` is only the server bind address, and browsers do not expose the microphone API on that origin.
+
 On the deployed service:
 
 ```text
