@@ -48,19 +48,32 @@ export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardP
 
 		const timer = window.setTimeout(() => {
 			if (lastMessage.type === "new_idea_block") {
-				setIdeaBlocks(prev => [...prev, lastMessage.payload]);
+				setIdeaBlocks(prev => (prev.some(block => block.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
 			}
 
 			if (lastMessage.type === "update_idea_block") {
-				setIdeaBlocks(prev => prev.map(block => (block.id === lastMessage.payload.id ? { ...block, ...lastMessage.payload, status: "ready" } : block)));
+				setIdeaBlocks(prev =>
+					prev.some(block => block.id === lastMessage.payload.id)
+						? prev.map(block => (block.id === lastMessage.payload.id ? { ...block, ...lastMessage.payload, status: "ready" } : block))
+						: [
+								...prev,
+								{
+									id: lastMessage.payload.id,
+									summary: lastMessage.payload.summary ?? "",
+									aiSummary: lastMessage.payload.aiSummary,
+									transcript: lastMessage.payload.transcript,
+									status: "ready"
+								}
+							]
+				);
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setTranscriptLines(prev => [...prev, lastMessage.payload]);
+				setTranscriptLines(prev => (prev.some(line => line.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
 			}
 
 			if (lastMessage.type === "similarity_cue") {
-				setCues(prev => [...prev, lastMessage.payload]);
+				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
 				setIdeaBlocks(prev => prev.map(block => (block.id === lastMessage.payload.blockId ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary } : block)));
 			}
 		}, 0);
