@@ -15,7 +15,8 @@ export function useParticipantIdentity() {
 	const params = new URLSearchParams(window.location.search);
 	const participantId = params.get("id") ?? "1";
 	const roomName = normalizeRoomName(params.get("room_name"));
-	const displayName = PARTICIPANT_NAME_MAP[participantId] ?? `Guest ${participantId}`;
+	const customDisplayName = params.get("name")?.trim();
+	const displayName = customDisplayName || PARTICIPANT_NAME_MAP[participantId] || `Guest ${participantId}`;
 
 	return {
 		participantId,
