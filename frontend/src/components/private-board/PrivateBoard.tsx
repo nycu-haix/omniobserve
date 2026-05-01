@@ -69,7 +69,16 @@ export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardP
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setTranscriptLines(prev => (prev.some(line => line.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
+				setTranscriptLines(prev => {
+					const existingLine = prev.find(line => line.id === lastMessage.payload.id);
+					if (!existingLine) {
+						return [...prev, lastMessage.payload];
+					}
+					if (existingLine.text === lastMessage.payload.text) {
+						return prev;
+					}
+					return [...prev, { ...lastMessage.payload, id: `${lastMessage.payload.id}-${Date.now()}` }];
+				});
 			}
 
 			if (lastMessage.type === "similarity_cue") {
