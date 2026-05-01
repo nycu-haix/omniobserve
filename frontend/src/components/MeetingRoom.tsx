@@ -4,6 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { cn } from "../lib/utils";
@@ -90,10 +91,32 @@ export default function MeetingRoom() {
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
+	const { startAudioStream, stopAudioStream, isAudioStreaming, isAudioConnected, lastAudioMessage, audioError } = useAudioStream(
+		sessionId,
+		participantId,
+		displayName
+	);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+	const latestTranscript = typeof lastAudioMessage?.text === "string" ? lastAudioMessage.text : null;
+	const audioStatusText = audioError
+		? `音訊錯誤：${audioError}`
+		: isAudioConnected
+			? "音訊後端已連線"
+			: isAudioStreaming
+				? "音訊串流啟動中"
+				: "音訊串流未啟動";
 
-	const handleMic = (mode: MicMode) => {
-		setMicMode(current => (current === mode ? "off" : mode));
+	const handleMic = async (mode: MicMode) => {
+		const nextMode = mode === "off" ? "off" : micMode === mode ? "off" : mode;
+
+		setMicMode(nextMode);
+
+		if (nextMode === "off") {
+			stopAudioStream();
+			return;
+		}
+
+		await startAudioStream(nextMode, roomName);
 	};
 
 	const handleDragEnd = (event: DragEndEvent) => {
@@ -198,19 +221,26 @@ export default function MeetingRoom() {
 					</DndContext>
 				</section>
 
-				<div className="flex flex-wrap items-center justify-center gap-2">
-					<Button variant={micMode === "public" ? "default" : "outline"} onClick={() => handleMic("public")}>
-						<Mic className="h-4 w-4" />
-						公開麥克風
-					</Button>
-					<Button variant={micMode === "private" ? "default" : "outline"} onClick={() => handleMic("private")}>
-						<Radio className="h-4 w-4" />
-						私人錄音
-					</Button>
-					<Button variant="secondary" onClick={() => handleMic("off")}>
-						<MicOff className="h-4 w-4" />
-						靜音
-					</Button>
+				<div className="grid gap-2">
+					<div className="flex flex-wrap items-center justify-center gap-2">
+						<Button variant={micMode === "public" ? "default" : "outline"} onClick={() => void handleMic("public")}>
+							<Mic className="h-4 w-4" />
+							公開麥克風
+						</Button>
+						<Button variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+							<Radio className="h-4 w-4" />
+							私人錄音
+						</Button>
+						<Button variant="secondary" onClick={() => void handleMic("off")}>
+							<MicOff className="h-4 w-4" />
+							靜音
+						</Button>
+					</div>
+
+					<div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+						<div>{audioStatusText}</div>
+						{latestTranscript && <div className="mt-1 text-foreground">最新逐字稿：{latestTranscript}</div>}
+					</div>
 				</div>
 			</section>
 
