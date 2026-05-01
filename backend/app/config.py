@@ -57,8 +57,8 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 <Task>
 閱讀 <Context> 標籤中的逐字稿內容，並根據 <Principle> 中定義的準則將其分割成獨立的 idea blocks。
 每個 idea block 應代表一個完整的想法或觀點，並輸出：
-1) content：一句短總結（給前端顯示）
-2) summary：詳細解釋 content（不要混入原逐字稿內容）
+1) content：一句最多10個字的短總結（給前端顯示）
+2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思，但不要直接複製原文。這部分應該是對 content 的補充說明，幫助使用者理解這個 idea block 的核心想法和背景。
 3) transcript：該 idea block 對應的逐字稿原文片段
 </Task>
 
