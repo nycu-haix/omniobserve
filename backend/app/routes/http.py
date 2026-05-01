@@ -160,13 +160,13 @@ async def create_frontend_board_block(
                     "payload": {"id": f"mock-t{index}", "text": line},
                 },
             )
-    elif payload.use_mock_transcript and not (payload.transcript_text or "").strip():
+    elif payload.transcript_text and payload.transcript_text.strip():
         for index, line in enumerate(build_transcript_lines_for_frontend(transcript_text), start=1):
             await board_manager.broadcast(
                 session_id,
                 {
                     "type": "new_transcript_line",
-                    "payload": {"id": f"t{index}", "text": line},
+                    "payload": {"id": f"manual-t{index}", "text": line},
                 },
             )
 
