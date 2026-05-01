@@ -21,6 +21,14 @@ services:
       - ollama_data:/root/.ollama
     ports:
       - "127.0.0.1:11434:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 
   backend:
     build:
