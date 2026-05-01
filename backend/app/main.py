@@ -34,5 +34,13 @@ async def startup() -> None:
         return
 
     async with engine.begin() as conn:
+        await conn.execute(sql_text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(sql_text("ALTER TABLE idea_blocks ADD COLUMN IF NOT EXISTS transcript TEXT"))
+        await conn.execute(sql_text("ALTER TABLE idea_blocks ADD COLUMN IF NOT EXISTS embedding vector(1024)"))
+        await conn.execute(
+            sql_text(
+                "CREATE INDEX IF NOT EXISTS idea_blocks_embedding_hnsw_idx "
+                "ON idea_blocks USING hnsw (embedding vector_cosine_ops)"
+            )
+        )

@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 
 def utc_now_model() -> datetime:
@@ -43,6 +44,7 @@ class IdeaBlock(Base):
     transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     source_transcript_ids: Mapped[list[str]] = mapped_column(ARRAY(String(36)), default=list)
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String(255)), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: utc_now_model())
