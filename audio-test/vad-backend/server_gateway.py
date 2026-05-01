@@ -113,12 +113,11 @@ vad_model.eval()
 
 print("Silero VAD loaded")
 
-
 # =========================
 # Load Breeze ASR
 # =========================
 
-# ASR_MODEL_NAME = str(BASE_DIR / "models" / "Breeze-ASR-25")
+# ASR_MODEL_NAME = "MediaTek-Research/Breeze-ASR-25"
 
 # asr_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -129,7 +128,7 @@ print("Silero VAD loaded")
 #     asr_dtype = torch.float32
 #     print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
 
-# print("Loading Breeze ASR 25...")
+# print("Loading Breeze ASR 25 from Hugging Face cache...")
 
 # asr_processor = WhisperProcessor.from_pretrained(ASR_MODEL_NAME)
 
@@ -141,9 +140,6 @@ print("Silero VAD loaded")
 # asr_model.eval()
 
 # print(f"Breeze ASR 25 loaded on {asr_device}")
-
-# # Avoid multiple ASR tasks using Breeze at the same time.
-# ASR_GLOBAL_LOCK = asyncio.Lock()
 
 def resolve_asr_device() -> str:
     configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()

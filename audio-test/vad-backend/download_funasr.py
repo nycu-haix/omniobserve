@@ -17,7 +17,6 @@ model = AutoModel(
 
 print("FunASR loaded successfully.")
 
-# Optional: 如果 segments 裡已經有 wav，就順便測試轉錄
 segments_dir = BASE_DIR / "segments"
 wav_files = sorted(segments_dir.glob("*.wav")) if segments_dir.exists() else []
 
