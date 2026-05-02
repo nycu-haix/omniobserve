@@ -27,7 +27,7 @@
   const APP_DEFAULTS = window.OMNI_DEFAULTS || {};
 
   const DEFAULT_ROOM_NAME =
-    APP_DEFAULTS.roomName || "omniobserveaudiotest0427";
+    APP_DEFAULTS.roomName || "lost-at-sea";
 
   const DEFAULT_JITSI_BASE_URL =
     APP_DEFAULTS.jitsiBaseUrl || "https://meet.omni.elvismao.com";

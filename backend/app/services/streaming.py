@@ -16,10 +16,18 @@ from .idea_blocks import generate_and_save_idea_blocks
 from .transcripts import save_ws_transcript_segment
 
 
-def parse_stream_start_message(raw_text: str) -> StreamContext:
+def parse_stream_start_message(raw_text: str, *, expected_session_id: str | None = None) -> StreamContext:
     payload = json.loads(raw_text)
     if not isinstance(payload, dict) or payload.get("type") != "start":
         raise ValueError("First WebSocket message must be a start message")
+
+    if expected_session_id is not None:
+        for field_name in ("sessionId", "roomName"):
+            metadata_session_id = payload.get(field_name)
+            if metadata_session_id is None or str(metadata_session_id).strip() == "":
+                continue
+            if str(metadata_session_id).strip() != expected_session_id:
+                raise ValueError(f"start.{field_name} must match URL session_id")
 
     scope_raw = payload.get("scope")
     try:
@@ -144,7 +152,7 @@ async def handle_audio_stream_websocket(
 
         try:
             first_message = await websocket.receive_text()
-            stream_context = parse_stream_start_message(first_message)
+            stream_context = parse_stream_start_message(first_message, expected_session_id=session_id)
             logger.info(
                 "Audio stream started session_id=%s participant_id=%s encoding=%s sample_rate=%s channels=%s",
                 session_id,

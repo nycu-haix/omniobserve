@@ -31,6 +31,6 @@ cd audio-test\public-agent-test
 python -m http.server 3000
 ```
 
-public agent test: http://localhost:3000/public-agent-test/public_index_gateway.html http://localhost:3000/public-agent-test/public_index_gateway.html?jitsiUrl=https%3A%2F%2Fomni.elvismao.com%2Fskyishandsome
+public agent test: http://localhost:3000/public-agent-test/public_index_gateway.html http://localhost:3000/public-agent-test/public_index_gateway.html?jitsiUrl=https%3A%2F%2Fomni.elvismao.com%2Flost-at-sea
 
 private agent test: http://localhost:3000/private-agent-test/private_index_gateway.html

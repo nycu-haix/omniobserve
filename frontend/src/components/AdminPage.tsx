@@ -1,5 +1,6 @@
 import { Activity, AlertCircle, ClipboardList, Globe2, Lock, Radio, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/Badge";
 import { ScrollArea } from "./ui/ScrollArea";
@@ -70,7 +71,7 @@ function normalizeRankingItemIds(itemIds: string[]) {
 
 function getRoomName() {
 	const params = new URLSearchParams(window.location.search);
-	const fallbackRoomName = import.meta.env.VITE_DEFAULT_ROOM_NAME || "mars-survival-001";
+	const fallbackRoomName = getDefaultRoomName();
 	return (
 		params
 			.get("room_name")

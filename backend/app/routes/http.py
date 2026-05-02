@@ -55,6 +55,13 @@ def build_transcript_lines_for_frontend(transcript_text: str) -> list[str]:
     return lines or [transcript_text.strip()]
 
 
+def resolve_payload_session_id(payload: Any) -> str:
+    session_id = (getattr(payload, "sessionId", None) or getattr(payload, "roomId", None) or "").strip()
+    if not session_id:
+        raise ApiError(400, "INVALID_PAYLOAD", "sessionId is required", details={"field": "sessionId"})
+    return session_id
+
+
 @router.post(
     "/sessions/{session_id}/idea-blocks/generate",
     status_code=201,
@@ -116,9 +123,7 @@ async def create_frontend_board_block(
     payload: FrontendBoardBlockCreateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendBoardBlockCreateResponse:
-    session_id = payload.roomId.strip()
-    if not session_id:
-        raise ApiError(400, "INVALID_PAYLOAD", "roomId is required", details={"field": "roomId"})
+    session_id = resolve_payload_session_id(payload)
 
     transcript_text = (payload.transcript_text or "").strip()
     using_frontend_mock_transcript = False
@@ -199,9 +204,7 @@ async def seed_frontend_board_with_mock_transcript(
     payload: FrontendMockBoardSeedRequest,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendMockBoardSeedResponse:
-    session_id = payload.roomId.strip()
-    if not session_id:
-        raise ApiError(400, "INVALID_PAYLOAD", "roomId is required", details={"field": "roomId"})
+    session_id = resolve_payload_session_id(payload)
 
     participant_id = (payload.participantId or "1").strip() or "1"
 

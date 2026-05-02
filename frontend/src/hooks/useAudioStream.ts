@@ -10,7 +10,6 @@ interface AudioStreamMessage {
 
 interface ActiveAudioMeta {
 	mode: AudioStreamMode;
-	roomName: string;
 	sessionId: string;
 	participantId: string;
 	displayName: string;
@@ -102,7 +101,7 @@ export function useAudioStream(
 	participantId?: string,
 	displayName?: string
 ): {
-	startAudioStream: (mode: AudioStreamMode, roomNameOverride?: string) => Promise<void>;
+	startAudioStream: (mode: AudioStreamMode) => Promise<void>;
 	stopAudioStream: () => void;
 	isAudioStreaming: boolean;
 	isAudioConnected: boolean;
@@ -168,7 +167,8 @@ export function useAudioStream(
 			source: sourceForMode(meta.mode),
 			scope: meta.mode,
 			agentType: agentTypeForMode(meta.mode),
-			roomName: meta.roomName,
+			roomName: meta.sessionId,
+			sessionId: meta.sessionId,
 			participantId: meta.participantId,
 			userId: meta.participantId,
 			displayName: meta.displayName,
@@ -243,7 +243,7 @@ export function useAudioStream(
 	}, []);
 
 	const startAudioStream = useCallback(
-		async (mode: AudioStreamMode, roomNameOverride?: string) => {
+		async (mode: AudioStreamMode) => {
 			if (!sessionId) {
 				setAudioError("Cannot start audio stream: sessionId is empty.");
 				return;
@@ -260,13 +260,11 @@ export function useAudioStream(
 			setAudioError(null);
 			setLastAudioMessage(null);
 
-			const roomName = roomNameOverride || sessionId;
 			const resolvedDisplayName = displayName || participantId;
 			const clientId = makeClientId();
 
 			activeMetaRef.current = {
 				mode,
-				roomName,
 				sessionId,
 				participantId,
 				displayName: resolvedDisplayName,
@@ -280,7 +278,6 @@ export function useAudioStream(
 				mode,
 				sessionId,
 				participantId,
-				roomName,
 				wsUrl
 			});
 
@@ -339,7 +336,8 @@ export function useAudioStream(
 						source: sourceForMode(meta.mode),
 						scope: meta.mode,
 						agentType: agentTypeForMode(meta.mode),
-						roomName: meta.roomName,
+						roomName: meta.sessionId,
+						sessionId: meta.sessionId,
 						participantId: meta.participantId,
 						userId: meta.participantId,
 						displayName: meta.displayName,
