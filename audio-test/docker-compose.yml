@@ -22,14 +22,18 @@ services:
       - "8001:8000"
 
     labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-      - "traefik.http.routers.vad-audio.rule=Host(`api.omni.elvismao.com`) && PathPrefix(`/sessions`)"
-      - "traefik.http.routers.vad-audio.entrypoints=websecure"
-      - "traefik.http.routers.vad-audio.tls=true"
-      - "traefik.http.routers.vad-audio.priority=100"
-      - "traefik.http.services.vad-audio.loadbalancer.server.port=8000"
-      
+    - "traefik.enable=true"
+    - "traefik.docker.network=dokploy-network"
+
+    - "traefik.http.routers.vad-audio.rule=Host(`api.omni.elvismao.com`) && PathPrefix(`/sessions`)"
+    - "traefik.http.routers.vad-audio.entrypoints=websecure"
+    - "traefik.http.routers.vad-audio.tls=true"
+    - "traefik.http.routers.vad-audio.tls.certresolver=letsencrypt"
+    - "traefik.http.routers.vad-audio.priority=10000"
+    - "traefik.http.routers.vad-audio.service=vad-audio"
+
+    - "traefik.http.services.vad-audio.loadbalancer.server.port=8000"
+
     volumes:
       - model-cache:/root/.cache
     environment:
