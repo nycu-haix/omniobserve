@@ -25,7 +25,6 @@
 
   const params = new URLSearchParams(window.location.search);
   const APP_DEFAULTS = window.OMNI_DEFAULTS || {};
-  const asrModel = params.get("asr") || "funasr";
 
   const DEFAULT_ROOM_NAME =
     APP_DEFAULTS.roomName || "omniobserveaudiotest0427";
@@ -714,8 +713,7 @@
 				sampleRate: SAMPLE_RATE,
 				channels: 1,
 				encoding: "float32",
-				format: "float32",
-        asrModel: asrModel,
+				format: "float32"
 			};
 		}
 

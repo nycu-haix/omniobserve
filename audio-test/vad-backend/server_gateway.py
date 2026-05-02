@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+# from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from funasr import AutoModel
 from transcript_normalizer import to_traditional
 
@@ -114,97 +114,6 @@ vad_model.eval()
 print("Silero VAD loaded")
 
 # =========================
-# ASR device
-# =========================
-
-def resolve_asr_device() -> str:
-    configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
-
-    if configured_device in ("", "auto"):
-        return "cuda:0" if torch.cuda.is_available() else "cpu"
-
-    if configured_device == "cuda":
-        return "cuda:0"
-
-    return configured_device
-
-
-def log_torch_runtime():
-    print(
-        "Torch runtime: "
-        f"version={torch.__version__}, "
-        f"cuda_build={torch.version.cuda}, "
-        f"cuda_available={torch.cuda.is_available()}"
-    )
-
-    if not torch.cuda.is_available():
-        return
-
-    try:
-        capability = torch.cuda.get_device_capability(0)
-        print(
-            "CUDA device: "
-            f"name={torch.cuda.get_device_name(0)}, "
-            f"capability=sm_{capability[0]}{capability[1]}, "
-            f"supported_arches={torch.cuda.get_arch_list()}"
-        )
-    except Exception as e:
-        print(f"Failed to inspect CUDA device: {e}")
-
-
-log_torch_runtime()
-
-asr_device_str = resolve_asr_device()
-breeze_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# =========================
-# Load Breeze ASR
-# =========================
-
-BREEZE_MODEL_NAME = "MediaTek-Research/Breeze-ASR-25"
-
-if breeze_device.type == "cuda":
-    breeze_dtype = torch.float16
-    print("CUDA detected. Breeze ASR will run on GPU.")
-else:
-    breeze_dtype = torch.float32
-    print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
-
-print("Loading Breeze ASR 25 from Hugging Face cache...")
-
-breeze_processor = WhisperProcessor.from_pretrained(BREEZE_MODEL_NAME)
-
-breeze_model = WhisperForConditionalGeneration.from_pretrained(
-    BREEZE_MODEL_NAME,
-    torch_dtype=breeze_dtype,
-).to(breeze_device)
-
-breeze_model.eval()
-
-print(f"Breeze ASR 25 loaded on {breeze_device}")
-
-# =========================
-# Load FunASR
-# =========================
-
-punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
-
-print(f"Loading FunASR on {asr_device_str}...")
-
-funasr_model = AutoModel(
-    model="paraformer-zh",
-    punc_model=punc_model,
-    device=asr_device_str,
-    disable_update=True,
-    hub="hf",
-)
-
-print(f"FunASR loaded on {asr_device_str}")
-
-# Avoid multiple ASR tasks using ASR at the same time.
-ASR_GLOBAL_LOCK = asyncio.Lock()
-
-# =========================
 # Load Breeze ASR
 # =========================
 
@@ -243,6 +152,7 @@ def resolve_asr_device() -> str:
 
     return configured_device
 
+
 def log_torch_runtime():
     print(
         "Torch runtime: "
@@ -265,29 +175,30 @@ def log_torch_runtime():
     except Exception as e:
         print(f"Failed to inspect CUDA device: {e}")
 
+
 # =========================
 # Load FunASR
 # =========================
 
-# log_torch_runtime()
+log_torch_runtime()
 
-# asr_device = resolve_asr_device()
-# punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
+asr_device = resolve_asr_device()
+punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
 
-# print(f"Loading FunASR on {asr_device}...")
+print(f"Loading FunASR on {asr_device}...")
 
-# asr_model = AutoModel(
-#     model="paraformer-zh",
-#     punc_model=punc_model,
-#     device=asr_device,
-#     disable_update=True,
-#     hub="hf",
-# )
+asr_model = AutoModel(
+    model="paraformer-zh",
+    punc_model=punc_model,
+    device=asr_device,
+    disable_update=True,
+    hub="hf",
+)
 
-# print(f"FunASR loaded on {asr_device}")
+print(f"FunASR loaded on {asr_device}")
 
-# # Avoid multiple ASR tasks using FunASR at the same time.
-# ASR_GLOBAL_LOCK = asyncio.Lock()
+# Avoid multiple ASR tasks using FunASR at the same time.
+ASR_GLOBAL_LOCK = asyncio.Lock()
 
 # =========================
 # Utility functions
@@ -423,69 +334,70 @@ def resample_to_16k(audio: np.ndarray, input_sample_rate: int) -> np.ndarray:
     return np.interp(new_x, old_x, audio).astype(np.float32)
 
 
-def transcribe_audio_breeze(audio_float32: np.ndarray) -> str:
-    """
-    Transcribe 16kHz mono float32 audio using Breeze ASR 25.
-    """
-    audio_float32 = np.asarray(audio_float32, dtype=np.float32)
+# def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
+#     """
+#     Transcribe 16kHz mono float32 audio using Breeze ASR 25.
+#     """
+#     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
 
-    if len(audio_float32) == 0:
-        return ""
+#     if len(audio_float32) == 0:
+#         return ""
 
-    audio_float32 = np.clip(audio_float32, -1.0, 1.0)
+#     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
 
-    segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
-    segment_peak = float(np.max(np.abs(audio_float32)))
+#     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
+#     segment_peak = float(np.max(np.abs(audio_float32)))
 
-    # print(f"ASR input stats: rms={segment_rms:.6f}, peak={segment_peak:.6f}")
+#     # print(f"ASR input stats: rms={segment_rms:.6f}, peak={segment_peak:.6f}")
 
-    # Avoid Whisper-like hallucination on almost-silent segments.
-    if segment_rms < 0.0008:
-        print("Skip ASR: segment rms too low")
-        return ""
+#     # Avoid Whisper-like hallucination on almost-silent segments.
+#     if segment_rms < 0.0008:
+#         print("Skip ASR: segment rms too low")
+#         return ""
 
-    inputs = breeze_processor(
-        audio_float32,
-        sampling_rate=SAMPLE_RATE,
-        return_tensors="pt",
-        return_attention_mask=True,
-    )
+#     inputs = asr_processor(
+#         audio_float32,
+#         sampling_rate=SAMPLE_RATE,
+#         return_tensors="pt",
+#         return_attention_mask=True,
+#     )
 
-    input_features = inputs.input_features.to(breeze_device)
+#     input_features = inputs.input_features.to(asr_device)
 
-    if breeze_device.type == "cuda":
-        input_features = input_features.to(torch.float16)
+#     if asr_device.type == "cuda":
+#         input_features = input_features.to(torch.float16)
 
-    generate_kwargs = {
-        "max_new_tokens": 128,
-        "no_repeat_ngram_size": 3,
-    }
+#     generate_kwargs = {
+#         "max_new_tokens": 128,
+#         "no_repeat_ngram_size": 3,
+#     }
 
-    try:
-        forced_decoder_ids = breeze_processor.get_decoder_prompt_ids(
-            language="zh",
-            task="transcribe",
-        )
-        generate_kwargs["forced_decoder_ids"] = forced_decoder_ids
-    except Exception:
-        generate_kwargs["language"] = "zh"
-        generate_kwargs["task"] = "transcribe"
+#     # Whisper/Breeze language prompt
+#     try:
+#         forced_decoder_ids = asr_processor.get_decoder_prompt_ids(
+#             language="zh",
+#             task="transcribe",
+#         )
+#         generate_kwargs["forced_decoder_ids"] = forced_decoder_ids
+#     except Exception:
+#         generate_kwargs["language"] = "zh"
+#         generate_kwargs["task"] = "transcribe"
 
-    if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
-        generate_kwargs["attention_mask"] = inputs.attention_mask.to(breeze_device)
+#     if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
+#         generate_kwargs["attention_mask"] = inputs.attention_mask.to(asr_device)
 
-    with torch.no_grad():
-        predicted_ids = breeze_model.generate(
-            input_features,
-            **generate_kwargs,
-        )
+#     with torch.no_grad():
+#         predicted_ids = asr_model.generate(
+#             input_features,
+#             **generate_kwargs,
+#         )
 
-    text = breeze_processor.batch_decode(
-        predicted_ids,
-        skip_special_tokens=True,
-    )[0]
+#     text = asr_processor.batch_decode(
+#         predicted_ids,
+#         skip_special_tokens=True,
+#     )[0]
 
-    return text.strip()
+#     return text.strip()
 
 def extract_funasr_text(result) -> str:
     """
@@ -508,13 +420,8 @@ def extract_funasr_text(result) -> str:
 
     return str(item).strip()
 
-def transcribe_audio(filename: Path, audio_float32: np.ndarray, asr_model_name: str) -> str:
-    if asr_model_name == "breeze":
-        return transcribe_audio_breeze(audio_float32)
 
-    return transcribe_audio_funasr(filename, audio_float32)
-
-def transcribe_audio_funasr(filename: Path, audio_float32: np.ndarray) -> str:
+def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
     """
     Transcribe saved wav segment using FunASR.
     The segment has already been saved as 16kHz mono wav.
@@ -532,7 +439,7 @@ def transcribe_audio_funasr(filename: Path, audio_float32: np.ndarray) -> str:
         print("Skip ASR: segment rms too low")
         return ""
 
-    result = funasr_model.generate(
+    result = asr_model.generate(
         input=str(filename),
         language="zh",
         use_itn=True,
@@ -557,7 +464,6 @@ async def transcribe_and_send(
     participant_id: Optional[str],
     user_id: Optional[str],
     display_name: Optional[str],
-    asr_model_name: str = "funasr",
 ):
     try:
         # print(f"Transcribing segment: {filename}")
@@ -569,10 +475,9 @@ async def transcribe_and_send(
             #     segment_audio,
             # )
             transcript = await asyncio.to_thread(
-                transcribe_audio,
+                transcribe_audio_file,
                 filename,
                 segment_audio,
-                asr_model_name,
             )
 
         raw_transcript = transcript
@@ -615,7 +520,6 @@ async def transcribe_and_send(
                     "end": round(end_time, 2),
                     "duration": round(duration, 2),
                     "reason": reason,
-                    "asrModel": asr_model_name,
                     "text": traditional_transcript,
                 })
         except Exception:
@@ -645,7 +549,6 @@ async def audio_ws(
     websocket: WebSocket,
     session_id: Optional[str] = None,
     participant_id: Optional[str] = Query(None),
-    asr: Optional[str] = Query(None),
 ):
     await websocket.accept()
 
@@ -676,22 +579,6 @@ async def audio_ws(
     encoding = "float32"
     channels = 1
 
-    # ASR model selection.
-    # Priority:
-    # 1. frontend start message: asrModel
-    # 2. URL query: ?asr=funasr or ?asr=breeze
-    # 3. environment variable DEFAULT_ASR_MODEL
-    # 4. fallback: funasr
-    selected_asr_model = (
-        asr
-        or os.getenv("DEFAULT_ASR_MODEL", "funasr")
-        or "funasr"
-    ).strip().lower()
-
-    if selected_asr_model not in ("funasr", "breeze"):
-        print(f"Unknown initial ASR model: {selected_asr_model}. Fallback to funasr.")
-        selected_asr_model = "funasr"
-        
     # Per-connection audio state
     pending_audio = np.zeros(0, dtype=np.float32)
 
@@ -788,7 +675,6 @@ async def audio_ws(
                         "start": round(start_time, 2),
                         "end": round(end_time, 2),
                         "reason": end_reason,
-                        "asrModel": selected_asr_model,
                     })
             except Exception:
                 print("Cannot send segment_saved because websocket is closed")
@@ -810,7 +696,6 @@ async def audio_ws(
                     participant_id=participant_id,
                     user_id=user_id,
                     display_name=display_name,
-                    asr_model_name=selected_asr_model,
                 )
             )
 
@@ -871,23 +756,6 @@ async def audio_ws(
                     encoding = msg.get("encoding", msg.get("format", encoding))
                     channels = int(msg.get("channels", channels))
 
-                    # Frontend can select ASR model here.
-                    # Expected values: "funasr" or "breeze"
-                    requested_asr_model = (
-                        msg.get("asrModel")
-                        or msg.get("asr")
-                        or selected_asr_model
-                    )
-
-                    selected_asr_model = str(requested_asr_model).strip().lower()
-
-                    if selected_asr_model not in ("funasr", "breeze"):
-                        print(
-                            f"Unknown asrModel={selected_asr_model}. "
-                            "Fallback to funasr."
-                        )
-                        selected_asr_model = "funasr"
-
                     print(
                         "Control start: "
                         f"source={source}, "
@@ -900,8 +768,7 @@ async def audio_ws(
                         f"clientId={client_id}, "
                         f"sampleRate={input_sample_rate}, "
                         f"encoding={encoding}, "
-                        f"channels={channels}",
-                        f"asrModel={selected_asr_model}",
+                        f"channels={channels}"
                     )
 
                     if channels != 1:
