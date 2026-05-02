@@ -389,6 +389,19 @@ export function useAudioStream(
 
 					silentGain.gain.value = 0;
 
+					processorNode.onaudioprocess = event => {
+						if (!audioContextRef.current) return;
+						const output = event.outputBuffer.getChannelData(0);
+						output.fill(0);
+
+						const input = event.inputBuffer.getChannelData(0);
+						const inputCopy = new Float32Array(input);
+
+						const downsampled = downsampleTo16k(inputCopy, audioContextRef.current.sampleRate);
+
+						sendAudioSamples(downsampled);
+					};
+
 					sourceNode.connect(processorNode);
 					processorNode.connect(silentGain);
 					silentGain.connect(audioContext.destination);
@@ -476,19 +489,6 @@ export function useAudioStream(
 					if (!stoppingRef.current) {
 						cleanupAudioResources();
 					}
-				};
-
-				processorNode.onaudioprocess = event => {
-					if (!audioContextRef.current) return;
-					const output = event.outputBuffer.getChannelData(0);
-					output.fill(0);
-
-					const input = event.inputBuffer.getChannelData(0);
-					const inputCopy = new Float32Array(input);
-
-					const downsampled = downsampleTo16k(inputCopy, audioContextRef.current.sampleRate);
-
-					sendAudioSamples(downsampled);
 				};
 			} catch (error) {
 				cleanupAudioResources();

@@ -154,9 +154,9 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 		}
 
 		const controller = new AbortController();
-		setTranscriptLines([]);
 
 		async function loadTranscripts() {
+			setTranscriptLines([]);
 			try {
 				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
 				if (!transcriptUrl) {
@@ -229,8 +229,12 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 			return;
 		}
 
-		setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, audioTranscriptMessageToLine(lastAudioMessage, micMode)));
-		setTranscriptRefreshKey(current => current + 1);
+		const timer = window.setTimeout(() => {
+			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, audioTranscriptMessageToLine(lastAudioMessage, micMode)));
+			setTranscriptRefreshKey(current => current + 1);
+		}, 0);
+
+		return () => window.clearTimeout(timer);
 	}, [lastAudioMessage, micMode]);
 
 	useEffect(() => {
