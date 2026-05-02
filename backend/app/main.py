@@ -10,7 +10,15 @@ from .routes.api_spec import router as api_spec_router
 from .routes.http import router as http_router
 from .routes.ws import router as ws_router
 
-app = FastAPI(title="OmniObserve API", version="0.1.0")
+OPENAPI_TAGS = [
+    {"name": "Transcripts", "description": "Create and read transcript records."},
+    {"name": "Idea Blocks", "description": "CRUD operations for generated idea blocks."},
+    {"name": "Similarities", "description": "Manage similarity clusters and assign idea blocks to clusters."},
+    {"name": "Task Items", "description": "Map idea blocks to external task item ids."},
+    {"name": "Idea Block To Transcript", "description": "Map idea blocks to one or more transcripts."},
+]
+
+app = FastAPI(title="OmniObserve API", version="0.1.0", openapi_tags=OPENAPI_TAGS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS,
