@@ -23,7 +23,7 @@ from ..services.board_payloads import (
     serialize_frontend_board_idea_block_update,
 )
 from ..services.idea_blocks import generate_and_save_idea_blocks, update_idea_block_fields
-from ..services.realtime import board_manager
+from ..services.realtime import board_manager, presence_manager
 from ..utils import to_iso_z
 
 router = APIRouter()
@@ -192,6 +192,18 @@ async def create_frontend_board_block(
         )
 
     return {"accepted": True, "generated_count": len(idea_blocks)}
+
+
+@router.get(
+    "/api/sessions/{session_name}/presence",
+    summary="Get Session Presence",
+    description="Returns the participant ids currently connected to the session presence channel.",
+)
+async def get_session_presence(session_name: str) -> dict[str, Any]:
+    return {
+        "session_name": session_name,
+        "participants": presence_manager.get_participants(session_name),
+    }
 
 
 @router.post(

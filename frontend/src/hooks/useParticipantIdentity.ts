@@ -1,11 +1,5 @@
 import { getDefaultRoomName } from "../lib/defaultRoomName";
-
-const PARTICIPANT_NAME_MAP: Record<string, string> = {
-	"1": "Otter",
-	"2": "Fox",
-	"3": "Rabbit",
-	"4": "Penguin"
-};
+import { getDefaultParticipantName } from "../lib/participantDefaults";
 
 function normalizeRoomName(roomName: string | null): string {
 	const fallbackRoomName = getDefaultRoomName();
@@ -18,7 +12,7 @@ export function useParticipantIdentity() {
 	const participantId = params.get("id") ?? "1";
 	const roomName = normalizeRoomName(params.get("room_name"));
 	const customDisplayName = params.get("name")?.trim();
-	const displayName = customDisplayName || PARTICIPANT_NAME_MAP[participantId] || `Guest ${participantId}`;
+	const displayName = customDisplayName || getDefaultParticipantName(participantId);
 
 	return {
 		participantId,
