@@ -18,7 +18,24 @@ from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .transcripts import save_ws_transcript_segment
 
 
-DEFAULT_RANKING_ITEMS = ["oxygen", "water", "map", "radio", "food"]
+DEFAULT_RANKING_ITEMS = [
+    "mosquito_net",
+    "petrol",
+    "water_container",
+    "shaving_mirror",
+    "sextant",
+    "emergency_rations",
+    "sea_chart",
+    "floating_cushion",
+    "rope",
+    "chocolate_bars",
+    "waterproof_sheet",
+    "fishing_rod",
+    "shark_repellent",
+    "rum",
+    "vhf_radio",
+]
+DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
 
 
 class ConnectionManager:
@@ -131,6 +148,26 @@ def _get_ranking_state(session_id: str) -> dict[str, Any]:
             "revision": 0,
             "items": list(DEFAULT_RANKING_ITEMS),
         }
+    else:
+        current_items = ranking_state[session_id].get("items")
+        if not isinstance(current_items, list):
+            current_items = []
+        normalized_items = [
+            item
+            for index, item in enumerate(current_items)
+            if isinstance(item, str)
+            and item in DEFAULT_RANKING_ITEM_SET
+            and current_items.index(item) == index
+        ]
+        normalized_items.extend(
+            item for item in DEFAULT_RANKING_ITEMS if item not in normalized_items
+        )
+        if normalized_items != current_items:
+            ranking_state[session_id]["items"] = normalized_items
+            ranking_state[session_id]["revision"] = _normalize_int(
+                ranking_state[session_id].get("revision"),
+                0,
+            ) + 1
     return ranking_state[session_id]
 
 

@@ -42,12 +42,31 @@ interface BoardBlock {
 const MAX_EVENTS = 80;
 const ADMIN_PARTICIPANT_ID = "admin";
 const RANKING_LABELS: Record<string, string> = {
-	oxygen: "氧氣筒",
-	water: "水",
-	map: "星圖",
-	radio: "無線電",
-	food: "濃縮食物"
+	mosquito_net: "蚊帳",
+	petrol: "一罐汽油",
+	water_container: "裝水容器",
+	shaving_mirror: "刮鬍鏡／小鏡子",
+	sextant: "六分儀",
+	emergency_rations: "緊急糧食",
+	sea_chart: "海圖",
+	floating_cushion: "可漂浮的坐墊",
+	rope: "繩子",
+	chocolate_bars: "巧克力棒",
+	waterproof_sheet: "防水塑膠布",
+	fishing_rod: "釣魚竿",
+	shark_repellent: "驅鯊劑",
+	rum: "一瓶蘭姆酒",
+	vhf_radio: "VHF 無線電"
 };
+const DEFAULT_RANKING_ITEM_IDS = Object.keys(RANKING_LABELS);
+
+function normalizeRankingItemIds(itemIds: string[]) {
+	const validIds = new Set(DEFAULT_RANKING_ITEM_IDS);
+	const rankedValidIds = itemIds.filter((id, index) => validIds.has(id) && itemIds.indexOf(id) === index);
+	const missingIds = DEFAULT_RANKING_ITEM_IDS.filter(id => !rankedValidIds.includes(id));
+
+	return [...rankedValidIds, ...missingIds];
+}
 
 function getRoomName() {
 	const params = new URLSearchParams(window.location.search);
@@ -214,7 +233,7 @@ export function AdminPage() {
 
 	const boardSocket = useAdminRealtimeSocket("board", roomName, recordEvent);
 	const presenceSocket = useAdminRealtimeSocket("presence", roomName, recordEvent);
-	const rankingItems = boardState?.ranking?.items || [];
+	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || []);
 	const publicBlocks = boardState?.public_blocks || [];
 	const privateBlocks = boardState?.private_blocks || [];
 
