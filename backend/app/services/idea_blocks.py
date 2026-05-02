@@ -134,7 +134,7 @@ def _parse_llm_json_payload(raw_content: str) -> Any:
 async def generate_and_save_idea_blocks(
     db: AsyncSession,
     *,
-    session_id: str,
+    session_name: str,
     participant_id: str,
     visibility: Visibility,
     source_transcript_ids: list[str],
@@ -150,7 +150,7 @@ async def generate_and_save_idea_blocks(
         title = _title_from_content(block_data["content"])
         idea_block = IdeaBlock(
             user_id=user_id,
-            session_name=session_id,
+            session_name=session_name,
             title=title,
             summary=summary,
             transcript_id=None,
@@ -174,7 +174,7 @@ async def generate_and_save_idea_blocks(
 async def generate_idea_blocks_from_stream_transcripts(
     db: AsyncSession,
     *,
-    session_id: str,
+    session_name: str,
     participant_id: str,
     visibility: Visibility,
     transcripts: list[Any],
@@ -185,7 +185,7 @@ async def generate_idea_blocks_from_stream_transcripts(
 
     idea_blocks = await generate_and_save_idea_blocks(
         db,
-        session_id=session_id,
+        session_name=session_name,
         participant_id=participant_id,
         visibility=visibility,
         source_transcript_ids=[str(item.segment_id) for item in transcripts if getattr(item, "segment_id", None)],

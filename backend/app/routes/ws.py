@@ -11,66 +11,66 @@ from ..services.streaming import handle_audio_stream_websocket
 router = APIRouter()
 
 
-@router.websocket("/ws/sessions/{session_id}/audio")
+@router.websocket("/ws/sessions/{session_name}/audio")
 async def audio_websocket(
     websocket: WebSocket,
-    session_id: str,
+    session_name: str,
     participant_id: str = Query(...),
 ) -> None:
     await handle_audio_websocket(
         websocket,
-        session_id=session_id,
+        session_id=session_name,
         participant_id=participant_id,
     )
 
 
-@router.websocket("/ws/sessions/{session_id}/board")
+@router.websocket("/ws/sessions/{session_name}/board")
 async def board_websocket(
     websocket: WebSocket,
-    session_id: str,
+    session_name: str,
     participant_id: str = Query(...),
 ) -> None:
     await handle_board_websocket(
         websocket,
-        session_id=session_id,
+        session_id=session_name,
         participant_id=participant_id,
     )
 
 
-@router.websocket("/ws/sessions/{session_id}/cue")
+@router.websocket("/ws/sessions/{session_name}/cue")
 async def cue_websocket(
     websocket: WebSocket,
-    session_id: str,
+    session_name: str,
     participant_id: str = Query(...),
 ) -> None:
     await handle_cue_websocket(
         websocket,
-        session_id=session_id,
+        session_id=session_name,
         participant_id=participant_id,
     )
 
 
-@router.websocket("/ws/sessions/{session_id}/presence")
+@router.websocket("/ws/sessions/{session_name}/presence")
 async def presence_websocket(
     websocket: WebSocket,
-    session_id: str,
+    session_name: str,
     participant_id: str = Query(...),
 ) -> None:
     await handle_presence_websocket(
         websocket,
-        session_id=session_id,
+        session_id=session_name,
         participant_id=participant_id,
     )
 
 
-@router.websocket("/sessions/{session_id}/audio-stream")
+@router.websocket("/sessions/{session_name}/audio-stream")
 async def audio_stream_websocket(
     websocket: WebSocket,
-    session_id: str,
+    session_name: str,
     participant_id: str = Query(...),
 ) -> None:
     await handle_audio_stream_websocket(
         websocket,
-        session_id=session_id,
+        session_name=session_name,
         participant_id=participant_id,
     )

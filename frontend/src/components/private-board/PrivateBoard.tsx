@@ -127,7 +127,7 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 			const response = await fetch(apiUrl("/api/board/block"), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ sessionId })
+				body: JSON.stringify({ sessionName: sessionId })
 			});
 
 			if (!response.ok) {

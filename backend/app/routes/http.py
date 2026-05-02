@@ -38,7 +38,7 @@ COMMON_ERROR_RESPONSES = {
 def serialize_idea_block(block: Any) -> dict[str, Any]:
     return {
         "id": block.id,
-        "session_id": block.session_id,
+        "session_name": block.session_name,
         "participant_id": block.participant_id,
         "visibility": block.visibility.value,
         "content": block.content,
@@ -55,15 +55,20 @@ def build_transcript_lines_for_frontend(transcript_text: str) -> list[str]:
     return lines or [transcript_text.strip()]
 
 
-def resolve_payload_session_id(payload: Any) -> str:
-    session_id = (getattr(payload, "sessionId", None) or getattr(payload, "roomId", None) or "").strip()
-    if not session_id:
-        raise ApiError(400, "INVALID_PAYLOAD", "sessionId is required", details={"field": "sessionId"})
-    return session_id
+def resolve_payload_session_name(payload: Any) -> str:
+    session_name = (
+        getattr(payload, "sessionName", None)
+        or getattr(payload, "sessionId", None)
+        or getattr(payload, "roomId", None)
+        or ""
+    ).strip()
+    if not session_name:
+        raise ApiError(400, "INVALID_PAYLOAD", "sessionName is required", details={"field": "sessionName"})
+    return session_name
 
 
 @router.post(
-    "/sessions/{session_id}/idea-blocks/generate",
+    "/sessions/{session_name}/idea-blocks/generate",
     status_code=201,
     response_model=IdeaBlockGenerateResponse,
     responses=COMMON_ERROR_RESPONSES,
@@ -74,7 +79,7 @@ def resolve_payload_session_id(payload: Any) -> str:
     ),
 )
 async def generate_idea_blocks(
-    session_id: str,
+    session_name: str,
     payload: IdeaBlockGenerateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockGenerateResponse:
@@ -91,7 +96,7 @@ async def generate_idea_blocks(
     try:
         idea_blocks = await generate_and_save_idea_blocks(
             db,
-            session_id=session_id,
+            session_name=session_name,
             participant_id=payload.participant_id,
             visibility=payload.visibility,
             source_transcript_ids=[],
@@ -123,7 +128,7 @@ async def create_frontend_board_block(
     payload: FrontendBoardBlockCreateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendBoardBlockCreateResponse:
-    session_id = resolve_payload_session_id(payload)
+    session_name = resolve_payload_session_name(payload)
 
     transcript_text = (payload.transcript_text or "").strip()
     using_frontend_mock_transcript = False
@@ -143,7 +148,7 @@ async def create_frontend_board_block(
     try:
         idea_blocks = await generate_and_save_idea_blocks(
             db,
-            session_id=session_id,
+            session_name=session_name,
             participant_id=participant_id,
             visibility=payload.visibility,
             source_transcript_ids=[],
@@ -160,7 +165,7 @@ async def create_frontend_board_block(
     if using_frontend_mock_transcript:
         for index, line in enumerate(FRONTEND_MOCK_TRANSCRIPT_LINES, start=1):
             await board_manager.broadcast(
-                session_id,
+                session_name,
                 {
                     "type": "new_transcript_line",
                     "payload": {"id": f"mock-t{index}", "text": line},
@@ -170,7 +175,7 @@ async def create_frontend_board_block(
         transcript_event_id = str(uuid4())
         for index, line in enumerate(build_transcript_lines_for_frontend(transcript_text), start=1):
             await board_manager.broadcast(
-                session_id,
+                session_name,
                 {
                     "type": "new_transcript_line",
                     "payload": {"id": f"manual-{transcript_event_id}-t{index}", "text": line},
@@ -179,7 +184,7 @@ async def create_frontend_board_block(
 
     for block in idea_blocks:
         await board_manager.broadcast(
-            session_id,
+            session_name,
             {
                 "type": "new_idea_block",
                 "payload": serialize_frontend_board_idea_block(block),
@@ -204,13 +209,13 @@ async def seed_frontend_board_with_mock_transcript(
     payload: FrontendMockBoardSeedRequest,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendMockBoardSeedResponse:
-    session_id = resolve_payload_session_id(payload)
+    session_name = resolve_payload_session_name(payload)
 
     participant_id = (payload.participantId or "1").strip() or "1"
 
     for index, line in enumerate(FRONTEND_MOCK_TRANSCRIPT_LINES, start=1):
         await board_manager.broadcast(
-            session_id,
+            session_name,
             {
                 "type": "new_transcript_line",
                 "payload": {"id": f"mock-t{index}", "text": line},
@@ -220,7 +225,7 @@ async def seed_frontend_board_with_mock_transcript(
     try:
         idea_blocks = await generate_and_save_idea_blocks(
             db,
-            session_id=session_id,
+            session_name=session_name,
             participant_id=participant_id,
             visibility=payload.visibility,
             source_transcript_ids=[],
@@ -236,7 +241,7 @@ async def seed_frontend_board_with_mock_transcript(
 
     for block in idea_blocks:
         await board_manager.broadcast(
-            session_id,
+            session_name,
             {
                 "type": "new_idea_block",
                 "payload": serialize_frontend_board_idea_block(block),
@@ -288,7 +293,7 @@ async def update_frontend_board_idea_block(
         raise ApiError(500, "INTERNAL_SERVER_ERROR", "Unexpected server error") from exc
 
     await board_manager.broadcast(
-        block.session_id,
+        block.session_name,
         {
             "type": "update_idea_block",
             "payload": serialize_frontend_board_idea_block_update(block),

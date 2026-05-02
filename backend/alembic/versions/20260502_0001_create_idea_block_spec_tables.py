@@ -25,7 +25,7 @@ def upgrade() -> None:
         "transcript",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("user_id", sa.BigInteger(), nullable=False),
-        sa.Column("session_id", sa.BigInteger(), nullable=False),
+        sa.Column("session_name", sa.String(length=255), nullable=False),
         sa.Column("time_stamp", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("transcript", sa.Text(), nullable=False),
     )
@@ -67,11 +67,11 @@ def upgrade() -> None:
     op.create_index("idx_idea_blocks_session_name", "idea_blocks", ["session_name"])
     op.create_index("idx_idea_blocks_similarity_id", "idea_blocks", ["similarity_id"])
     op.create_index("idx_transcript_user_id", "transcript", ["user_id"])
-    op.create_index("idx_transcript_session_id", "transcript", ["session_id"])
+    op.create_index("idx_transcript_session_name", "transcript", ["session_name"])
 
 
 def downgrade() -> None:
-    op.drop_index("idx_transcript_session_id", table_name="transcript")
+    op.drop_index("idx_transcript_session_name", table_name="transcript")
     op.drop_index("idx_transcript_user_id", table_name="transcript")
     op.drop_index("idx_idea_blocks_similarity_id", table_name="idea_blocks")
     op.drop_index("idx_idea_blocks_session_name", table_name="idea_blocks")

@@ -11,7 +11,7 @@ from ..schemas import StreamTranscript
 async def save_ws_transcript_segment(
     db: AsyncSession,
     *,
-    session_id: str,
+    session_name: str,
     participant_id: str,
     visibility: Visibility,
     transcript_text: str,
@@ -20,7 +20,7 @@ async def save_ws_transcript_segment(
 ) -> StreamTranscript | None:
     transcript = Transcript(
         user_id=_numeric_id(participant_id),
-        session_id=_numeric_id(session_id),
+        session_name=session_name,
         transcript=transcript_text,
     )
 

@@ -181,7 +181,7 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
     ]
     return {
         "type": "board_state",
-        "session_id": session_id,
+        "session_name": session_id,
         "revision": state["revision"],
         "ranking": {"items": list(state["items"])},
         "public_blocks": list(blocks["public_blocks"]),
@@ -209,7 +209,7 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
     await board_manager.send_to(
         session_id,
         participant_id,
-        {"type": "joined", "session_id": session_id, "participant_id": participant_id},
+        {"type": "joined", "session_name": session_id, "participant_id": participant_id},
     )
 
     try:
@@ -350,7 +350,7 @@ async def _handle_board_block_message(
 
 async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
     await cue_manager.connect(session_id, participant_id, websocket)
-    await cue_manager.send_to(session_id, participant_id, {"type": "joined", "session_id": session_id, "participant_id": participant_id})
+    await cue_manager.send_to(session_id, participant_id, {"type": "joined", "session_name": session_id, "participant_id": participant_id})
 
     try:
         while True:
@@ -366,7 +366,7 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
             if message_type == "ping":
                 await cue_manager.send_to(session_id, participant_id, {"type": "pong"})
             elif message_type == "join":
-                await cue_manager.send_to(session_id, participant_id, {"type": "joined", "session_id": session_id, "participant_id": participant_id})
+                await cue_manager.send_to(session_id, participant_id, {"type": "joined", "session_name": session_id, "participant_id": participant_id})
             elif message_type == "cue_response":
                 cue_responses[session_id].append(
                     {
@@ -390,7 +390,7 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
         participant_id,
         {
             "type": "presence_state",
-            "session_id": session_id,
+            "session_name": session_id,
             "participants": presence_manager.get_participants(session_id),
         },
     )
@@ -423,7 +423,7 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
                     participant_id,
                     {
                         "type": "presence_state",
-                        "session_id": session_id,
+                        "session_name": session_id,
                         "participants": presence_manager.get_participants(session_id),
                     },
                 )
@@ -481,7 +481,7 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
             now = utc_now()
             saved_segment = await save_ws_transcript_segment(
                 db,
-                session_id=session_id,
+                session_name=session_id,
                 participant_id=participant_id,
                 visibility=Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC,
                 transcript_text=transcript_text,
@@ -548,7 +548,7 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     await audio_manager.send_to(
                         session_id,
                         participant_id,
-                        {"type": "joined", "session_id": session_id, "participant_id": participant_id},
+                        {"type": "joined", "session_name": session_id, "participant_id": participant_id},
                     )
                 elif message_type == "speaking_start":
                     state.is_speaking = True
@@ -573,7 +573,7 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
             if transcript_segments:
                 await generate_idea_blocks_from_stream_transcripts(
                     db,
-                    session_id=session_id,
+                    session_name=session_id,
                     participant_id=participant_id,
                     visibility=Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC,
                     transcripts=transcript_segments,

@@ -31,7 +31,7 @@ class IdeaBlockGenerateRequest(BaseModel):
 
 class GeneratedIdeaBlockResponse(BaseModel):
     id: int
-    session_id: str
+    session_name: str
     participant_id: str
     visibility: Literal["public", "private"]
     content: str
@@ -47,7 +47,9 @@ class IdeaBlockGenerateResponse(BaseModel):
 
 
 class FrontendBoardBlockCreateRequest(BaseModel):
-    roomId: str
+    sessionName: str | None = None
+    sessionId: str | None = None
+    roomId: str | None = None
     participantId: str | None = None
     transcript_text: str | None = Field(
         default=None,
@@ -89,7 +91,9 @@ class IdeaBlockUpdateResponse(BaseModel):
 
 
 class FrontendMockBoardSeedRequest(BaseModel):
-    roomId: str
+    sessionName: str | None = None
+    sessionId: str | None = None
+    roomId: str | None = None
     participantId: str | None = None
     visibility: Visibility = Field(
         default=Visibility.PRIVATE,

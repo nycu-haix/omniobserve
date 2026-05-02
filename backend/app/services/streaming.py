@@ -16,18 +16,18 @@ from .idea_blocks import generate_and_save_idea_blocks
 from .transcripts import save_ws_transcript_segment
 
 
-def parse_stream_start_message(raw_text: str, *, expected_session_id: str | None = None) -> StreamContext:
+def parse_stream_start_message(raw_text: str, *, expected_session_name: str | None = None) -> StreamContext:
     payload = json.loads(raw_text)
     if not isinstance(payload, dict) or payload.get("type") != "start":
         raise ValueError("First WebSocket message must be a start message")
 
-    if expected_session_id is not None:
-        for field_name in ("sessionId", "roomName"):
-            metadata_session_id = payload.get(field_name)
-            if metadata_session_id is None or str(metadata_session_id).strip() == "":
+    if expected_session_name is not None:
+        for field_name in ("sessionName", "sessionId", "roomName"):
+            metadata_session_name = payload.get(field_name)
+            if metadata_session_name is None or str(metadata_session_name).strip() == "":
                 continue
-            if str(metadata_session_id).strip() != expected_session_id:
-                raise ValueError(f"start.{field_name} must match URL session_id")
+            if str(metadata_session_name).strip() != expected_session_name:
+                raise ValueError(f"start.{field_name} must match URL session_name")
 
     scope_raw = payload.get("scope")
     try:
@@ -91,7 +91,7 @@ async def send_ws_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> No
 async def handle_audio_stream_websocket(
     websocket: WebSocket,
     *,
-    session_id: str,
+    session_name: str,
     participant_id: str,
 ) -> None:
     await websocket.accept()
@@ -129,7 +129,7 @@ async def handle_audio_stream_websocket(
                 if transcript_text:
                     saved_segment = await save_ws_transcript_segment(
                         db,
-                        session_id=session_id,
+                        session_name=session_name,
                         participant_id=participant_id,
                         visibility=stream_context.scope,
                         transcript_text=transcript_text,
@@ -152,10 +152,10 @@ async def handle_audio_stream_websocket(
 
         try:
             first_message = await websocket.receive_text()
-            stream_context = parse_stream_start_message(first_message, expected_session_id=session_id)
+            stream_context = parse_stream_start_message(first_message, expected_session_name=session_name)
             logger.info(
-                "Audio stream started session_id=%s participant_id=%s encoding=%s sample_rate=%s channels=%s",
-                session_id,
+                "Audio stream started session_name=%s participant_id=%s encoding=%s sample_rate=%s channels=%s",
+                session_name,
                 participant_id,
                 stream_context.encoding,
                 stream_context.sample_rate,
@@ -232,7 +232,7 @@ async def handle_audio_stream_websocket(
                     if transcript_text_all:
                         generated_blocks = await generate_and_save_idea_blocks(
                             db,
-                            session_id=session_id,
+                            session_name=session_name,
                             participant_id=participant_id,
                             visibility=stream_context.scope,
                             source_transcript_ids=[item.segment_id for item in transcript_segments],
@@ -242,7 +242,7 @@ async def handle_audio_stream_websocket(
                         idea_blocks_payload = [
                             {
                                 "id": block.id,
-                                "session_id": block.session_id,
+                                "session_name": block.session_name,
                                 "participant_id": block.participant_id,
                                 "visibility": block.visibility.value,
                                 "content": block.content,
@@ -278,8 +278,8 @@ async def handle_audio_stream_websocket(
 
         except WebSocketDisconnect:
             logger.info(
-                "WebSocket disconnected unexpectedly, flushing buffered audio for session_id=%s participant_id=%s",
-                session_id,
+                "WebSocket disconnected unexpectedly, flushing buffered audio for session_name=%s participant_id=%s",
+                session_name,
                 participant_id,
             )
             await flush_buffer(force=True)

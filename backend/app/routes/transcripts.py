@@ -34,13 +34,13 @@ async def read_transcript(
 
 
 @router.get(
-    "/sessions/{session_id}/transcripts",
+    "/sessions/{session_name}/transcripts",
     response_model=list[TranscriptResponse],
-    summary="List Transcripts By Session",
+    summary="List Transcripts By Session Name",
 )
 async def read_session_transcripts(
-    session_id: int,
+    session_name: str,
     user_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[TranscriptResponse]:
-    return await list_transcripts_by_session(session_id, user_id, db)
+    return await list_transcripts_by_session(session_name, user_id, db)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, Text, func
+from sqlalchemy import BigInteger, DateTime, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -16,7 +16,7 @@ class Transcript(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
-    session_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    session_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     time_stamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

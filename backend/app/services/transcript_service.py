@@ -22,11 +22,11 @@ async def get_transcript(transcript_id: int, db: AsyncSession) -> Transcript:
 
 
 async def list_transcripts_by_session(
-    session_id: int,
+    session_name: str,
     user_id: int | None,
     db: AsyncSession,
 ) -> list[Transcript]:
-    stmt = select(Transcript).where(Transcript.session_id == session_id)
+    stmt = select(Transcript).where(Transcript.session_name == session_name)
     if user_id is not None:
         stmt = stmt.where(Transcript.user_id == user_id)
     stmt = stmt.order_by(Transcript.time_stamp.asc(), Transcript.id.asc())
