@@ -9,3 +9,6 @@ torchaudio==2.4.1+cu118
 uvicorn[standard]
 websockets
 huggingface_hub
+transformers
+accelerate
+sentencepiece
