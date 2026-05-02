@@ -196,7 +196,7 @@ export default function MeetingRoom() {
 
 	return (
 		<main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_560px]">
-			<section className="grid min-w-0 grid-rows-[minmax(180px,1fr)_minmax(0,2fr)_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[390px_minmax(0,1fr)_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
 					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
 				</div>
