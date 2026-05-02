@@ -54,4 +54,48 @@ async def startup() -> None:
             await conn.execute(sql_text("DROP TYPE IF EXISTS visibility_enum CASCADE"))
             await conn.execute(sql_text("DROP TYPE IF EXISTS idea_visibility_enum CASCADE"))
             await conn.execute(sql_text("DROP TYPE IF EXISTS bullet_visibility_enum CASCADE"))
+        await conn.execute(
+            sql_text(
+                """
+                DO $$
+                BEGIN
+                    IF to_regclass('public.transcript') IS NOT NULL THEN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'transcript'
+                              AND column_name = 'session_id'
+                        ) AND NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'transcript'
+                              AND column_name = 'session_name'
+                        ) THEN
+                            ALTER TABLE transcript RENAME COLUMN session_id TO session_name;
+                        END IF;
+
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'transcript'
+                              AND column_name = 'session_name'
+                        ) THEN
+                            ALTER TABLE transcript ADD COLUMN session_name varchar(255);
+                            UPDATE transcript SET session_name = 'default_session' WHERE session_name IS NULL;
+                            ALTER TABLE transcript ALTER COLUMN session_name SET NOT NULL;
+                        END IF;
+
+                        ALTER TABLE transcript
+                        ALTER COLUMN session_name TYPE varchar(255)
+                        USING session_name::text;
+                    END IF;
+                END $$;
+                """
+            )
+        )
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(sql_text("DROP INDEX IF EXISTS idx_transcript_session_id"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_session_name ON transcript(session_name)"))
