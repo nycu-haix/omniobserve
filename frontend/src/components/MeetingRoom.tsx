@@ -103,6 +103,7 @@ function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
 
 export default function MeetingRoom() {
 	const [micMode, setMicMode] = useState<MicMode>("off");
+	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
 	const [items, setItems] = useState(INITIAL_ITEMS);
 	const [rankingRevision, setRankingRevision] = useState(0);
 	const isDraggingRef = useRef(false);
@@ -113,6 +114,32 @@ export default function MeetingRoom() {
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+
+	useEffect(() => {
+		const queryPermission = async () => {
+			try {
+				const result = await navigator.permissions.query({ name: "microphone" as PermissionName });
+				setMicPermission(result.state);
+				result.onchange = () => {
+					setMicPermission(result.state);
+				};
+			} catch (err) {
+				console.error("Failed to query microphone permission", err);
+			}
+		};
+		void queryPermission();
+	}, []);
+
+	const requestMicPermission = async () => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			stream.getTracks().forEach(track => track.stop());
+			setMicPermission("granted");
+		} catch (err) {
+			console.error("Failed to get mic permission", err);
+			setMicPermission("denied");
+		}
+	};
 
 	const handleMic = async (mode: MicMode) => {
 		const shouldRetryCurrentMode = mode !== "off" && micMode === mode && hasAudioConnectionError;
@@ -231,6 +258,14 @@ export default function MeetingRoom() {
 				</section>
 
 				<div className="relative flex items-center justify-center">
+					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
+						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						{micPermission !== "granted" && micPermission !== "unknown" && (
+							<button onClick={() => void requestMicPermission()} className="text-primary hover:underline hover:text-primary/80 transition-colors text-left">
+								{micPermission === "denied" ? "麥克風已拒絕 (需至瀏覽器開啟)" : "點擊允許麥克風權限"}
+							</button>
+						)}
+					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2">
 						<Button variant={micMode === "public" ? "default" : "outline"} onClick={() => void handleMic("public")}>
 							<Mic className="h-4 w-4" />
