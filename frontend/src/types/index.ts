@@ -15,6 +15,7 @@ export interface IdeaBlock {
 export interface TranscriptLine {
 	id: string;
 	text: string;
+	source?: "public" | "private";
 	linkedBlockId?: string;
 }
 
@@ -25,4 +26,4 @@ export interface SimilarityCueData {
 }
 
 export type MicMode = "public" | "private" | "off";
-export type BoardTab = "transcript" | "ideablock";
+export type BoardTab = "websocket-transcript" | "transcript" | "ideablock";

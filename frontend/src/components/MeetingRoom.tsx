@@ -2,11 +2,10 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Mic, MicOff, Radio } from "lucide-react";
+import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
-import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
@@ -111,14 +110,13 @@ export default function MeetingRoom() {
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
-	const { isConnected: isPresenceConnected } = usePresenceWebSocket(sessionId, participantId);
-	const { startAudioStream, stopAudioStream, isAudioStreaming, isAudioConnected, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
+	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-	const latestTranscript = typeof lastAudioMessage?.text === "string" ? lastAudioMessage.text : null;
-	const audioStatusText = audioError ? `音訊錯誤：${audioError}` : isAudioConnected ? "音訊後端已連線" : isAudioStreaming ? "音訊串流啟動中" : "音訊串流未啟動";
+	const hasAudioConnectionError = micMode !== "off" && !!audioError;
 
 	const handleMic = async (mode: MicMode) => {
-		const nextMode = mode === "off" ? "off" : micMode === mode ? "off" : mode;
+		const shouldRetryCurrentMode = mode !== "off" && micMode === mode && hasAudioConnectionError;
+		const nextMode = shouldRetryCurrentMode ? mode : mode === "off" ? "off" : micMode === mode ? "off" : mode;
 
 		setMicMode(nextMode);
 
@@ -232,7 +230,7 @@ export default function MeetingRoom() {
 					</DndContext>
 				</section>
 
-				<div className="grid gap-2">
+				<div className="relative flex items-center justify-center">
 					<div className="flex flex-wrap items-center justify-center gap-2">
 						<Button variant={micMode === "public" ? "default" : "outline"} onClick={() => void handleMic("public")}>
 							<Mic className="h-4 w-4" />
@@ -247,17 +245,16 @@ export default function MeetingRoom() {
 							靜音
 						</Button>
 					</div>
-
-					<div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-						<div>{audioStatusText}</div>
-						<div>Presence：{isPresenceConnected ? "已連線" : "未連線"}</div>
-						{latestTranscript && <div className="mt-1 text-foreground">最新逐字稿：{latestTranscript}</div>}
-					</div>
+					{hasAudioConnectionError && (
+						<AlertCircle className="absolute right-0 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
+							<title>{audioError}</title>
+						</AlertCircle>
+					)}
 				</div>
 			</section>
 
 			<aside className="min-h-0">
-				<PrivateBoard sessionId={sessionId} lastMessage={lastMessage} isConnected={isConnected} />
+				<PrivateBoard sessionId={sessionId} participantId={participantId} micMode={micMode} lastMessage={lastMessage} lastAudioMessage={lastAudioMessage} isConnected={isConnected} />
 			</aside>
 		</main>
 	);

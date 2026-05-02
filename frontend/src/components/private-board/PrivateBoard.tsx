@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, MicMode, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
@@ -11,7 +11,10 @@ import { TranscriptLine } from "./TranscriptLine";
 
 interface PrivateBoardProps {
 	sessionId: string;
+	participantId: string;
+	micMode: MicMode;
 	lastMessage: object | null;
+	lastAudioMessage: object | null;
 	isConnected: boolean;
 }
 
@@ -21,6 +24,30 @@ type BoardMessage =
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityCueData };
 
+interface TranscriptResponse {
+	id: number;
+	user_id: number;
+	session_name: string;
+	time_stamp: string;
+	transcript: string;
+}
+
+type AudioTranscriptMessage =
+	| {
+			type: "transcript_update";
+			transcript_segment_id?: string | number | null;
+			mic_mode?: string | null;
+			scope?: string | null;
+			text?: string;
+	  }
+	| {
+			type: "transcript";
+			segment_id?: string | number | null;
+			mic_mode?: string | null;
+			scope?: string | null;
+			text?: string;
+	  };
+
 function isBoardMessage(message: object | null): message is BoardMessage {
 	if (!message || !("type" in message) || !("payload" in message)) {
 		return false;
@@ -29,19 +56,134 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 	return message.type === "new_idea_block" || message.type === "update_idea_block" || message.type === "new_transcript_line" || message.type === "similarity_cue";
 }
 
+function isAudioTranscriptMessage(message: object | null): message is AudioTranscriptMessage {
+	return (
+		!!message && "type" in message && (message.type === "transcript_update" || message.type === "transcript") && "text" in message && typeof message.text === "string" && message.text.trim().length > 0
+	);
+}
+
 const fallbackBlock = (): IdeaBlock => ({
 	id: `local-${Date.now()}`,
 	summary: "正在生成...",
 	status: "generating"
 });
 
-export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoardProps) {
+function buildTranscriptUrl(sessionId: string, participantId: string): string | null {
+	const userId = Number(participantId);
+
+	if (!Number.isInteger(userId)) {
+		return null;
+	}
+
+	const path = `/api/sessions/${encodeURIComponent(sessionId)}/transcripts`;
+	return apiUrl(`${path}?user_id=${encodeURIComponent(String(userId))}`);
+}
+
+function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType {
+	return {
+		id: String(item.id),
+		text: item.transcript
+	};
+}
+
+function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage, fallbackMicMode: MicMode): TranscriptLineType["source"] {
+	const source = message.mic_mode ?? message.scope ?? fallbackMicMode;
+	if (source === "public" || source === "private") {
+		return source;
+	}
+	return undefined;
+}
+
+function audioTranscriptMessageToLine(message: AudioTranscriptMessage, fallbackMicMode: MicMode): TranscriptLineType {
+	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
+	return {
+		id: segmentId == null ? `audio-${Date.now()}` : `audio-${String(segmentId)}`,
+		source: transcriptSourceFromAudioMessage(message, fallbackMicMode),
+		text: message.text?.trim() ?? ""
+	};
+}
+
+function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineType): TranscriptLineType[] {
+	const normalizedText = line.text.trim();
+	if (!normalizedText) {
+		return lines;
+	}
+
+	const existingLine = lines.find(item => item.id === line.id);
+	if (!existingLine) {
+		const duplicateTextLine = lines.find(item => item.text.trim() === normalizedText && item.source === line.source);
+		if (duplicateTextLine) {
+			return lines;
+		}
+		return [...lines, { ...line, text: normalizedText }];
+	}
+	if (existingLine.text.trim() === normalizedText) {
+		return lines;
+	}
+	return lines.map(item => (item.id === line.id ? { ...line, text: normalizedText } : item));
+}
+
+function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
+	return nextLines.reduce((lines, line) => appendTranscriptLine(lines, line), baseLines);
+}
+
+function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
+	return (
+		<div className="grid gap-1">
+			{lines.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">{emptyText}</div>}
+			{lines.map(line => (
+				<TranscriptLine key={line.id} line={line} onJumpToBlock={onJumpToBlock} />
+			))}
+		</div>
+	);
+}
+
+export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, lastAudioMessage, isConnected }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
+	const [websocketTranscriptLines, setWebsocketTranscriptLines] = useState<TranscriptLineType[]>([]);
+	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+	useEffect(() => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			return;
+		}
+
+		const controller = new AbortController();
+		setTranscriptLines([]);
+
+		async function loadTranscripts() {
+			try {
+				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
+				if (!transcriptUrl) {
+					setTranscriptLines([]);
+					return;
+				}
+
+				const response = await fetch(transcriptUrl, { signal: controller.signal });
+				if (!response.ok) {
+					throw new Error("Failed to load transcripts");
+				}
+
+				const transcriptLinesFromDb = ((await response.json()) as TranscriptResponse[]).map(transcriptResponseToLine);
+				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.warn("[private-board] failed to load transcripts", error);
+			}
+		}
+
+		void loadTranscripts();
+
+		return () => controller.abort();
+	}, [participantId, sessionId, transcriptRefreshKey]);
+
 	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
@@ -70,16 +212,7 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setTranscriptLines(prev => {
-					const existingLine = prev.find(line => line.id === lastMessage.payload.id);
-					if (!existingLine) {
-						return [...prev, lastMessage.payload];
-					}
-					if (existingLine.text === lastMessage.payload.text) {
-						return prev;
-					}
-					return [...prev, { ...lastMessage.payload, id: `${lastMessage.payload.id}-${Date.now()}` }];
-				});
+				setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, lastMessage.payload));
 			}
 
 			if (lastMessage.type === "similarity_cue") {
@@ -90,6 +223,15 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 
 		return () => window.clearTimeout(timer);
 	}, [lastMessage]);
+
+	useEffect(() => {
+		if (!isAudioTranscriptMessage(lastAudioMessage)) {
+			return;
+		}
+
+		setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, audioTranscriptMessageToLine(lastAudioMessage, micMode)));
+		setTranscriptRefreshKey(current => current + 1);
+	}, [lastAudioMessage, micMode]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -143,6 +285,9 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex rounded-lg bg-muted p-1">
+						<Button variant={activeTab === "websocket-transcript" ? "secondary" : "ghost"} onClick={() => setActiveTab("websocket-transcript")}>
+							逐字稿 WebSocket
+						</Button>
 						<Button variant={activeTab === "transcript" ? "secondary" : "ghost"} onClick={() => setActiveTab("transcript")}>
 							逐字稿
 						</Button>
@@ -159,7 +304,9 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 				</header>
 
 				<ScrollArea className="min-h-0 flex-1 p-3">
-					{activeTab === "ideablock" ? (
+					{activeTab === "websocket-transcript" ? (
+						renderTranscriptLines(websocketTranscriptLines, "尚無 WebSocket 逐字稿", jumpToBlock)
+					) : activeTab === "ideablock" ? (
 						<div className="grid gap-2">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
@@ -174,12 +321,7 @@ export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoa
 							))}
 						</div>
 					) : (
-						<div className="grid gap-1">
-							{transcriptLines.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無逐字稿</div>}
-							{transcriptLines.map(line => (
-								<TranscriptLine key={line.id} line={line} onJumpToBlock={jumpToBlock} />
-							))}
-						</div>
+						renderTranscriptLines(transcriptLines, "尚無逐字稿", jumpToBlock)
 					)}
 				</ScrollArea>
 			</section>

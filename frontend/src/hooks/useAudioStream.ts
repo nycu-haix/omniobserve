@@ -102,7 +102,7 @@ export function useAudioStream(
 	displayName?: string
 ): {
 	startAudioStream: (mode: AudioStreamMode) => Promise<void>;
-	stopAudioStream: () => void;
+	stopAudioStream: () => Promise<void>;
 	isAudioStreaming: boolean;
 	isAudioConnected: boolean;
 	lastAudioMessage: AudioStreamMessage | null;
@@ -124,6 +124,7 @@ export function useAudioStream(
 	const sentChunksRef = useRef(0);
 	const stoppingRef = useRef(false);
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
+	const stoppingPromiseRef = useRef<Promise<void> | null>(null);
 
 	const cleanupAudioResources = useCallback(() => {
 		processorNodeRef.current?.disconnect();
@@ -154,6 +155,19 @@ export function useAudioStream(
 		sentChunksRef.current = 0;
 	}, []);
 
+	const flushPendingAudioSamples = useCallback(() => {
+		const socket = socketRef.current;
+		const pending = pendingSamplesRef.current;
+
+		if (!socket || socket.readyState !== WebSocket.OPEN || pending.length === 0) {
+			pendingSamplesRef.current = new Float32Array(0);
+			return;
+		}
+
+		socket.send(pending.buffer as ArrayBuffer);
+		pendingSamplesRef.current = new Float32Array(0);
+	}, []);
+
 	const sendStopMessage = useCallback(() => {
 		const socket = socketRef.current;
 		const meta = activeMetaRef.current;
@@ -179,32 +193,91 @@ export function useAudioStream(
 		socket.send(JSON.stringify(stopMessage));
 	}, []);
 
-	const stopAudioStream = useCallback(() => {
-		stoppingRef.current = true;
-
-		try {
-			sendStopMessage();
-		} catch (error) {
-			console.warn("[audio-ws] failed to send stop message", error);
+	const waitForAudioStopAck = useCallback((socket: WebSocket): Promise<void> => {
+		if (socket.readyState === WebSocket.CLOSED) {
+			return Promise.resolve();
 		}
 
-		if (socketRef.current) {
+		return new Promise(resolve => {
+			let done = false;
+			const timeout = window.setTimeout(() => finish(), 5000);
+
+			const finish = () => {
+				if (done) {
+					return;
+				}
+				done = true;
+				window.clearTimeout(timeout);
+				socket.removeEventListener("message", handleMessage);
+				socket.removeEventListener("close", finish);
+				socket.removeEventListener("error", finish);
+				resolve();
+			};
+
+			const handleMessage = (event: MessageEvent) => {
+				if (typeof event.data !== "string") {
+					return;
+				}
+				try {
+					const message = JSON.parse(event.data) as AudioStreamMessage;
+					if (message.type === "idea_blocks_update" || (message.type === "transcript_update" && message.is_final === true)) {
+						finish();
+					}
+				} catch {
+					// Ignore non-JSON messages here; the regular onmessage handler still records them.
+				}
+			};
+
+			socket.addEventListener("message", handleMessage);
+			socket.addEventListener("close", finish);
+			socket.addEventListener("error", finish);
+		});
+	}, []);
+
+	const stopAudioStream = useCallback(async () => {
+		if (stoppingPromiseRef.current) {
+			return stoppingPromiseRef.current;
+		}
+
+		stoppingPromiseRef.current = (async () => {
+			stoppingRef.current = true;
+
+			const socket = socketRef.current;
+
 			try {
-				socketRef.current.close(1000, "client_stop");
+				flushPendingAudioSamples();
+				sendStopMessage();
 			} catch (error) {
-				console.warn("[audio-ws] failed to close socket", error);
+				console.warn("[audio-ws] failed to send final audio or stop message", error);
 			}
-		}
 
-		socketRef.current = null;
+			cleanupAudioResources();
 
-		cleanupAudioResources();
+			setIsAudioConnected(false);
+			setIsAudioStreaming(false);
+			activeMetaRef.current = null;
 
-		setIsAudioConnected(false);
-		setIsAudioStreaming(false);
+			if (socket) {
+				await waitForAudioStopAck(socket);
 
-		activeMetaRef.current = null;
-	}, [cleanupAudioResources, sendStopMessage]);
+				if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+					try {
+						socket.close(1000, "client_stop");
+					} catch (error) {
+						console.warn("[audio-ws] failed to close socket", error);
+					}
+				}
+
+				if (socketRef.current === socket) {
+					socketRef.current = null;
+				}
+			}
+		})().finally(() => {
+			stoppingPromiseRef.current = null;
+		});
+
+		return stoppingPromiseRef.current;
+	}, [cleanupAudioResources, flushPendingAudioSamples, sendStopMessage, waitForAudioStopAck]);
 
 	const sendAudioSamples = useCallback((samples: Float32Array) => {
 		const socket = socketRef.current;
@@ -254,7 +327,7 @@ export function useAudioStream(
 				return;
 			}
 
-			stopAudioStream();
+			await stopAudioStream();
 
 			stoppingRef.current = false;
 			setAudioError(null);
@@ -426,7 +499,7 @@ export function useAudioStream(
 
 	useEffect(() => {
 		return () => {
-			stopAudioStream();
+			void stopAudioStream();
 		};
 	}, [stopAudioStream]);
 
