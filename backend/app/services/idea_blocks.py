@@ -2,17 +2,14 @@ import json
 import os
 import re
 from typing import Any
-from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
 from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Visibility
 from ..schemas import ApiError
-from ..utils import utc_now
 
 
 def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
@@ -26,17 +23,12 @@ def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
             continue
 
         summary = item.get("summary")
-        if summary is not None:
-            summary = str(summary).strip() or None
+        summary = str(summary).strip() if summary is not None else content
+        if not summary:
+            summary = content
 
         transcript = item.get("transcript")
-        if transcript is not None:
-            transcript = str(transcript).strip() or None
-
-        raw_bullets = item.get("bullet_points", [])
-        bullets = [str(x).strip() for x in raw_bullets if str(x).strip()]
-        if bullets:
-            logger.debug("Ignoring legacy bullet_points field from model output")
+        transcript = str(transcript).strip() if transcript is not None else None
 
         normalized.append(
             {
@@ -64,7 +56,7 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
         )
 
     system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(transcript_text=transcript_text)
-    user_prompt = "請依照系統規則輸出 JSON。"
+    user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
 
     try:
         completion = await openai_client.chat.completions.create(
@@ -151,34 +143,30 @@ async def generate_and_save_idea_blocks(
     generated_blocks = await build_idea_blocks_with_llm(transcript_text)
 
     idea_blocks: list[IdeaBlock] = []
-    now = utc_now()
+    user_id = _participant_id_to_int(participant_id)
 
     for block_data in generated_blocks:
+        summary = block_data["summary"]
+        title = _title_from_content(block_data["content"])
         idea_block = IdeaBlock(
-            id=str(uuid4()),
-            session_id=session_id,
-            participant_id=participant_id,
-            visibility=visibility,
-            transcript=block_data.get("transcript") or transcript_text,
-            content=block_data["content"],
-            summary=block_data["summary"],
-            source_transcript_ids=source_transcript_ids,
-            tags=None,
-            created_at=now,
-            updated_at=now,
+            user_id=user_id,
+            session_name=session_id,
+            title=title,
+            summary=summary,
+            transcript_id=None,
+            embedding_vector=None,
+            similarity_id=None,
         )
         db.add(idea_block)
         await db.flush()
-
         idea_blocks.append(idea_block)
 
     await db.flush()
 
     result = await db.execute(
         select(IdeaBlock)
-        .options(selectinload(IdeaBlock.bullet_points))
         .where(IdeaBlock.id.in_([item.id for item in idea_blocks]))
-        .order_by(IdeaBlock.created_at.asc())
+        .order_by(IdeaBlock.time_stamp.asc())
     )
     return list(result.scalars().all())
 
@@ -213,7 +201,7 @@ async def update_idea_block_fields(
     block_id: str,
     fields: dict[str, Any],
 ) -> IdeaBlock:
-    result = await db.execute(select(IdeaBlock).where(IdeaBlock.id == block_id))
+    result = await db.execute(select(IdeaBlock).where(IdeaBlock.id == int(block_id)))
     block = result.scalar_one_or_none()
     if block is None:
         raise ApiError(
@@ -232,23 +220,16 @@ async def update_idea_block_fields(
                 "summary cannot be empty",
                 details={"field": "summary"},
             )
-        block.content = content
+        block.summary = content
+        block.title = _title_from_content(content)
 
     if "summary" in fields:
         raw_summary = fields["summary"]
-        if raw_summary is None:
-            block.summary = None
-        else:
-            block.summary = str(raw_summary).strip() or None
+        if raw_summary is not None:
+            summary = str(raw_summary).strip()
+            if summary:
+                block.summary = summary
 
-    if "transcript" in fields:
-        raw_transcript = fields["transcript"]
-        if raw_transcript is None:
-            block.transcript = None
-        else:
-            block.transcript = str(raw_transcript).strip() or None
-
-    block.updated_at = utc_now()
     await db.flush()
     return block
 
@@ -264,8 +245,20 @@ def _build_mock_idea_blocks(transcript_text: str) -> list[dict[str, Any]] | None
 
     return [
         {
-            "content": "會議主軸是定義即時音訊到 idea blocks 的端到端流程。",
-            "summary": "重點在先穩定打通音訊到文字，再將文字整理為可操作的 idea blocks。",
+            "content": "Mock idea block",
+            "summary": content[:280],
             "transcript": content[:280],
         }
     ]
+
+
+def _title_from_content(content: str) -> str:
+    value = content.strip()[:10]
+    return value or "Idea"
+
+
+def _participant_id_to_int(participant_id: str) -> int:
+    try:
+        return int(participant_id)
+    except (TypeError, ValueError):
+        return 0

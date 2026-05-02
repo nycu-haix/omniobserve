@@ -1,0 +1,34 @@
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import Transcript
+from ..schemas import TranscriptCreate
+
+
+async def create_transcript(payload: TranscriptCreate, db: AsyncSession) -> Transcript:
+    transcript = Transcript(**payload.model_dump())
+    db.add(transcript)
+    await db.commit()
+    await db.refresh(transcript)
+    return transcript
+
+
+async def get_transcript(transcript_id: int, db: AsyncSession) -> Transcript:
+    transcript = await db.get(Transcript, transcript_id)
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="Transcript not found")
+    return transcript
+
+
+async def list_transcripts_by_session(
+    session_id: int,
+    user_id: int | None,
+    db: AsyncSession,
+) -> list[Transcript]:
+    stmt = select(Transcript).where(Transcript.session_id == session_id)
+    if user_id is not None:
+        stmt = stmt.where(Transcript.user_id == user_id)
+    stmt = stmt.order_by(Transcript.time_stamp.asc(), Transcript.id.asc())
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

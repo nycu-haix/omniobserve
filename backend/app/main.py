@@ -2,10 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text as sql_text
 
-from .config import CORS_ALLOW_CREDENTIALS, CORS_ALLOWED_ORIGINS, SKIP_DB_STARTUP, logger
+from .config import CORS_ALLOW_CREDENTIALS, CORS_ALLOWED_ORIGINS, RESET_DB_ON_STARTUP, SKIP_DB_STARTUP, logger
 from .db import engine
 from .error_handlers import register_exception_handlers
 from .models import Base
+from .routes.api_spec import router as api_spec_router
 from .routes.http import router as http_router
 from .routes.ws import router as ws_router
 
@@ -19,6 +20,7 @@ app.add_middleware(
 )
 register_exception_handlers(app)
 app.include_router(http_router)
+app.include_router(api_spec_router)
 app.include_router(ws_router)
 
 
@@ -35,12 +37,13 @@ async def startup() -> None:
 
     async with engine.begin() as conn:
         await conn.execute(sql_text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(sql_text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        if RESET_DB_ON_STARTUP:
+            logger.warning("RESET_DB_ON_STARTUP is enabled; dropping all metadata tables before startup create_all")
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.execute(sql_text("DROP TABLE IF EXISTS bullet_points CASCADE"))
+            await conn.execute(sql_text("DROP TABLE IF EXISTS transcript_segments CASCADE"))
+            await conn.execute(sql_text("DROP TYPE IF EXISTS visibility_enum CASCADE"))
+            await conn.execute(sql_text("DROP TYPE IF EXISTS idea_visibility_enum CASCADE"))
+            await conn.execute(sql_text("DROP TYPE IF EXISTS bullet_visibility_enum CASCADE"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(sql_text("ALTER TABLE idea_blocks ADD COLUMN IF NOT EXISTS transcript TEXT"))
-        await conn.execute(sql_text("ALTER TABLE idea_blocks ADD COLUMN IF NOT EXISTS embedding vector(1024)"))
-        await conn.execute(
-            sql_text(
-                "CREATE INDEX IF NOT EXISTS idea_blocks_embedding_hnsw_idx "
-                "ON idea_blocks USING hnsw (embedding vector_cosine_ops)"
-            )
-        )

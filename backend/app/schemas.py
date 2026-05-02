@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import Visibility
 
@@ -23,7 +25,7 @@ class IdeaBlockGenerateRequest(BaseModel):
             "example": {
                 "participant_id": "p1",
                 "visibility": "public",
-                "transcript_text": "大家好，今天要確認 API 設計方向。",
+                "transcript_text": "請根據這段逐字稿產生 idea blocks。",
                 "use_mock_transcript": False,
             }
         }
@@ -48,8 +50,8 @@ class StreamTranscript:
     text: str
 
 
-class IdeaBlockResponse(BaseModel):
-    id: str
+class GeneratedIdeaBlockResponse(BaseModel):
+    id: int
     session_id: str
     participant_id: str
     visibility: Literal["public", "private"]
@@ -62,7 +64,7 @@ class IdeaBlockResponse(BaseModel):
 
 
 class IdeaBlockGenerateResponse(BaseModel):
-    idea_blocks: list[IdeaBlockResponse]
+    idea_blocks: list[GeneratedIdeaBlockResponse]
 
 
 class FrontendBoardBlockCreateRequest(BaseModel):
@@ -104,7 +106,132 @@ class IdeaBlockUpdateRequest(BaseModel):
 
 class IdeaBlockUpdateResponse(BaseModel):
     updated: bool
-    idea_block: IdeaBlockResponse
+    idea_block: GeneratedIdeaBlockResponse
+
+
+class TranscriptCreate(BaseModel):
+    user_id: int
+    session_id: int
+    transcript: str
+
+
+class TranscriptResponse(BaseModel):
+    id: int
+    user_id: int
+    session_id: int
+    time_stamp: datetime
+    transcript: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IdeaBlockCreate(BaseModel):
+    user_id: int
+    session_name: str
+    title: str
+    summary: str
+    transcript_id: int | None = None
+    embedding_vector: list[float] | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title_length(cls, value: str) -> str:
+        if len(value) > 10:
+            raise ValueError("title must be at most 10 characters")
+        return value
+
+    @field_validator("embedding_vector")
+    @classmethod
+    def validate_embedding_dim(cls, value: list[float] | None) -> list[float] | None:
+        if value is not None and len(value) != 1024:
+            raise ValueError("embedding_vector must contain exactly 1024 floats")
+        return value
+
+
+class IdeaBlockUpdate(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+    embedding_vector: list[float] | None = None
+    similarity_id: UUID | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title_length(cls, value: str | None) -> str | None:
+        if value is not None and len(value) > 10:
+            raise ValueError("title must be at most 10 characters")
+        return value
+
+    @field_validator("embedding_vector")
+    @classmethod
+    def validate_embedding_dim(cls, value: list[float] | None) -> list[float] | None:
+        if value is not None and len(value) != 1024:
+            raise ValueError("embedding_vector must contain exactly 1024 floats")
+        return value
+
+
+class IdeaBlockResponse(BaseModel):
+    id: int
+    user_id: int
+    session_name: str
+    time_stamp: datetime
+    title: str
+    summary: str
+    transcript_id: int | None
+    embedding_vector: list[float] | None
+    similarity_id: UUID | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarityCreate(BaseModel):
+    similarity_reason: str
+
+
+class SimilarityResponse(BaseModel):
+    id: UUID
+    similarity_reason: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SimilarityAssignRequest(BaseModel):
+    idea_block_a_id: int
+    idea_block_b_id: int
+    similarity_reason: str
+
+
+class SimilarityAssignResponse(BaseModel):
+    similarity_id: UUID
+    idea_block_a_id: int
+    idea_block_b_id: int
+    similarity_reason: str
+    action: str
+
+
+class TaskItemCreate(BaseModel):
+    idea_block_id: int
+    task_item_id: int
+
+
+class TaskItemResponse(BaseModel):
+    id: int
+    idea_block_id: int
+    task_item_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IdeaBlockToTranscriptCreate(BaseModel):
+    idea_blocks_id: int
+    transcript_id: int
+
+
+class IdeaBlockToTranscriptResponse(BaseModel):
+    id: int
+    idea_blocks_id: int
+    transcript_id: int
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FrontendMockBoardSeedRequest(BaseModel):

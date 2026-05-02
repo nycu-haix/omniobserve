@@ -1,13 +1,11 @@
 from datetime import datetime
-from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import logger
-from ..models import TranscriptSegment, Visibility
+from ..models import Transcript, Visibility
 from ..schemas import StreamTranscript
-from ..utils import utc_now
 
 
 async def save_ws_transcript_segment(
@@ -20,15 +18,10 @@ async def save_ws_transcript_segment(
     started_at: datetime,
     ended_at: datetime,
 ) -> StreamTranscript | None:
-    transcript = TranscriptSegment(
-        id=str(uuid4()),
-        session_id=session_id,
-        participant_id=participant_id,
-        visibility=visibility,
-        text=transcript_text,
-        started_at=started_at,
-        ended_at=ended_at,
-        created_at=utc_now(),
+    transcript = Transcript(
+        user_id=_numeric_id(participant_id),
+        session_id=_numeric_id(session_id),
+        transcript=transcript_text,
     )
 
     try:
@@ -39,4 +32,11 @@ async def save_ws_transcript_segment(
         logger.exception("Failed to save transcript segment from stream: %s", exc)
         return None
 
-    return StreamTranscript(segment_id=transcript.id, text=transcript.text)
+    return StreamTranscript(segment_id=str(transcript.id), text=transcript.transcript)
+
+
+def _numeric_id(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

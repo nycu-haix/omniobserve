@@ -20,9 +20,13 @@ async def handle_api_error(_: Any, exc: ApiError) -> JSONResponse:
 
 
 async def handle_validation_error(_: Any, exc: RequestValidationError) -> JSONResponse:
+    first_error = exc.errors()[0] if exc.errors() else {}
+    message = str(first_error.get("msg") or "Request validation failed")
+    if message.startswith("Value error, "):
+        message = message.removeprefix("Value error, ")
     return JSONResponse(
-        status_code=400,
-        content=error_payload("INVALID_PAYLOAD", "Request validation failed", details=exc.errors()),
+        status_code=422,
+        content={"detail": message},
     )
 
 

@@ -9,6 +9,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/omniobserve"
 )
 SKIP_DB_STARTUP = os.getenv("SKIP_DB_STARTUP", "").lower() in {"1", "true", "yes", "on"}
+RESET_DB_ON_STARTUP = os.getenv("RESET_DB_ON_STARTUP", "").lower() in {"1", "true", "yes", "on"}
 AUDIO_STORAGE_DIR = Path(os.getenv("AUDIO_STORAGE_DIR", "./storage/audio"))
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
