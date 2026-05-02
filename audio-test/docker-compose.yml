@@ -20,6 +20,16 @@ services:
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
     ports:
       - "8001:8000"
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
+      - "traefik.http.routers.vad-audio.rule=Host(`api.omni.elvismao.com`) && PathPrefix(`/sessions`)"
+      - "traefik.http.routers.vad-audio.entrypoints=websecure"
+      - "traefik.http.routers.vad-audio.tls=true"
+      - "traefik.http.routers.vad-audio.priority=100"
+      - "traefik.http.services.vad-audio.loadbalancer.server.port=8000"
+      
     volumes:
       - model-cache:/root/.cache
     environment:
