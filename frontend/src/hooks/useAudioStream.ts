@@ -124,7 +124,6 @@ export function useAudioStream(
 	const sentChunksRef = useRef(0);
 	const stoppingRef = useRef(false);
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
-	const stoppingPromiseRef = useRef<Promise<void> | null>(null);
 
 	const cleanupAudioResources = useCallback(() => {
 		processorNodeRef.current?.disconnect();
@@ -197,77 +196,67 @@ export function useAudioStream(
 	}, []);
 
 	const stopAudioStream = useCallback(async (keepAudioResources = false) => {
-		if (stoppingPromiseRef.current) {
-			return stoppingPromiseRef.current;
+		stoppingRef.current = true;
+
+		const socket = socketRef.current;
+		const meta = activeMetaRef.current;
+
+		socketRef.current = null;
+		activeMetaRef.current = null;
+
+		try {
+			if (socket && socket.readyState === WebSocket.OPEN) {
+				const pending = pendingSamplesRef.current;
+				if (pending.length > 0) {
+					let offset = 0;
+					while (offset < pending.length) {
+						const chunk = pending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
+						offset += OUTPUT_CHUNK_SIZE;
+						socket.send(chunk.buffer);
+					}
+				}
+
+				if (meta) {
+					const stopMessage = {
+						type: "stop",
+						source: sourceForMode(meta.mode),
+						scope: meta.mode,
+						agentType: agentTypeForMode(meta.mode),
+						roomName: meta.sessionId,
+						sessionName: meta.sessionId,
+						participantId: meta.participantId,
+						userId: meta.participantId,
+						displayName: meta.displayName,
+						clientId: meta.clientId
+					};
+					console.info("[audio-ws] send stop", stopMessage);
+					socket.send(JSON.stringify(stopMessage));
+				}
+			}
+		} catch (error) {
+			console.warn("[audio-ws] failed to send final audio or stop message", error);
 		}
 
-		stoppingPromiseRef.current = (async () => {
-			stoppingRef.current = true;
+		pendingSamplesRef.current = new Float32Array(0);
 
-			const socket = socketRef.current;
-			const meta = activeMetaRef.current;
+		if (!keepAudioResources) {
+			cleanupAudioResources();
+		}
 
-			socketRef.current = null;
+		setIsAudioConnected(false);
+		setIsAudioStreaming(false);
 
-			try {
-				if (socket && socket.readyState === WebSocket.OPEN) {
-					const pending = pendingSamplesRef.current;
-					if (pending.length > 0) {
-						let offset = 0;
-						while (offset < pending.length) {
-							const chunk = pending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
-							offset += OUTPUT_CHUNK_SIZE;
-							socket.send(chunk.buffer);
-						}
-					}
+		if (socket) {
+			await waitForAudioStopAck(socket);
 
-					if (meta) {
-						const stopMessage = {
-							type: "stop",
-							source: sourceForMode(meta.mode),
-							scope: meta.mode,
-							agentType: agentTypeForMode(meta.mode),
-							roomName: meta.sessionId,
-							sessionName: meta.sessionId,
-							participantId: meta.participantId,
-							userId: meta.participantId,
-							displayName: meta.displayName,
-							clientId: meta.clientId
-						};
-						console.info("[audio-ws] send stop", stopMessage);
-						socket.send(JSON.stringify(stopMessage));
-					}
-				}
-			} catch (error) {
-				console.warn("[audio-ws] failed to send final audio or stop message", error);
-			}
-
-			pendingSamplesRef.current = new Float32Array(0);
-
-			if (!keepAudioResources) {
-				cleanupAudioResources();
-			}
-
-			setIsAudioConnected(false);
-			setIsAudioStreaming(false);
-			activeMetaRef.current = null;
-
-			if (socket) {
-				await waitForAudioStopAck(socket);
-
-				if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-					try {
-						socket.close(1000, "client_stop");
-					} catch (error) {
-						console.warn("[audio-ws] failed to close socket", error);
-					}
+			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+				try {
+					socket.close(1000, "client_stop");
+				} catch (error) {
+					console.warn("[audio-ws] failed to close socket", error);
 				}
 			}
-		})().finally(() => {
-			stoppingPromiseRef.current = null;
-		});
-
-		return stoppingPromiseRef.current;
+		}
 	}, [cleanupAudioResources, waitForAudioStopAck]);
 
 	const sendAudioSamples = useCallback((samples: Float32Array) => {
@@ -327,11 +316,10 @@ export function useAudioStream(
 			}
 
 			const hasExistingAudio = !!mediaStreamRef.current;
-			await stopAudioStream(true);
+			void stopAudioStream(true);
 
 			stoppingRef.current = false;
 			setAudioError(null);
-			setLastAudioMessage(null);
 
 			const resolvedDisplayName = displayName || participantId;
 			const clientId = makeClientId();
@@ -452,6 +440,8 @@ export function useAudioStream(
 					setIsAudioStreaming(true);
 				};
 
+				const currentMode = mode;
+
 				socket.onmessage = event => {
 					if (typeof event.data !== "string") {
 						console.info("[audio-ws] receive binary", event.data);
@@ -460,13 +450,15 @@ export function useAudioStream(
 
 					try {
 						const parsedMessage = JSON.parse(event.data) as AudioStreamMessage;
+						parsedMessage.local_mic_mode = currentMode;
 						console.info("[audio-ws] receive", parsedMessage);
 						setLastAudioMessage(parsedMessage);
 					} catch {
 						console.info("[audio-ws] receive raw", event.data);
 						setLastAudioMessage({
 							type: "raw_message",
-							payload: event.data
+							payload: event.data,
+							local_mic_mode: currentMode
 						});
 					}
 				};

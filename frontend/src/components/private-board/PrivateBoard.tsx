@@ -39,6 +39,7 @@ type AudioTranscriptMessage =
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
+			local_mic_mode?: string | null;
 	  }
 	| {
 			type: "transcript";
@@ -46,6 +47,7 @@ type AudioTranscriptMessage =
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
+			local_mic_mode?: string | null;
 	  };
 
 function isBoardMessage(message: object | null): message is BoardMessage {
@@ -87,7 +89,7 @@ function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType 
 }
 
 function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage, fallbackMicMode: MicMode): TranscriptLineType["source"] {
-	const source = message.mic_mode ?? message.scope ?? fallbackMicMode;
+	const source = message.local_mic_mode ?? message.mic_mode ?? message.scope ?? fallbackMicMode;
 	if (source === "public" || source === "private") {
 		return source;
 	}
