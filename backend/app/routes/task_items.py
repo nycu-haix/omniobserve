@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas import TaskItemCreate, TaskItemResponse
-from ..services.task_item_service import create_task_item, delete_task_item, list_task_items
+from ..services.task_item_service import create_task_items, delete_task_item, list_task_items
 
 router = APIRouter(tags=["Task Items"])
 
@@ -11,14 +11,14 @@ router = APIRouter(tags=["Task Items"])
 @router.post(
     "/task-items",
     status_code=status.HTTP_201_CREATED,
-    response_model=TaskItemResponse,
-    summary="Create Task Item Mapping",
+    response_model=list[TaskItemResponse],
+    summary="Create Task Item Mappings",
 )
 async def post_task_item(
     payload: TaskItemCreate,
     db: AsyncSession = Depends(get_db),
-) -> TaskItemResponse:
-    return await create_task_item(payload, db)
+) -> list[TaskItemResponse]:
+    return await create_task_items(payload, db)
 
 
 @router.get(

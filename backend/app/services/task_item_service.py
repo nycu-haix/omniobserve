@@ -6,14 +6,19 @@ from ..models import IdeaBlock, TaskItem
 from ..schemas import TaskItemCreate
 
 
-async def create_task_item(payload: TaskItemCreate, db: AsyncSession) -> TaskItem:
+async def create_task_items(payload: TaskItemCreate, db: AsyncSession) -> list[TaskItem]:
     if await db.get(IdeaBlock, payload.idea_block_id) is None:
         raise HTTPException(status_code=404, detail="Idea block not found")
-    task_item = TaskItem(**payload.model_dump())
-    db.add(task_item)
+
+    task_items = [
+        TaskItem(idea_block_id=payload.idea_block_id, task_item_id=task_item_id)
+        for task_item_id in payload.task_item_ids
+    ]
+    db.add_all(task_items)
     await db.commit()
-    await db.refresh(task_item)
-    return task_item
+    for task_item in task_items:
+        await db.refresh(task_item)
+    return task_items
 
 
 async def list_task_items(
