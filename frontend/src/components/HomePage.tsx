@@ -1,6 +1,8 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { getDefaultParticipantName, getNextAvailableParticipantId } from "../lib/participantDefaults";
+import { apiUrl } from "../services/api";
 import { Button } from "./ui/Button";
 
 const defaultSessionName = getDefaultRoomName();
@@ -17,9 +19,62 @@ function buildMeetingUrl(sessionName: string, participantId: string, displayName
 export function HomePage() {
 	const [sessionName, setSessionName] = useState(defaultSessionName);
 	const [participantId, setParticipantId] = useState("1");
-	const [displayName, setDisplayName] = useState("");
+	const [displayName, setDisplayName] = useState(getDefaultParticipantName("1"));
 	const [copied, setCopied] = useState(false);
+	const participantIdEditedRef = useRef(false);
+	const displayNameEditedRef = useRef(false);
 	const meetingUrl = useMemo(() => buildMeetingUrl(sessionName, participantId, displayName), [displayName, participantId, sessionName]);
+
+	useEffect(() => {
+		let disposed = false;
+		let pollTimer: number | null = null;
+		let abortController: AbortController | null = null;
+
+		const syncAvailableParticipant = async () => {
+			const normalizedSessionName = sessionName.trim() || defaultSessionName;
+			abortController?.abort();
+			abortController = new AbortController();
+
+			try {
+				const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(normalizedSessionName)}/presence`), {
+					signal: abortController.signal
+				});
+				if (!response.ok) {
+					return;
+				}
+
+				const payload = (await response.json()) as { participants?: unknown };
+				if (disposed || !Array.isArray(payload.participants)) {
+					return;
+				}
+
+				const participants = payload.participants.filter((item): item is string => typeof item === "string");
+				const nextParticipantId = getNextAvailableParticipantId(participants);
+
+				if (!participantIdEditedRef.current) {
+					setParticipantId(nextParticipantId);
+					if (!displayNameEditedRef.current) {
+						setDisplayName(getDefaultParticipantName(nextParticipantId));
+					}
+				}
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+			}
+		};
+
+		void syncAvailableParticipant();
+		pollTimer = window.setInterval(() => void syncAvailableParticipant(), 3000);
+
+		return () => {
+			disposed = true;
+			abortController?.abort();
+			if (pollTimer !== null) {
+				window.clearInterval(pollTimer);
+			}
+		};
+	}, [sessionName]);
 
 	const copyUrl = async () => {
 		await navigator.clipboard.writeText(meetingUrl);
@@ -43,7 +98,11 @@ export function HomePage() {
 							<input
 								className="h-11 rounded-md border bg-background px-3 text-base outline-none transition focus-visible:ring-1 focus-visible:ring-ring"
 								value={sessionName}
-								onChange={event => setSessionName(event.target.value)}
+								onChange={event => {
+									participantIdEditedRef.current = false;
+									displayNameEditedRef.current = false;
+									setSessionName(event.target.value);
+								}}
 								placeholder={defaultSessionName}
 							/>
 						</label>
@@ -53,7 +112,14 @@ export function HomePage() {
 							<input
 								className="h-11 rounded-md border bg-background px-3 text-base outline-none transition focus-visible:ring-1 focus-visible:ring-ring"
 								value={participantId}
-								onChange={event => setParticipantId(event.target.value)}
+								onChange={event => {
+									const nextParticipantId = event.target.value;
+									participantIdEditedRef.current = true;
+									setParticipantId(nextParticipantId);
+									if (!displayNameEditedRef.current) {
+										setDisplayName(getDefaultParticipantName(nextParticipantId.trim() || "1"));
+									}
+								}}
 								placeholder="1"
 							/>
 						</label>
@@ -63,7 +129,10 @@ export function HomePage() {
 							<input
 								className="h-11 rounded-md border bg-background px-3 text-base outline-none transition focus-visible:ring-1 focus-visible:ring-ring"
 								value={displayName}
-								onChange={event => setDisplayName(event.target.value)}
+								onChange={event => {
+									displayNameEditedRef.current = true;
+									setDisplayName(event.target.value);
+								}}
 								placeholder="使用者顯示名稱"
 							/>
 						</label>
