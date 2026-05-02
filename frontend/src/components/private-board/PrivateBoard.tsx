@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
+import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
@@ -123,7 +124,7 @@ export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardP
 		}
 
 		try {
-			const response = await fetch("/api/board/block", {
+			const response = await fetch(apiUrl("/api/board/block"), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ roomId })

@@ -6,6 +6,7 @@ import { GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
+import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
@@ -91,6 +92,7 @@ export default function MeetingRoom() {
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
+	const { isConnected: isPresenceConnected } = usePresenceWebSocket(sessionId, participantId);
 	const { startAudioStream, stopAudioStream, isAudioStreaming, isAudioConnected, lastAudioMessage, audioError } = useAudioStream(
 		sessionId,
 		participantId,
@@ -239,6 +241,7 @@ export default function MeetingRoom() {
 
 					<div className="rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
 						<div>{audioStatusText}</div>
+						<div>Presence：{isPresenceConnected ? "已連線" : "未連線"}</div>
 						{latestTranscript && <div className="mt-1 text-foreground">最新逐字稿：{latestTranscript}</div>}
 					</div>
 				</div>
