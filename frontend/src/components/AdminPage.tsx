@@ -71,7 +71,12 @@ function normalizeRankingItemIds(itemIds: string[]) {
 function getRoomName() {
 	const params = new URLSearchParams(window.location.search);
 	const fallbackRoomName = import.meta.env.VITE_DEFAULT_ROOM_NAME || "mars-survival-001";
-	return params.get("room_name")?.trim().replace(/^["']|["']$/g, "") || fallbackRoomName;
+	return (
+		params
+			.get("room_name")
+			?.trim()
+			.replace(/^["']|["']$/g, "") || fallbackRoomName
+	);
 }
 
 function getWsBaseUrl() {
@@ -288,9 +293,7 @@ export function AdminPage() {
 						<AlertCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 						<h2 className="text-sm font-semibold">目前限制</h2>
 					</header>
-					<p className="text-sm leading-6 text-muted-foreground">
-						backend 尚未提供 admin aggregate stream，所以此頁不顯示假造的 private channels、transcript search、AI 狀態、latency 或會議控制。
-					</p>
+					<p className="text-sm leading-6 text-muted-foreground">backend 尚未提供 admin aggregate stream，所以此頁不顯示假造的 private channels、transcript search、AI 狀態、latency 或會議控制。</p>
 				</section>
 			</aside>
 

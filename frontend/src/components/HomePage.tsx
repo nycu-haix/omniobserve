@@ -32,9 +32,7 @@ export function HomePage() {
 				<header className="space-y-3">
 					<p className="text-sm font-medium text-muted-foreground">OmniObserve</p>
 					<h1 className="text-3xl font-semibold tracking-normal sm:text-4xl">建立會議連結</h1>
-					<p className="max-w-2xl text-base leading-7 text-muted-foreground">
-						填入本次活動需要的 session 與使用者資訊，下方會即時產生可分享的會議網址。
-					</p>
+					<p className="max-w-2xl text-base leading-7 text-muted-foreground">填入本次活動需要的 session 與使用者資訊，下方會即時產生可分享的會議網址。</p>
 				</header>
 
 				<section className="grid gap-6 rounded-lg border bg-card p-5 text-card-foreground shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] md:p-6">

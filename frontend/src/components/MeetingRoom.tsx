@@ -112,20 +112,10 @@ export default function MeetingRoom() {
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
 	const { isConnected: isPresenceConnected } = usePresenceWebSocket(sessionId, participantId);
-	const { startAudioStream, stopAudioStream, isAudioStreaming, isAudioConnected, lastAudioMessage, audioError } = useAudioStream(
-		sessionId,
-		participantId,
-		displayName
-	);
+	const { startAudioStream, stopAudioStream, isAudioStreaming, isAudioConnected, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const latestTranscript = typeof lastAudioMessage?.text === "string" ? lastAudioMessage.text : null;
-	const audioStatusText = audioError
-		? `音訊錯誤：${audioError}`
-		: isAudioConnected
-			? "音訊後端已連線"
-			: isAudioStreaming
-				? "音訊串流啟動中"
-				: "音訊串流未啟動";
+	const audioStatusText = audioError ? `音訊錯誤：${audioError}` : isAudioConnected ? "音訊後端已連線" : isAudioStreaming ? "音訊串流啟動中" : "音訊串流未啟動";
 
 	const handleMic = async (mode: MicMode) => {
 		const nextMode = mode === "off" ? "off" : micMode === mode ? "off" : mode;
