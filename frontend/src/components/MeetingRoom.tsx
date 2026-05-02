@@ -14,13 +14,13 @@ import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
 
-interface SurvivalItem {
+interface LostAtSeaItem {
 	id: string;
 	label: string;
 	rank: number;
 }
 
-const INITIAL_ITEMS: SurvivalItem[] = [
+const INITIAL_ITEMS: LostAtSeaItem[] = [
 	{ id: "mosquito_net", label: "蚊帳", rank: 1 },
 	{ id: "petrol", label: "一罐汽油", rank: 2 },
 	{ id: "water_container", label: "裝水容器", rank: 3 },
@@ -54,7 +54,7 @@ function normalizeRankingItemIds(itemIds: string[]): string[] {
 	return [...rankedValidIds, ...missingIds];
 }
 
-function createRankedItems(itemIds: string[]): SurvivalItem[] {
+function createRankedItems(itemIds: string[]): LostAtSeaItem[] {
 	return normalizeRankingItemIds(itemIds).map((id, index) => ({
 		id,
 		label: ITEM_LABELS[id] ?? id,
@@ -79,7 +79,7 @@ function isBoardStateMessage(message: object | null): message is { type: "board_
 	);
 }
 
-function SortableSurvivalItem({ item }: { item: SurvivalItem }) {
+function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
@@ -127,7 +127,7 @@ export default function MeetingRoom() {
 			return;
 		}
 
-		await startAudioStream(nextMode, roomName);
+		await startAudioStream(nextMode);
 	};
 
 	const handleDragEnd = (event: DragEndEvent) => {
@@ -201,7 +201,7 @@ export default function MeetingRoom() {
 					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
 				</div>
 
-				<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border p-3" aria-label="Survival ranking task">
+				<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 items-center justify-between">
 						<h2 className="text-base font-semibold">海上求生排序</h2>
 						<span className="text-sm text-muted-foreground">協作中</span>
@@ -225,7 +225,7 @@ export default function MeetingRoom() {
 						<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 							<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
 								{items.map(item => (
-									<SortableSurvivalItem key={item.id} item={item} />
+									<SortableLostAtSeaItem key={item.id} item={item} />
 								))}
 							</div>
 						</SortableContext>
@@ -257,7 +257,7 @@ export default function MeetingRoom() {
 			</section>
 
 			<aside className="min-h-0">
-				<PrivateBoard roomId={sessionId} lastMessage={lastMessage} isConnected={isConnected} />
+				<PrivateBoard sessionId={sessionId} lastMessage={lastMessage} isConnected={isConnected} />
 			</aside>
 		</main>
 	);

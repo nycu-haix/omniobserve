@@ -10,7 +10,7 @@ import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
 
 interface PrivateBoardProps {
-	roomId: string;
+	sessionId: string;
 	lastMessage: object | null;
 	isConnected: boolean;
 }
@@ -35,7 +35,7 @@ const fallbackBlock = (): IdeaBlock => ({
 	status: "generating"
 });
 
-export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardProps) {
+export function PrivateBoard({ sessionId, lastMessage, isConnected }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
@@ -127,7 +127,7 @@ export function PrivateBoard({ roomId, lastMessage, isConnected }: PrivateBoardP
 			const response = await fetch(apiUrl("/api/board/block"), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ roomId })
+				body: JSON.stringify({ sessionId })
 			});
 
 			if (!response.ok) {

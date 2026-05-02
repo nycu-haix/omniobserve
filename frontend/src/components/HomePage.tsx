@@ -1,8 +1,9 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
+import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { Button } from "./ui/Button";
 
-const defaultSessionName = import.meta.env.VITE_DEFAULT_ROOM_NAME || "mars-survival-001";
+const defaultSessionName = getDefaultRoomName();
 
 function buildMeetingUrl(sessionName: string, participantId: string, displayName: string) {
 	const params = new URLSearchParams();
@@ -43,7 +44,7 @@ export function HomePage() {
 								className="h-11 rounded-md border bg-background px-3 text-base outline-none transition focus-visible:ring-1 focus-visible:ring-ring"
 								value={sessionName}
 								onChange={event => setSessionName(event.target.value)}
-								placeholder="mars-survival-001"
+								placeholder={defaultSessionName}
 							/>
 						</label>
 

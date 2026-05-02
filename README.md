@@ -9,7 +9,7 @@ Set these values in `frontend/.env` before starting or building the frontend:
 ```env
 VITE_WS_BASE_URL=wss://meet.omni.elvismao.com
 VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
-VITE_DEFAULT_ROOM_NAME=skyishandsome
+VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 For local WebSocket testing, use:
@@ -17,7 +17,7 @@ For local WebSocket testing, use:
 ```env
 VITE_WS_BASE_URL=ws://localhost:8000
 VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
-VITE_DEFAULT_ROOM_NAME=mars-survival-001
+VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 Restart the Vite dev server after changing `.env`.
@@ -30,23 +30,23 @@ pnpm dev
 Open multiple participants with the same `room_name` and different query ids. The `room_name` query value is the WebSocket session id and the Jitsi room name.
 
 ```text
-http://localhost:5173/?room_name=skyishandsome&id=1
-http://localhost:5173/?room_name=skyishandsome&id=2
-http://localhost:5173/?room_name=skyishandsome&id=3
-http://localhost:5173/?room_name=skyishandsome&id=4
+http://localhost:5173/?room_name=lost-at-sea&id=1
+http://localhost:5173/?room_name=lost-at-sea&id=2
+http://localhost:5173/?room_name=lost-at-sea&id=3
+http://localhost:5173/?room_name=lost-at-sea&id=4
 ```
 
 In production, the page URL follows the same pattern:
 
 ```text
-https://omni.elvismao.com?room_name=skyishandsome&id=1
+https://omni.elvismao.com?room_name=lost-at-sea&id=1
 ```
 
 This creates:
 
 ```text
-Jitsi URL: https://meet.omni.elvismao.com/skyishandsome
-Board WS: wss://meet.omni.elvismao.com/ws/sessions/skyishandsome/board?participant_id=1
+Jitsi URL: https://meet.omni.elvismao.com/lost-at-sea
+Board WS: wss://meet.omni.elvismao.com/ws/sessions/lost-at-sea/board?participant_id=1
 ```
 
 ## Backend Environment
@@ -148,7 +148,7 @@ Expected client message:
 ```json
 {
 	"type": "ranking_move",
-	"itemId": "oxygen",
+	"itemId": "sea_chart",
 	"toIndex": 2,
 	"baseRevision": 0
 }
@@ -160,7 +160,7 @@ Expected server broadcast:
 {
 	"type": "ranking_state",
 	"revision": 1,
-	"items": ["water", "map", "oxygen", "radio", "food"],
+	"items": ["mosquito_net", "petrol", "sea_chart", "water_container", "vhf_radio"],
 	"updatedBy": "1"
 }
 ```

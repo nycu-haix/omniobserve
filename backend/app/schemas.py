@@ -68,7 +68,11 @@ class IdeaBlockGenerateResponse(BaseModel):
 
 
 class FrontendBoardBlockCreateRequest(BaseModel):
-    roomId: str
+    sessionId: str | None = None
+    roomId: str | None = Field(
+        default=None,
+        description="Deprecated alias for sessionId. Kept for older frontend builds.",
+    )
     participantId: str | None = None
     transcript_text: str | None = Field(
         default=None,
@@ -235,7 +239,11 @@ class IdeaBlockToTranscriptResponse(BaseModel):
 
 
 class FrontendMockBoardSeedRequest(BaseModel):
-    roomId: str
+    sessionId: str | None = None
+    roomId: str | None = Field(
+        default=None,
+        description="Deprecated alias for sessionId. Kept for older frontend builds.",
+    )
     participantId: str | None = None
     visibility: Visibility = Field(
         default=Visibility.PRIVATE,

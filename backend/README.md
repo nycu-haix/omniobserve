@@ -29,7 +29,7 @@ wss://meet.omni.elvismao.com/ws/sessions/{session_id}/audio?participant_id={part
 Local:
 
 ```text
-ws://localhost:8000/ws/sessions/mars-survival-001/audio?participant_id=1
+ws://localhost:8000/ws/sessions/lost-at-sea/audio?participant_id=1
 ```
 
 Initial join message:
@@ -59,7 +59,7 @@ Server messages:
 ```json
 {
 	"type": "joined",
-	"session_id": "mars-survival-001",
+	"session_id": "lost-at-sea",
 	"participant_id": "1"
 }
 ```
@@ -102,7 +102,7 @@ wss://meet.omni.elvismao.com/ws/sessions/{session_id}/board?participant_id={part
 Local:
 
 ```text
-ws://localhost:8000/ws/sessions/mars-survival-001/board?participant_id=1
+ws://localhost:8000/ws/sessions/lost-at-sea/board?participant_id=1
 ```
 
 Initial join message:
@@ -126,7 +126,7 @@ Ranking move:
 ```json
 {
 	"type": "ranking_move",
-	"itemId": "oxygen",
+	"itemId": "sea_chart",
 	"toIndex": 2,
 	"baseRevision": 12
 }
@@ -170,7 +170,7 @@ Server messages:
 ```json
 {
 	"type": "joined",
-	"session_id": "mars-survival-001",
+	"session_id": "lost-at-sea",
 	"participant_id": "1"
 }
 ```
@@ -178,10 +178,10 @@ Server messages:
 ```json
 {
 	"type": "board_state",
-	"session_id": "mars-survival-001",
+	"session_id": "lost-at-sea",
 	"revision": 12,
 	"ranking": {
-		"items": ["oxygen", "water", "map", "radio", "food"]
+		"items": ["mosquito_net", "petrol", "water_container", "shaving_mirror", "sea_chart"]
 	},
 	"public_blocks": [],
 	"private_blocks": []
@@ -192,7 +192,7 @@ Server messages:
 {
 	"type": "ranking_state",
 	"revision": 13,
-	"items": ["water", "oxygen", "map", "radio", "food"],
+	"items": ["mosquito_net", "petrol", "sea_chart", "water_container", "shaving_mirror"],
 	"updatedBy": "1"
 }
 ```
@@ -222,7 +222,7 @@ wss://meet.omni.elvismao.com/ws/sessions/{session_id}/cue?participant_id={partic
 Local:
 
 ```text
-ws://localhost:8000/ws/sessions/mars-survival-001/cue?participant_id=1
+ws://localhost:8000/ws/sessions/lost-at-sea/cue?participant_id=1
 ```
 
 Initial join message:
@@ -258,7 +258,7 @@ Current server responses:
 ```json
 {
 	"type": "joined",
-	"session_id": "mars-survival-001",
+	"session_id": "lost-at-sea",
 	"participant_id": "1"
 }
 ```
@@ -285,7 +285,7 @@ wss://meet.omni.elvismao.com/ws/sessions/{session_id}/presence?participant_id={p
 Local:
 
 ```text
-ws://localhost:8000/ws/sessions/mars-survival-001/presence?participant_id=1
+ws://localhost:8000/ws/sessions/lost-at-sea/presence?participant_id=1
 ```
 
 Initial join message:
@@ -319,7 +319,7 @@ Server messages:
 ```json
 {
 	"type": "presence_state",
-	"session_id": "mars-survival-001",
+	"session_id": "lost-at-sea",
 	"participants": ["1", "2"]
 }
 ```
@@ -356,7 +356,7 @@ wss://meet.omni.elvismao.com/sessions/{session_id}/audio-stream?participant_id={
 Local:
 
 ```text
-ws://localhost:8000/sessions/mars-survival-001/audio-stream?participant_id=1
+ws://localhost:8000/sessions/lost-at-sea/audio-stream?participant_id=1
 ```
 
 This is the older official audio route. It is still kept for compatibility.
@@ -425,7 +425,7 @@ The URL is built from:
 ```env
 VITE_WS_BASE_URL=ws://localhost:8000
 VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
-VITE_DEFAULT_ROOM_NAME=mars-survival-001
+VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 For production:
@@ -433,14 +433,14 @@ For production:
 ```env
 VITE_WS_BASE_URL=wss://meet.omni.elvismao.com
 VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
-VITE_DEFAULT_ROOM_NAME=skyishandsome
+VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 The session id and participant id come from the URL query:
 
 ```text
-https://omni.elvismao.com?room_name=skyishandsome&id=1
-https://omni.elvismao.com?room_name=skyishandsome&id=2
+https://omni.elvismao.com?room_name=lost-at-sea&id=1
+https://omni.elvismao.com?room_name=lost-at-sea&id=2
 ```
 
 The frontend uses `room_name` as the WebSocket `session_id` and also builds the Jitsi meeting URL:

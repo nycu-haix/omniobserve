@@ -1,3 +1,5 @@
+import { getDefaultRoomName } from "../lib/defaultRoomName";
+
 const PARTICIPANT_NAME_MAP: Record<string, string> = {
 	"1": "Otter",
 	"2": "Fox",
@@ -6,7 +8,7 @@ const PARTICIPANT_NAME_MAP: Record<string, string> = {
 };
 
 function normalizeRoomName(roomName: string | null): string {
-	const fallbackRoomName = import.meta.env.VITE_DEFAULT_ROOM_NAME || "mars-survival-001";
+	const fallbackRoomName = getDefaultRoomName();
 	const normalized = roomName?.trim().replace(/^["']|["']$/g, "");
 	return normalized || fallbackRoomName;
 }
