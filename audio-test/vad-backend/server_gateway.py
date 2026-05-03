@@ -12,9 +12,9 @@ import numpy as np
 import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
-# from transformers import WhisperProcessor, WhisperForConditionalGeneration
-from funasr import AutoModel
-from transcript_normalizer import to_traditional
+from transformers import WhisperProcessor, WhisperForConditionalGeneration
+# from funasr import AutoModel
+# from transcript_normalizer import to_traditional
 
 app = FastAPI()
 
@@ -117,88 +117,88 @@ print("Silero VAD loaded")
 # Load Breeze ASR
 # =========================
 
-# ASR_MODEL_NAME = "MediaTek-Research/Breeze-ASR-25"
+ASR_MODEL_NAME = "MediaTek-Research/Breeze-ASR-25"
 
-# asr_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+asr_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# if asr_device.type == "cuda":
-#     asr_dtype = torch.float16
-#     print("CUDA detected. Breeze ASR will run on GPU.")
-# else:
-#     asr_dtype = torch.float32
-#     print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
+if asr_device.type == "cuda":
+    asr_dtype = torch.float16
+    print("CUDA detected. Breeze ASR will run on GPU.")
+else:
+    asr_dtype = torch.float32
+    print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
 
-# print("Loading Breeze ASR 25 from Hugging Face cache...")
+print("Loading Breeze ASR 25 from Hugging Face cache...")
 
-# asr_processor = WhisperProcessor.from_pretrained(ASR_MODEL_NAME)
+asr_processor = WhisperProcessor.from_pretrained(ASR_MODEL_NAME)
 
-# asr_model = WhisperForConditionalGeneration.from_pretrained(
-#     ASR_MODEL_NAME,
-#     torch_dtype=asr_dtype,
-# ).to(asr_device)
+asr_model = WhisperForConditionalGeneration.from_pretrained(
+    ASR_MODEL_NAME,
+    torch_dtype=asr_dtype,
+).to(asr_device)
 
-# asr_model.eval()
+asr_model.eval()
 
-# print(f"Breeze ASR 25 loaded on {asr_device}")
+print(f"Breeze ASR 25 loaded on {asr_device}")
 
-def resolve_asr_device() -> str:
-    configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
+# def resolve_asr_device() -> str:
+#     configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
 
-    if configured_device in ("", "auto"):
-        return "cuda:0" if torch.cuda.is_available() else "cpu"
+#     if configured_device in ("", "auto"):
+#         return "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    if configured_device == "cuda":
-        return "cuda:0"
+#     if configured_device == "cuda":
+#         return "cuda:0"
 
-    return configured_device
+#     return configured_device
 
 
-def log_torch_runtime():
-    print(
-        "Torch runtime: "
-        f"version={torch.__version__}, "
-        f"cuda_build={torch.version.cuda}, "
-        f"cuda_available={torch.cuda.is_available()}"
-    )
+# def log_torch_runtime():
+#     print(
+#         "Torch runtime: "
+#         f"version={torch.__version__}, "
+#         f"cuda_build={torch.version.cuda}, "
+#         f"cuda_available={torch.cuda.is_available()}"
+#     )
 
-    if not torch.cuda.is_available():
-        return
+#     if not torch.cuda.is_available():
+#         return
 
-    try:
-        capability = torch.cuda.get_device_capability(0)
-        print(
-            "CUDA device: "
-            f"name={torch.cuda.get_device_name(0)}, "
-            f"capability=sm_{capability[0]}{capability[1]}, "
-            f"supported_arches={torch.cuda.get_arch_list()}"
-        )
-    except Exception as e:
-        print(f"Failed to inspect CUDA device: {e}")
+#     try:
+#         capability = torch.cuda.get_device_capability(0)
+#         print(
+#             "CUDA device: "
+#             f"name={torch.cuda.get_device_name(0)}, "
+#             f"capability=sm_{capability[0]}{capability[1]}, "
+#             f"supported_arches={torch.cuda.get_arch_list()}"
+#         )
+#     except Exception as e:
+#         print(f"Failed to inspect CUDA device: {e}")
 
 
 # =========================
 # Load FunASR
 # =========================
 
-log_torch_runtime()
+# log_torch_runtime()
 
-asr_device = resolve_asr_device()
-punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
+# asr_device = resolve_asr_device()
+# punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
 
-print(f"Loading FunASR on {asr_device}...")
+# print(f"Loading FunASR on {asr_device}...")
 
-asr_model = AutoModel(
-    model="paraformer-zh",
-    punc_model=punc_model,
-    device=asr_device,
-    disable_update=True,
-    hub="hf",
-)
+# asr_model = AutoModel(
+#     model="paraformer-zh",
+#     punc_model=punc_model,
+#     device=asr_device,
+#     disable_update=True,
+#     hub="hf",
+# )
 
-print(f"FunASR loaded on {asr_device}")
+# print(f"FunASR loaded on {asr_device}")
 
-# Avoid multiple ASR tasks using FunASR at the same time.
-ASR_GLOBAL_LOCK = asyncio.Lock()
+# # Avoid multiple ASR tasks using FunASR at the same time.
+# ASR_GLOBAL_LOCK = asyncio.Lock()
 
 # =========================
 # Utility functions
@@ -334,97 +334,9 @@ def resample_to_16k(audio: np.ndarray, input_sample_rate: int) -> np.ndarray:
     return np.interp(new_x, old_x, audio).astype(np.float32)
 
 
-# def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
-#     """
-#     Transcribe 16kHz mono float32 audio using Breeze ASR 25.
-#     """
-#     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
-
-#     if len(audio_float32) == 0:
-#         return ""
-
-#     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
-
-#     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
-#     segment_peak = float(np.max(np.abs(audio_float32)))
-
-#     # print(f"ASR input stats: rms={segment_rms:.6f}, peak={segment_peak:.6f}")
-
-#     # Avoid Whisper-like hallucination on almost-silent segments.
-#     if segment_rms < 0.0008:
-#         print("Skip ASR: segment rms too low")
-#         return ""
-
-#     inputs = asr_processor(
-#         audio_float32,
-#         sampling_rate=SAMPLE_RATE,
-#         return_tensors="pt",
-#         return_attention_mask=True,
-#     )
-
-#     input_features = inputs.input_features.to(asr_device)
-
-#     if asr_device.type == "cuda":
-#         input_features = input_features.to(torch.float16)
-
-#     generate_kwargs = {
-#         "max_new_tokens": 128,
-#         "no_repeat_ngram_size": 3,
-#     }
-
-#     # Whisper/Breeze language prompt
-#     try:
-#         forced_decoder_ids = asr_processor.get_decoder_prompt_ids(
-#             language="zh",
-#             task="transcribe",
-#         )
-#         generate_kwargs["forced_decoder_ids"] = forced_decoder_ids
-#     except Exception:
-#         generate_kwargs["language"] = "zh"
-#         generate_kwargs["task"] = "transcribe"
-
-#     if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
-#         generate_kwargs["attention_mask"] = inputs.attention_mask.to(asr_device)
-
-#     with torch.no_grad():
-#         predicted_ids = asr_model.generate(
-#             input_features,
-#             **generate_kwargs,
-#         )
-
-#     text = asr_processor.batch_decode(
-#         predicted_ids,
-#         skip_special_tokens=True,
-#     )[0]
-
-#     return text.strip()
-
-def extract_funasr_text(result) -> str:
+def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
     """
-    Extract text from FunASR generate() result.
-    Common output:
-      [{'key': '...', 'text': '...'}]
-    """
-    if not result:
-        return ""
-
-    if isinstance(result, list):
-        if len(result) == 0:
-            return ""
-        item = result[0]
-    else:
-        item = result
-
-    if isinstance(item, dict):
-        return str(item.get("text", "")).strip()
-
-    return str(item).strip()
-
-
-def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
-    """
-    Transcribe saved wav segment using FunASR.
-    The segment has already been saved as 16kHz mono wav.
+    Transcribe 16kHz mono float32 audio using Breeze ASR 25.
     """
     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
 
@@ -434,19 +346,107 @@ def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
 
     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
+    segment_peak = float(np.max(np.abs(audio_float32)))
 
+    # print(f"ASR input stats: rms={segment_rms:.6f}, peak={segment_peak:.6f}")
+
+    # Avoid Whisper-like hallucination on almost-silent segments.
     if segment_rms < 0.0008:
         print("Skip ASR: segment rms too low")
         return ""
 
-    result = asr_model.generate(
-        input=str(filename),
-        language="zh",
-        use_itn=True,
-        batch_size_s=20,
+    inputs = asr_processor(
+        audio_float32,
+        sampling_rate=SAMPLE_RATE,
+        return_tensors="pt",
+        return_attention_mask=True,
     )
 
-    return extract_funasr_text(result)
+    input_features = inputs.input_features.to(asr_device)
+
+    if asr_device.type == "cuda":
+        input_features = input_features.to(torch.float16)
+
+    generate_kwargs = {
+        "max_new_tokens": 128,
+        "no_repeat_ngram_size": 3,
+    }
+
+    # Whisper/Breeze language prompt
+    try:
+        forced_decoder_ids = asr_processor.get_decoder_prompt_ids(
+            language="zh",
+            task="transcribe",
+        )
+        generate_kwargs["forced_decoder_ids"] = forced_decoder_ids
+    except Exception:
+        generate_kwargs["language"] = "zh"
+        generate_kwargs["task"] = "transcribe"
+
+    if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
+        generate_kwargs["attention_mask"] = inputs.attention_mask.to(asr_device)
+
+    with torch.no_grad():
+        predicted_ids = asr_model.generate(
+            input_features,
+            **generate_kwargs,
+        )
+
+    text = asr_processor.batch_decode(
+        predicted_ids,
+        skip_special_tokens=True,
+    )[0]
+
+    return text.strip()
+
+# def extract_funasr_text(result) -> str:
+#     """
+#     Extract text from FunASR generate() result.
+#     Common output:
+#       [{'key': '...', 'text': '...'}]
+#     """
+#     if not result:
+#         return ""
+
+#     if isinstance(result, list):
+#         if len(result) == 0:
+#             return ""
+#         item = result[0]
+#     else:
+#         item = result
+
+#     if isinstance(item, dict):
+#         return str(item.get("text", "")).strip()
+
+#     return str(item).strip()
+
+
+# def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
+#     """
+#     Transcribe saved wav segment using FunASR.
+#     The segment has already been saved as 16kHz mono wav.
+#     """
+#     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
+
+#     if len(audio_float32) == 0:
+#         return ""
+
+#     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
+
+#     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
+
+#     if segment_rms < 0.0008:
+#         print("Skip ASR: segment rms too low")
+#         return ""
+
+#     result = asr_model.generate(
+#         input=str(filename),
+#         language="zh",
+#         use_itn=True,
+#         batch_size_s=20,
+#     )
+
+#     return extract_funasr_text(result)
 
 async def transcribe_and_send(
     websocket: WebSocket,
@@ -468,29 +468,30 @@ async def transcribe_and_send(
     try:
         # print(f"Transcribing segment: {filename}")
 
-        
-        async with ASR_GLOBAL_LOCK:
-            # transcript = await asyncio.to_thread(
-            #     transcribe_audio_float32,
-            #     segment_audio,
-            # )
+        async with send_lock:
             transcript = await asyncio.to_thread(
-                transcribe_audio_file,
-                filename,
+                transcribe_audio_float32,
                 segment_audio,
             )
+            # transcript = await asyncio.to_thread(
+            #     transcribe_audio_file,
+            #     filename,
+            #     segment_audio,
+            # )
 
-        raw_transcript = transcript
-        traditional_transcript = to_traditional(raw_transcript)
+        # raw_transcript = transcript
+        # traditional_transcript = to_traditional(raw_transcript)
         
-        print(f"Transcript: {traditional_transcript}")
+        # print(f"Transcript: {traditional_transcript}")
+        print(f"Transcript: {transcript}")
 
         save_transcript_jsonl(
             file=str(filename),
             start=start_time,
             end=end_time,
             duration=duration,
-            text=traditional_transcript,
+            text=transcript,
+            # text=traditional_transcript,
             source=source,
             scope=scope,
             agent_type=agent_type,
@@ -502,8 +503,8 @@ async def transcribe_and_send(
         )
 
         try:
-            print("[ASR raw]", raw_transcript)
-            print("[ASR traditional]", traditional_transcript)
+            # print("[ASR raw]", raw_transcript)
+            # print("[ASR traditional]", traditional_transcript)
 
             async with send_lock:
                 await websocket.send_json({
@@ -520,7 +521,8 @@ async def transcribe_and_send(
                     "end": round(end_time, 2),
                     "duration": round(duration, 2),
                     "reason": reason,
-                    "text": traditional_transcript,
+                    "text": transcript,
+                    # "text": traditional_transcript,
                 })
         except Exception:
             print("Cannot send transcript because websocket is closed")
