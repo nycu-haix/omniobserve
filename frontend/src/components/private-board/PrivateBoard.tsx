@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import type { UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, MicMode, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
@@ -49,6 +50,12 @@ type AudioTranscriptMessage =
 			text?: string;
 			local_mic_mode?: string | null;
 	  };
+
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+
+function isNearScrollBottom(element: HTMLElement): boolean {
+	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+}
 
 function isBoardMessage(message: object | null): message is BoardMessage {
 	if (!message || !("type" in message) || !("payload" in message)) {
@@ -149,6 +156,12 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
+		"websocket-transcript": true,
+		transcript: true,
+		ideablock: true
+	});
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -258,6 +271,19 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 		setHighlightedBlockId(blockId);
 	};
 
+	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current[activeTab] = isNearScrollBottom(event.currentTarget);
+	};
+
+	useLayoutEffect(() => {
+		const viewport = scrollViewportRef.current;
+		if (!viewport || !shouldAutoScrollRef.current[activeTab]) {
+			return;
+		}
+
+		viewport.scrollTop = viewport.scrollHeight;
+	}, [activeTab, ideaBlocks, transcriptLines, websocketTranscriptLines]);
+
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
 	};
@@ -309,7 +335,7 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 					</div>
 				</header>
 
-				<ScrollArea className="min-h-0 flex-1 p-3">
+				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
 					{activeTab === "websocket-transcript" ? (
 						renderTranscriptLines(websocketTranscriptLines, "尚無 WebSocket 逐字稿", jumpToBlock)
 					) : activeTab === "ideablock" ? (
