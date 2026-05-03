@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 
 from fastapi import HTTPException
 
-from ..config import OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL, OLLAMA_TIMEOUT_SECONDS
+from ..config import OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL, OLLAMA_TIMEOUT_SECONDS, logger
 
 
 async def create_title_embedding(title: str) -> list[float]:
@@ -31,10 +31,13 @@ def _create_embedding_sync(title: str) -> list[float]:
         with urlopen(request, timeout=OLLAMA_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
+        logger.exception("Ollama embedding request failed url=%s status=%s", url, exc.code)
         raise HTTPException(status_code=502, detail=f"Ollama embedding request failed: HTTP {exc.code}") from exc
     except (URLError, TimeoutError) as exc:
+        logger.exception("Ollama embedding service unavailable url=%s error=%s", url, exc)
         raise HTTPException(status_code=502, detail="Ollama embedding service is unavailable") from exc
     except json.JSONDecodeError as exc:
+        logger.exception("Ollama embedding response is not valid JSON url=%s", url)
         raise HTTPException(status_code=502, detail="Ollama embedding response is not valid JSON") from exc
 
     embedding = _extract_first_embedding(payload)
