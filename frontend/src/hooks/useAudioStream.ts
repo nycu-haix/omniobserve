@@ -404,6 +404,10 @@ export function useAudioStream(
 				socketRef.current = socket;
 
 				socket.onopen = () => {
+					if (socketRef.current !== socket) {
+						return;
+					}
+
 					const meta = activeMetaRef.current;
 
 					if (!meta) {
@@ -465,7 +469,9 @@ export function useAudioStream(
 
 				socket.onerror = event => {
 					console.error("[audio-ws] error", event);
-					setAudioError("Audio WebSocket error. Check backend or nginx proxy.");
+					if (socketRef.current === socket) {
+						setAudioError("Audio WebSocket error. Check backend or nginx proxy.");
+					}
 				};
 
 				socket.onclose = event => {
@@ -475,11 +481,13 @@ export function useAudioStream(
 						wasClean: event.wasClean
 					});
 
-					setIsAudioConnected(false);
-					setIsAudioStreaming(false);
+					if (socketRef.current === socket) {
+						setIsAudioConnected(false);
+						setIsAudioStreaming(false);
 
-					if (!stoppingRef.current) {
-						cleanupAudioResources();
+						if (!stoppingRef.current) {
+							cleanupAudioResources();
+						}
 					}
 				};
 			} catch (error) {
