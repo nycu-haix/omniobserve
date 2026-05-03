@@ -3,7 +3,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -38,6 +38,26 @@ const INITIAL_ITEMS: LostAtSeaItem[] = [
 ];
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
+const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
+const MIN_PRIVATE_BOARD_WIDTH = 360;
+const MIN_MEETING_COLUMN_WIDTH = 520;
+const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
+const DEFAULT_JITSI_HEIGHT = 390;
+const MIN_JITSI_HEIGHT = 240;
+const MIN_RANKING_HEIGHT = 220;
+const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+
+function clampPrivateBoardWidth(width: number) {
+	const availableWidth = window.innerWidth - 32 - 16;
+	const maxWidth = Math.max(MIN_PRIVATE_BOARD_WIDTH, availableWidth - MIN_MEETING_COLUMN_WIDTH);
+	return Math.min(Math.max(width, MIN_PRIVATE_BOARD_WIDTH), maxWidth);
+}
+
+function clampJitsiHeight(height: number) {
+	const availableHeight = window.innerHeight - 32 - 24 - 24 - 56;
+	const maxHeight = Math.max(MIN_JITSI_HEIGHT, availableHeight - MIN_RANKING_HEIGHT);
+	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
+}
 
 const ITEM_LABELS = INITIAL_ITEMS.reduce<Record<string, string>>((labels, item) => {
 	labels[item.id] = item.label;
@@ -106,6 +126,14 @@ export default function MeetingRoom() {
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
 	const [items, setItems] = useState(INITIAL_ITEMS);
 	const [rankingRevision, setRankingRevision] = useState(0);
+	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
+		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
+		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
+	});
+	const [jitsiHeight, setJitsiHeight] = useState(() => {
+		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
+		return clampJitsiHeight(Number.isFinite(storedHeight) ? storedHeight : DEFAULT_JITSI_HEIGHT);
+	});
 	const isDraggingRef = useRef(false);
 	const pendingRankingRef = useRef<{ revision: number; items: string[] } | null>(null);
 	const { participantId, displayName, roomName } = useParticipantIdentity();
@@ -114,6 +142,10 @@ export default function MeetingRoom() {
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+	const meetingLayoutStyle = {
+		"--private-board-width": `${privateBoardWidth}px`,
+		"--jitsi-height": `${jitsiHeight}px`
+	} as CSSProperties;
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -191,6 +223,92 @@ export default function MeetingRoom() {
 	};
 
 	useEffect(() => {
+		const handleResize = () => {
+			setPrivateBoardWidth(current => clampPrivateBoardWidth(current));
+			setJitsiHeight(current => clampJitsiHeight(current));
+		};
+
+		window.addEventListener("resize", handleResize);
+		return () => window.removeEventListener("resize", handleResize);
+	}, []);
+
+	useEffect(() => {
+		window.localStorage.setItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY, String(privateBoardWidth));
+	}, [privateBoardWidth]);
+
+	useEffect(() => {
+		window.localStorage.setItem(JITSI_HEIGHT_STORAGE_KEY, String(jitsiHeight));
+	}, [jitsiHeight]);
+
+	const handlePrivateBoardResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const startX = event.clientX;
+		const startWidth = privateBoardWidth;
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			setPrivateBoardWidth(clampPrivateBoardWidth(startWidth - (moveEvent.clientX - startX)));
+		};
+
+		const handlePointerUp = () => {
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+
+	const handlePrivateBoardResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowLeft" ? 1 : -1;
+		setPrivateBoardWidth(current => clampPrivateBoardWidth(current + direction * 24));
+	};
+
+	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const startY = event.clientY;
+		const startHeight = jitsiHeight;
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			setJitsiHeight(clampJitsiHeight(startHeight + moveEvent.clientY - startY));
+		};
+
+		const handlePointerUp = () => {
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		document.body.style.cursor = "row-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+
+	const handleJitsiResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowDown" ? 1 : -1;
+		setJitsiHeight(current => clampJitsiHeight(current + direction * 24));
+	};
+
+	useEffect(() => {
 		if (isBoardStateMessage(lastMessage)) {
 			const nextRanking = {
 				revision: lastMessage.revision,
@@ -220,10 +338,26 @@ export default function MeetingRoom() {
 	}, [lastMessage]);
 
 	return (
-		<main className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_560px]">
-			<section className="grid min-w-0 grid-rows-[390px_minmax(0,1fr)_auto] gap-3 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
+		<main
+			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
+			style={meetingLayoutStyle}
+		>
+			<section className="grid min-w-0 grid-rows-[var(--jitsi-height)_10px_minmax(0,1fr)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
 					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
+				</div>
+				<div className="grid place-items-center">
+					<button
+						type="button"
+						className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						aria-label="調整 Jitsi 視訊高度"
+						aria-orientation="horizontal"
+						aria-valuemin={MIN_JITSI_HEIGHT}
+						aria-valuenow={jitsiHeight}
+						role="separator"
+						onPointerDown={handleJitsiResizeStart}
+						onKeyDown={handleJitsiResizeKeyDown}
+					/>
 				</div>
 
 				<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
@@ -288,7 +422,18 @@ export default function MeetingRoom() {
 				</div>
 			</section>
 
-			<aside className="min-h-0">
+			<aside className="relative min-h-0">
+				<button
+					type="button"
+					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+					aria-label="調整 Private Board 寬度"
+					aria-orientation="vertical"
+					aria-valuemin={MIN_PRIVATE_BOARD_WIDTH}
+					aria-valuenow={privateBoardWidth}
+					role="separator"
+					onPointerDown={handlePrivateBoardResizeStart}
+					onKeyDown={handlePrivateBoardResizeKeyDown}
+				/>
 				<PrivateBoard sessionId={sessionId} participantId={participantId} micMode={micMode} lastMessage={lastMessage} lastAudioMessage={lastAudioMessage} isConnected={isConnected} />
 			</aside>
 		</main>
