@@ -55,7 +55,7 @@ class IdeaBlockResponse(BaseModel):
     time_stamp: datetime
     title: str
     summary: str
-    transcript_id: int | None
+    transcript: str | None
     embedding_vector: list[float] | None
     similarity_id: UUID | None
 

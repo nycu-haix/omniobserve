@@ -76,7 +76,9 @@ class IdeaBlock(Base):
 
     @property
     def transcript(self) -> str | None:
-        return None
+        if "main_transcript" not in self.__dict__ or self.main_transcript is None:
+            return None
+        return self.main_transcript.transcript
 
     @transcript.setter
     def transcript(self, _: str | None) -> None:

@@ -68,7 +68,7 @@ def resolve_payload_session_name(payload: Any) -> str:
 
 
 @router.post(
-    "/sessions/{session_name}/idea-blocks/generate",
+    "/sessions/{session_name}/users/{user_id}/idea-blocks/generate",
     status_code=201,
     response_model=IdeaBlockGenerateResponse,
     responses=COMMON_ERROR_RESPONSES,
@@ -80,6 +80,7 @@ def resolve_payload_session_name(payload: Any) -> str:
 )
 async def generate_idea_blocks(
     session_name: str,
+    user_id: int,
     payload: IdeaBlockGenerateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockGenerateResponse:
@@ -97,7 +98,7 @@ async def generate_idea_blocks(
         idea_blocks = await generate_and_save_idea_blocks(
             db,
             session_name=session_name,
-            participant_id=payload.participant_id,
+            participant_id=str(user_id),
             visibility=payload.visibility,
             source_transcript_ids=[],
             transcript_text=transcript_text,

@@ -23,9 +23,49 @@ async def get_similarity(similarity_id: UUID, db: AsyncSession) -> Similarity:
     return similarity
 
 
+async def get_scoped_similarity(
+    similarity_id: UUID,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> Similarity:
+    result = await db.execute(
+        select(Similarity)
+        .join(IdeaBlock, IdeaBlock.similarity_id == Similarity.id)
+        .where(
+            Similarity.id == similarity_id,
+            IdeaBlock.session_name == session_name,
+            IdeaBlock.user_id == user_id,
+        )
+    )
+    similarity = result.scalar_one_or_none()
+    if similarity is None:
+        raise HTTPException(status_code=404, detail="Similarity not found")
+    return similarity
+
+
 async def list_similarities(db: AsyncSession) -> list[Similarity]:
     result = await db.execute(select(Similarity))
     return list(result.scalars().all())
+
+
+async def list_scoped_similarities(
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> list[Similarity]:
+    result = await db.execute(
+        select(Similarity)
+        .join(IdeaBlock, IdeaBlock.similarity_id == Similarity.id)
+        .where(
+            IdeaBlock.session_name == session_name,
+            IdeaBlock.user_id == user_id,
+        )
+        .order_by(Similarity.id.asc())
+    )
+    return list(result.scalars().unique().all())
 
 
 async def assign_similarity_to_idea_blocks(
@@ -93,6 +133,25 @@ async def assign_similarity_to_idea_blocks(
     )
 
 
+async def assign_scoped_similarity_to_idea_blocks(
+    idea_block_a_id: int,
+    idea_block_b_id: int,
+    similarity_reason: str,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> SimilarityAssignResponse:
+    await _require_scoped_idea_block(idea_block_a_id, session_name=session_name, user_id=user_id, db=db)
+    await _require_scoped_idea_block(idea_block_b_id, session_name=session_name, user_id=user_id, db=db)
+    return await assign_similarity_to_idea_blocks(
+        idea_block_a_id,
+        idea_block_b_id,
+        similarity_reason,
+        db,
+    )
+
+
 async def _require_similarity(similarity_id: UUID | None, db: AsyncSession) -> Similarity:
     if similarity_id is None:
         raise HTTPException(status_code=404, detail="Similarity not found")
@@ -107,3 +166,21 @@ def _append_reason(existing: str, new_reason: str) -> str:
     if not new_reason or new_reason in existing:
         return existing
     return f"{existing}\n\n{new_reason}"
+
+
+async def _require_scoped_idea_block(
+    idea_block_id: int,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> None:
+    result = await db.execute(
+        select(IdeaBlock.id).where(
+            IdeaBlock.id == idea_block_id,
+            IdeaBlock.session_name == session_name,
+            IdeaBlock.user_id == user_id,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Idea block not found")

@@ -3,44 +3,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas import TranscriptCreate, TranscriptResponse
-from ..services.transcript_service import create_transcript, get_transcript, list_transcripts_by_session
+from ..services.transcript_service import create_transcript, get_scoped_transcript, list_transcripts_by_session
 
 router = APIRouter(tags=["Transcripts"])
 
 
 @router.post(
-    "/transcripts",
+    "/sessions/{session_name}/users/{user_id}/transcripts",
     status_code=status.HTTP_201_CREATED,
     response_model=TranscriptResponse,
     summary="Create Transcript",
 )
 async def post_transcript(
+    session_name: str,
+    user_id: int,
     payload: TranscriptCreate,
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    return await create_transcript(payload, db)
+    scoped_payload = payload.model_copy(update={"session_name": session_name, "user_id": user_id})
+    return await create_transcript(scoped_payload, db)
 
 
 @router.get(
-    "/transcripts/{transcript_id}",
+    "/sessions/{session_name}/users/{user_id}/transcripts/{transcript_id}",
     response_model=TranscriptResponse,
     summary="Get Transcript By ID",
 )
 async def read_transcript(
+    session_name: str,
+    user_id: int,
     transcript_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    return await get_transcript(transcript_id, db)
+    return await get_scoped_transcript(transcript_id, session_name=session_name, user_id=user_id, db=db)
 
 
 @router.get(
-    "/sessions/{session_name}/transcripts",
+    "/sessions/{session_name}/users/{user_id}/transcripts",
     response_model=list[TranscriptResponse],
     summary="List Transcripts By Session Name",
 )
 async def read_session_transcripts(
     session_name: str,
-    user_id: int | None = None,
+    user_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> list[TranscriptResponse]:
     return await list_transcripts_by_session(session_name, user_id, db)

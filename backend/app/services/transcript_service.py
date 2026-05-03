@@ -21,6 +21,26 @@ async def get_transcript(transcript_id: int, db: AsyncSession) -> Transcript:
     return transcript
 
 
+async def get_scoped_transcript(
+    transcript_id: int,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> Transcript:
+    result = await db.execute(
+        select(Transcript).where(
+            Transcript.id == transcript_id,
+            Transcript.session_name == session_name,
+            Transcript.user_id == user_id,
+        )
+    )
+    transcript = result.scalar_one_or_none()
+    if transcript is None:
+        raise HTTPException(status_code=404, detail="Transcript not found")
+    return transcript
+
+
 async def list_transcripts_by_session(
     session_name: str,
     user_id: int | None,
