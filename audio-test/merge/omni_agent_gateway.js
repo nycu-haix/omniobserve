@@ -507,8 +507,9 @@
       }
 
 			if (this.running && this.scope !== scope) {
-				await this.stop();
-			}
+        await this.switchScope(scope);
+        return;
+      }
 
 			this.running = true;
 			this.scope = scope;
@@ -556,6 +557,42 @@
 				await this.stop();
 			}
 		}
+
+    async switchScope(scope) {
+      scope = normalizeMode(scope);
+
+      if (!this.running) {
+        await this.start(scope);
+        return;
+      }
+
+      if (this.scope === scope) {
+        return;
+      }
+
+      // 如果 WebSocket 已經不在，就退回原本完整重啟流程。
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        await this.stop();
+        await this.start(scope);
+        return;
+      }
+
+      const oldScope = this.scope;
+
+      this.scope = scope;
+      this.clientId = makeClientId(scope);
+      this.pendingPcm = new Float32Array(0);
+      this.sentChunkCount = 0;
+      this.hasReceivedAudioInput = false;
+      this.lastLevelLogTime = 0;
+      this.stopping = false;
+
+      // 不送 stop、不關 WebSocket，只送新的 start。
+      this.ws.send(JSON.stringify(this.buildStartMessage(scope)));
+
+      this.log(`🔁 Browser mic agent switched ${oldScope} → ${scope}`);
+      this.onStatusChange?.();
+    }
 
 		async stop() {
 			if (!this.running && this.stopping) return;

@@ -596,6 +596,7 @@ async def audio_ws(
     segment_buffer = []
 
     connection_start_time = time.monotonic()
+    has_received_start = False
 
     async def finalize_segment(end_reason: str):
         nonlocal speech_started
@@ -746,17 +747,71 @@ async def audio_ws(
                     continue
 
                 if msg_type == "start":
-                    source = msg.get("source", source)
-                    scope = msg.get("scope", scope)
-                    agent_type = msg.get("agentType", agent_type)
-                    room_name = msg.get("roomName", room_name)
-                    participant_id = msg.get("participantId", participant_id)
-                    user_id = msg.get("userId", user_id)
-                    display_name = msg.get("displayName", display_name)
-                    client_id = msg.get("clientId", client_id)
-                    input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
-                    encoding = msg.get("encoding", msg.get("format", encoding))
-                    channels = int(msg.get("channels", channels))
+                    next_source = msg.get("source", source)
+                    next_scope = msg.get("scope", scope)
+                    next_agent_type = msg.get("agentType", agent_type)
+                    next_room_name = msg.get("roomName", room_name)
+                    next_participant_id = msg.get("participantId", participant_id)
+                    next_user_id = msg.get("userId", user_id)
+                    next_display_name = msg.get("displayName", display_name)
+                    next_client_id = msg.get("clientId", client_id)
+                    next_input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
+                    next_encoding = msg.get("encoding", msg.get("format", encoding))
+                    next_channels = int(msg.get("channels", channels))
+
+                    current_stream_key = (
+                        source,
+                        scope,
+                        agent_type,
+                        room_name,
+                        participant_id,
+                        user_id,
+                        display_name,
+                        input_sample_rate,
+                        encoding,
+                        channels,
+                    )
+                    next_stream_key = (
+                        next_source,
+                        next_scope,
+                        next_agent_type,
+                        next_room_name,
+                        next_participant_id,
+                        next_user_id,
+                        next_display_name,
+                        next_input_sample_rate,
+                        next_encoding,
+                        next_channels,
+                    )
+
+                    stream_changed = has_received_start and next_stream_key != current_stream_key
+
+                    if stream_changed:
+                        print(
+                            "Control start indicates stream/mic-mode switch: "
+                            f"from scope={scope}, agentType={agent_type}, source={source} "
+                            f"to scope={next_scope}, agentType={next_agent_type}, source={next_source}"
+                        )
+
+                        # 先用舊 metadata 結束目前 segment
+                        await finalize_segment("mic_mode_switch")
+
+                        # 避免舊模式殘留音訊混進新模式
+                        pending_audio = np.zeros(0, dtype=np.float32)
+                        pre_buffer.clear()
+
+                    source = next_source
+                    scope = next_scope
+                    agent_type = next_agent_type
+                    room_name = next_room_name
+                    participant_id = next_participant_id
+                    user_id = next_user_id
+                    display_name = next_display_name
+                    client_id = next_client_id
+                    input_sample_rate = next_input_sample_rate
+                    encoding = next_encoding
+                    channels = next_channels
+                    has_received_start = True
 
                     print(
                         "Control start: "
