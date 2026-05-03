@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..schemas import IdeaBlockCreate, IdeaBlockResponse, IdeaBlockUpdate
+from ..schemas import IdeaBlockCreate, IdeaBlockListResponse, IdeaBlockResponse, IdeaBlockUpdate
 from ..services.idea_block_service import (
     create_idea_block,
     delete_scoped_idea_block,
@@ -34,7 +34,7 @@ async def post_idea_block(
 
 @router.get(
     "/sessions/{session_name}/users/{user_id}/idea-blocks",
-    response_model=list[IdeaBlockResponse],
+    response_model=list[IdeaBlockListResponse],
     summary="List Idea Blocks",
 )
 async def read_idea_blocks(
@@ -42,7 +42,7 @@ async def read_idea_blocks(
     user_id: int,
     similarity_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
-) -> list[IdeaBlockResponse]:
+) -> list[IdeaBlockListResponse]:
     return await list_idea_blocks(
         db,
         user_id=user_id,

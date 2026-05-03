@@ -7,13 +7,16 @@ from sqlalchemy.orm import selectinload
 
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
 from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
+from .embedding_service import create_title_embedding
 
 
 async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaBlock:
     if payload.transcript_id is not None and await db.get(Transcript, payload.transcript_id) is None:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
-    idea_block = IdeaBlock(**payload.model_dump(), similarity_id=None)
+    idea_block_data = payload.model_dump()
+    idea_block_data["embedding_vector"] = await create_title_embedding(payload.title)
+    idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
     return await get_idea_block(idea_block.id, db)
