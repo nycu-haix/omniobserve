@@ -292,3 +292,142 @@ async def handle_audio_stream_websocket(
             if not stop_received and websocket.client_state == WebSocketState.CONNECTED:
                 # Keep connection open unless stop arrives; close only in error paths above.
                 await websocket.close()
+
+
+def serialize_stream_idea_block(block: Any) -> dict[str, Any]:
+    return {
+        "id": block.id,
+        "session_name": block.session_name,
+        "participant_id": block.participant_id,
+        "visibility": block.visibility.value,
+        "content": block.content,
+        "summary": block.summary,
+        "transcript": block.transcript,
+        "created_at": to_iso_z(block.created_at),
+        "updated_at": to_iso_z(block.updated_at),
+    }
+
+
+def _normalize_visibility(value: Any) -> Visibility:
+    try:
+        return Visibility(value)
+    except ValueError:
+        return Visibility.PRIVATE
+
+
+def _timestamp_from_seconds(value: Any) -> datetime:
+    if isinstance(value, (int, float)) and value >= 0:
+        return utc_now() + timedelta(seconds=0)
+    return utc_now()
+
+
+async def handle_transcript_segments_websocket(
+    websocket: WebSocket,
+    *,
+    session_name: str,
+    participant_id: str,
+) -> None:
+    await websocket.accept()
+
+    pending_idea_segments: list[StreamTranscript] = []
+
+    async with SessionLocal() as db:
+
+        async def build_idea_blocks_payload(
+            *,
+            visibility: Visibility,
+            segments: list[StreamTranscript],
+        ) -> list[dict[str, Any]]:
+            transcript_text = "\n".join(item.text for item in segments if item.text).strip()
+            if not transcript_text:
+                return []
+
+            generated_blocks = await generate_and_save_idea_blocks(
+                db,
+                session_name=session_name,
+                participant_id=participant_id,
+                visibility=visibility,
+                source_transcript_ids=[item.segment_id for item in segments],
+                transcript_text=transcript_text,
+            )
+            await db.commit()
+            return [serialize_stream_idea_block(item) for item in generated_blocks]
+
+        try:
+            while True:
+                payload = await websocket.receive_json()
+                if not isinstance(payload, dict):
+                    continue
+
+                message_type = payload.get("type")
+                if message_type in {"ping", "heartbeat"}:
+                    await send_ws_json_safe(websocket, {"type": "pong"})
+                    continue
+                if message_type == "stop":
+                    await send_ws_json_safe(websocket, {"type": "transcript_segments_stopped"})
+                    await websocket.close()
+                    return
+                if message_type != "transcript_segment":
+                    continue
+
+                text = str(payload.get("text") or "").strip()
+                reason = str(payload.get("reason") or "").strip().lower()
+                visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
+                if not text:
+                    continue
+
+                timestamp = _timestamp_from_seconds(payload.get("start"))
+                saved_segment = await save_ws_transcript_segment(
+                    db,
+                    session_name=session_name,
+                    participant_id=participant_id,
+                    visibility=visibility,
+                    transcript_text=text,
+                    started_at=timestamp,
+                    ended_at=timestamp,
+                )
+                if saved_segment is None:
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "transcript_error",
+                            "reason": "save_failed",
+                        },
+                    )
+                    continue
+
+                await send_ws_json_safe(
+                    websocket,
+                    {
+                        "type": "transcript_update",
+                        "transcript_segment_id": saved_segment.segment_id,
+                        "text": saved_segment.text,
+                        "is_final": False,
+                        "reason": reason,
+                    },
+                )
+
+                if reason == "max_speech_ms":
+                    pending_idea_segments.append(saved_segment)
+                    continue
+
+                if reason == "silence":
+                    segments_for_llm = [*pending_idea_segments, saved_segment]
+                    pending_idea_segments = []
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "idea_blocks_update",
+                            "idea_blocks": await build_idea_blocks_payload(
+                                visibility=visibility,
+                                segments=segments_for_llm,
+                            ),
+                        },
+                    )
+
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            logger.exception("Unhandled transcript segment WebSocket error: %s", exc)
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close(code=1011)

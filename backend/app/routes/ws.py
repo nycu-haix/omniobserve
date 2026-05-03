@@ -6,7 +6,7 @@ from ..services.realtime import (
     handle_cue_websocket,
     handle_presence_websocket,
 )
-from ..services.streaming import handle_audio_stream_websocket
+from ..services.streaming import handle_audio_stream_websocket, handle_transcript_segments_websocket
 
 router = APIRouter()
 
@@ -70,6 +70,19 @@ async def audio_stream_websocket(
     participant_id: str = Query(...),
 ) -> None:
     await handle_audio_stream_websocket(
+        websocket,
+        session_name=session_name,
+        participant_id=participant_id,
+    )
+
+
+@router.websocket("/ws/sessions/{session_name}/transcript-segments")
+async def transcript_segments_websocket(
+    websocket: WebSocket,
+    session_name: str,
+    participant_id: str = Query(...),
+) -> None:
+    await handle_transcript_segments_websocket(
         websocket,
         session_name=session_name,
         participant_id=participant_id,
