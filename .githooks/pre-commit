@@ -1,2 +1,17 @@
-pnpm prettier $(git diff --cached --name-only --diff-filter=ACMR | sed 's| |\\ |g') --write --ignore-unknown
-git update-index --again
+#!/bin/sh
+set -e
+
+# 1. 執行 Prettier 自動排版
+FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -n "$FILES" ]; then
+  pnpm prettier $FILES --write --ignore-unknown
+  git update-index --again
+fi
+
+# 2. 執行 ESLint 檢查邏輯錯誤
+if echo "$FILES" | grep -q "^frontend/"; then
+  echo "👀 偵測到 frontend 變更，正在執行 ESLint 檢查..."
+  cd frontend
+  pnpm run lint
+  cd ..
+fi

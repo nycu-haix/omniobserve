@@ -195,69 +195,72 @@ export function useAudioStream(
 		});
 	}, []);
 
-	const stopAudioStream = useCallback(async (keepAudioResources = false) => {
-		stoppingRef.current = true;
+	const stopAudioStream = useCallback(
+		async (keepAudioResources = false) => {
+			stoppingRef.current = true;
 
-		const socket = socketRef.current;
-		const meta = activeMetaRef.current;
+			const socket = socketRef.current;
+			const meta = activeMetaRef.current;
 
-		socketRef.current = null;
-		activeMetaRef.current = null;
+			socketRef.current = null;
+			activeMetaRef.current = null;
 
-		try {
-			if (socket && socket.readyState === WebSocket.OPEN) {
-				const pending = pendingSamplesRef.current;
-				if (pending.length > 0) {
-					let offset = 0;
-					while (offset < pending.length) {
-						const chunk = pending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
-						offset += OUTPUT_CHUNK_SIZE;
-						socket.send(chunk.buffer);
+			try {
+				if (socket && socket.readyState === WebSocket.OPEN) {
+					const pending = pendingSamplesRef.current;
+					if (pending.length > 0) {
+						let offset = 0;
+						while (offset < pending.length) {
+							const chunk = pending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
+							offset += OUTPUT_CHUNK_SIZE;
+							socket.send(chunk.buffer);
+						}
+					}
+
+					if (meta) {
+						const stopMessage = {
+							type: "stop",
+							source: sourceForMode(meta.mode),
+							scope: meta.mode,
+							agentType: agentTypeForMode(meta.mode),
+							roomName: meta.sessionId,
+							sessionName: meta.sessionId,
+							participantId: meta.participantId,
+							userId: meta.participantId,
+							displayName: meta.displayName,
+							clientId: meta.clientId
+						};
+						console.info("[audio-ws] send stop", stopMessage);
+						socket.send(JSON.stringify(stopMessage));
 					}
 				}
+			} catch (error) {
+				console.warn("[audio-ws] failed to send final audio or stop message", error);
+			}
 
-				if (meta) {
-					const stopMessage = {
-						type: "stop",
-						source: sourceForMode(meta.mode),
-						scope: meta.mode,
-						agentType: agentTypeForMode(meta.mode),
-						roomName: meta.sessionId,
-						sessionName: meta.sessionId,
-						participantId: meta.participantId,
-						userId: meta.participantId,
-						displayName: meta.displayName,
-						clientId: meta.clientId
-					};
-					console.info("[audio-ws] send stop", stopMessage);
-					socket.send(JSON.stringify(stopMessage));
+			pendingSamplesRef.current = new Float32Array(0);
+
+			if (!keepAudioResources) {
+				cleanupAudioResources();
+			}
+
+			setIsAudioConnected(false);
+			setIsAudioStreaming(false);
+
+			if (socket) {
+				await waitForAudioStopAck(socket);
+
+				if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+					try {
+						socket.close(1000, "client_stop");
+					} catch (error) {
+						console.warn("[audio-ws] failed to close socket", error);
+					}
 				}
 			}
-		} catch (error) {
-			console.warn("[audio-ws] failed to send final audio or stop message", error);
-		}
-
-		pendingSamplesRef.current = new Float32Array(0);
-
-		if (!keepAudioResources) {
-			cleanupAudioResources();
-		}
-
-		setIsAudioConnected(false);
-		setIsAudioStreaming(false);
-
-		if (socket) {
-			await waitForAudioStopAck(socket);
-
-			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-				try {
-					socket.close(1000, "client_stop");
-				} catch (error) {
-					console.warn("[audio-ws] failed to close socket", error);
-				}
-			}
-		}
-	}, [cleanupAudioResources, waitForAudioStopAck]);
+		},
+		[cleanupAudioResources, waitForAudioStopAck]
+	);
 
 	const sendAudioSamples = useCallback((samples: Float32Array) => {
 		const pending = pendingSamplesRef.current;
