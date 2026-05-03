@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..schemas import TranscriptCreate, TranscriptResponse
+from ..schemas import TranscriptCreate, TranscriptCreateRequest, TranscriptResponse
 from ..services.transcript_service import create_transcript, get_scoped_transcript, list_transcripts_by_session
 
 router = APIRouter(tags=["Transcripts"])
@@ -17,10 +17,14 @@ router = APIRouter(tags=["Transcripts"])
 async def post_transcript(
     session_name: str,
     user_id: int,
-    payload: TranscriptCreate,
+    payload: TranscriptCreateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    scoped_payload = payload.model_copy(update={"session_name": session_name, "user_id": user_id})
+    scoped_payload = TranscriptCreate(
+        session_name=session_name,
+        user_id=user_id,
+        transcript=payload.transcript,
+    )
     return await create_transcript(scoped_payload, db)
 
 

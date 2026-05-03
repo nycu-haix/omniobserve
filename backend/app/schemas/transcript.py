@@ -9,6 +9,10 @@ class TranscriptCreate(BaseModel):
     transcript: str
 
 
+class TranscriptCreateRequest(BaseModel):
+    transcript: str
+
+
 class TranscriptResponse(BaseModel):
     id: int
     user_id: int

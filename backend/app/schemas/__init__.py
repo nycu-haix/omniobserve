@@ -20,7 +20,7 @@ from .similarity import (
 )
 from .stream import StreamContext, StreamTranscript
 from .task_item import TaskItemCreate, TaskItemResponse
-from .transcript import TranscriptCreate, TranscriptResponse
+from .transcript import TranscriptCreate, TranscriptCreateRequest, TranscriptResponse
 
 __all__ = [
     "ApiError",
@@ -49,5 +49,6 @@ __all__ = [
     "TaskItemCreate",
     "TaskItemResponse",
     "TranscriptCreate",
+    "TranscriptCreateRequest",
     "TranscriptResponse",
 ]
