@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..schemas import (
     IdeaBlockCreate,
+    IdeaBlockCreateRequest,
     IdeaBlockListResponse,
     IdeaBlockOverviewResponse,
     IdeaBlockResponse,
@@ -56,10 +57,16 @@ async def read_all_session_idea_blocks(
 async def post_idea_block(
     session_name: str,
     user_id: int,
-    payload: IdeaBlockCreate,
+    payload: IdeaBlockCreateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockResponse:
-    scoped_payload = payload.model_copy(update={"session_name": session_name, "user_id": user_id})
+    scoped_payload = IdeaBlockCreate(
+        session_name=session_name,
+        user_id=user_id,
+        title=payload.title,
+        summary=payload.summary,
+        transcript_id=payload.transcript_id,
+    )
     return await create_idea_block(scoped_payload, db)
 
 

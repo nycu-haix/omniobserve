@@ -27,6 +27,19 @@ class IdeaBlockCreate(BaseModel):
         return value
 
 
+class IdeaBlockCreateRequest(BaseModel):
+    title: str
+    summary: str
+    transcript_id: int | None = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title_length(cls, value: str) -> str:
+        if len(value) > 10:
+            raise ValueError("title must be at most 10 characters")
+        return value
+
+
 class IdeaBlockUpdate(BaseModel):
     title: str | None = None
     summary: str | None = None

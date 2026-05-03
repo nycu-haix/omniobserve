@@ -12,6 +12,7 @@ from .board import (
 from .errors import ApiError, ErrorResponse
 from .idea_block import (
     IdeaBlockCreate,
+    IdeaBlockCreateRequest,
     IdeaBlockListResponse,
     IdeaBlockOverviewResponse,
     IdeaBlockResponse,
@@ -37,6 +38,7 @@ __all__ = [
     "FrontendMockBoardSeedResponse",
     "GeneratedIdeaBlockResponse",
     "IdeaBlockCreate",
+    "IdeaBlockCreateRequest",
     "IdeaBlockGenerateRequest",
     "IdeaBlockGenerateResponse",
     "IdeaBlockListResponse",
