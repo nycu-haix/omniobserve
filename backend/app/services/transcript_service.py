@@ -52,3 +52,19 @@ async def list_transcripts_by_session(
     stmt = stmt.order_by(Transcript.time_stamp.asc(), Transcript.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def list_transcripts(
+    db: AsyncSession,
+    *,
+    session_name: str | None = None,
+    user_id: int | None = None,
+) -> list[Transcript]:
+    stmt = select(Transcript)
+    if session_name is not None:
+        stmt = stmt.where(Transcript.session_name == session_name)
+    if user_id is not None:
+        stmt = stmt.where(Transcript.user_id == user_id)
+    stmt = stmt.order_by(Transcript.session_name.asc(), Transcript.user_id.asc(), Transcript.time_stamp.asc(), Transcript.id.asc())
+    result = await db.execute(stmt)
+    return list(result.scalars().all())

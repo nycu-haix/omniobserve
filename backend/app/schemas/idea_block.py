@@ -70,3 +70,15 @@ class IdeaBlockListResponse(BaseModel):
     similarity_id: UUID | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class IdeaBlockOverviewResponse(BaseModel):
+    id: int
+    user_id: int
+    session_name: str
+    summary: str
+    title: str
+    transcript: str | None
+    similarity_id: UUID | None
+
+    model_config = ConfigDict(from_attributes=True)

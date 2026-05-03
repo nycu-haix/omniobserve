@@ -3,9 +3,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas import TranscriptCreate, TranscriptCreateRequest, TranscriptResponse
-from ..services.transcript_service import create_transcript, get_scoped_transcript, list_transcripts_by_session
+from ..services.transcript_service import (
+    create_transcript,
+    get_scoped_transcript,
+    list_transcripts,
+    list_transcripts_by_session,
+)
 
 router = APIRouter(tags=["Transcripts"])
+
+
+@router.get(
+    "/transcripts",
+    response_model=list[TranscriptResponse],
+    summary="List All Transcripts",
+)
+async def read_all_transcripts(
+    db: AsyncSession = Depends(get_db),
+) -> list[TranscriptResponse]:
+    return await list_transcripts(db)
+
+
+@router.get(
+    "/sessions/{session_name}/transcripts",
+    response_model=list[TranscriptResponse],
+    summary="List Transcripts For Session",
+)
+async def read_all_session_transcripts(
+    session_name: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[TranscriptResponse]:
+    return await list_transcripts(db, session_name=session_name)
 
 
 @router.post(

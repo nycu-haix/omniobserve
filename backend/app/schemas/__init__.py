@@ -10,7 +10,13 @@ from .board import (
     IdeaBlockUpdateResponse,
 )
 from .errors import ApiError, ErrorResponse
-from .idea_block import IdeaBlockCreate, IdeaBlockListResponse, IdeaBlockResponse, IdeaBlockUpdate
+from .idea_block import (
+    IdeaBlockCreate,
+    IdeaBlockListResponse,
+    IdeaBlockOverviewResponse,
+    IdeaBlockResponse,
+    IdeaBlockUpdate,
+)
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
 from .similarity import (
     SimilarityAssignRequest,
@@ -34,6 +40,7 @@ __all__ = [
     "IdeaBlockGenerateRequest",
     "IdeaBlockGenerateResponse",
     "IdeaBlockListResponse",
+    "IdeaBlockOverviewResponse",
     "IdeaBlockResponse",
     "IdeaBlockToTranscriptCreate",
     "IdeaBlockToTranscriptResponse",
