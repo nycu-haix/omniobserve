@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT
+from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT, TOPIC_DESCRIPTION
 from ..db import get_db
 from ..schemas import (
     ApiError,
@@ -17,6 +17,7 @@ from ..schemas import (
     IdeaBlockGenerateResponse,
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
+    TopicDescriptionResponse,
 )
 from ..services.board_payloads import (
     serialize_frontend_board_idea_block,
@@ -34,6 +35,16 @@ COMMON_ERROR_RESPONSES = {
     422: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
 }
+
+
+@router.get(
+    "/api/topic-description",
+    response_model=TopicDescriptionResponse,
+    summary="Get Topic Description",
+    description="Returns only the ranking task topic description for frontend display.",
+)
+async def get_topic_description() -> TopicDescriptionResponse:
+    return TopicDescriptionResponse(topic_description=TOPIC_DESCRIPTION)
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:

@@ -105,3 +105,7 @@ class FrontendMockBoardSeedResponse(BaseModel):
     accepted: bool
     transcript_count: int
     generated_count: int
+
+
+class TopicDescriptionResponse(BaseModel):
+    topic_description: str
