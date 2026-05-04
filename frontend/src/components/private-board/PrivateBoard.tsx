@@ -175,6 +175,10 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 	};
 }
 
+function shouldSyncAudioTranscriptFromDb(message: AudioTranscriptMessage, line: TranscriptLineType): boolean {
+	return message.type === "transcript_update" && isDbTranscriptId(line.id);
+}
+
 function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineType): TranscriptLineType[] {
 	const normalizedText = line.text.trim();
 	if (!normalizedText) {
@@ -375,7 +379,9 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
 			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
-			void ensureTranscriptPersisted(transcriptLine);
+			if (shouldSyncAudioTranscriptFromDb(lastAudioMessage, transcriptLine)) {
+				void ensureTranscriptPersisted(transcriptLine);
+			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
