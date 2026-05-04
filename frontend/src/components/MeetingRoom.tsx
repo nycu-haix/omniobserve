@@ -61,6 +61,8 @@ const DEFAULT_JITSI_HEIGHT = 390;
 const MIN_JITSI_HEIGHT = 240;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const LOST_AT_SEA_TASK_DETAIL =
+	"你和你的團隊被困在南太平洋的一艘橡皮救生筏上，具體位置不詳，周圍看不到陸地。團隊無法確定方向，也沒有足夠能力自行划回岸邊，因此主要策略是留在救生筏上、保存體力並等待救援。請根據物品對生存的重要程度進行排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。每個物品需附上簡短理由。";
 
 function clampPrivateBoardWidth(width: number) {
 	const availableWidth = window.innerWidth - 32 - 16;
@@ -188,6 +190,7 @@ export default function MeetingRoom() {
 	const [privateItems, setPrivateItems] = useState(INITIAL_ITEMS);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
+	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [topicDescription, setTopicDescription] = useState("");
 	const [topicDescriptionError, setTopicDescriptionError] = useState<string | null>(null);
 	const [isTopicDescriptionLoading, setIsTopicDescriptionLoading] = useState(true);
@@ -517,16 +520,24 @@ export default function MeetingRoom() {
 					/>
 				</div>
 
-				<Tabs defaultValue="ranking" className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
+				<Tabs defaultValue="ranking" className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
 						<div className="flex min-w-0 flex-wrap items-center gap-3">
-							<h2 className="text-base font-semibold">海上求生排序</h2>
+							<button
+								type="button"
+								className="text-left text-base font-semibold transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+								aria-expanded={isTaskDetailOpen}
+								onClick={() => setIsTaskDetailOpen(current => !current)}
+							>
+								海上求生排序
+							</button>
 							<TabsList>
 								<TabsTrigger value="ranking">排序</TabsTrigger>
 								<TabsTrigger value="description">題目敘述</TabsTrigger>
 							</TabsList>
 						</div>
 					</header>
+					{isTaskDetailOpen && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{LOST_AT_SEA_TASK_DETAIL}</p>}
 					<TabsContent value="ranking" className="mt-0 grid h-full min-h-0 gap-3 overflow-y-auto pr-1 data-[state=inactive]:hidden lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
 						<LostAtSeaRankingPanel
 							title="Public 排序"
