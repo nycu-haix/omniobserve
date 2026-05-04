@@ -42,6 +42,9 @@
   const DEFAULT_API_BASE_WS_URL =
     APP_DEFAULTS.apiBaseWsUrl || "ws://" + window.location.hostname + ":8001";
 
+  const DEFAULT_TRANSCRIPT_BASE_WS_URL =
+    APP_DEFAULTS.transcriptBaseWsUrl || "ws://" + window.location.hostname + ":8000";
+
   const SAMPLE_RATE = 16000;
   const SEND_CHUNK_SIZE = 512;
   const PROCESSOR_BUFFER_SIZE = 4096;
@@ -92,6 +95,7 @@
     ui.roomNameInput.value = initialConfig.roomName;
     ui.jitsiUrlInput.value = initialConfig.jitsiUrl;
     ui.apiWsUrlInput.value = initialConfig.apiWsUrl;
+    ui.transcriptWsUrlInput.value = initialConfig.transcriptWsUrl;
     ui.userIdInput.value = initialConfig.userId;
     ui.displayNameInput.value = initialConfig.displayName;
 
@@ -191,10 +195,18 @@
       APP_DEFAULTS.apiWsUrl ||
       "";
 
+    const transcriptWsUrl =
+      params.get("transcriptWsUrl") ||
+      window.AGENT_TRANSCRIPT_WS_URL ||
+      localStorageGet("omni.transcriptWsUrl", "") ||
+      APP_DEFAULTS.transcriptWsUrl ||
+      "";
+
     return {
       roomName,
       jitsiUrl,
       apiWsUrl,
+      transcriptWsUrl,
       userId,
       displayName
     };
@@ -224,10 +236,15 @@
       ui.apiWsUrlInput.value.trim() ||
       buildDefaultApiWsUrl(roomName, userId);
 
+    const transcriptWsUrl =
+      ui.transcriptWsUrlInput.value.trim() ||
+      buildDefaultTranscriptWsUrl(roomName, userId);
+
     return {
       roomName,
       jitsiUrl,
       apiWsUrl,
+      transcriptWsUrl,
       userId,
       displayName
     };
@@ -481,6 +498,7 @@
       this.silentGain = null;
 
       this.ws = null;
+      this.transcriptWs = null;
       this.clientId = null;
 
       this.pendingPcm = new Float32Array(0);
@@ -530,9 +548,10 @@
 				// this.log(`Room Name: ${config.roomName}`);
 				// this.log(`API WebSocket: ${config.apiWsUrl}`);
 
-				await this.connectWebSocket(scope);
-
-				if (this.stopping) return;
+					await this.connectWebSocket(scope);
+					this.connectTranscriptWebSocket();
+	
+					if (this.stopping) return;
 
 				this.micStream = await navigator.mediaDevices.getUserMedia({
 					audio: {
@@ -642,15 +661,16 @@
 				this.micStream = null;
 			}
 
-			await this.closeWebSocket(oldScope);
+				await this.closeWebSocket(oldScope);
+				this.closeTranscriptWebSocket();
 
-			if (this.audioContext) {
-				try {
-					await this.audioContext.close();
-				} catch {}
+				if (this.audioContext) {
+					try {
+						await this.audioContext.close();
+					} catch {}
 
-				this.audioContext = null;
-			}
+					this.audioContext = null;
+				}
 
 			this.pendingPcm = new Float32Array(0);
 			this.sentChunkCount = 0;
@@ -660,10 +680,106 @@
 				this.log(`✅ Browser mic agent stopped: ${oldScope}`);
 			}
 
-			this.onStatusChange?.();
-		}
+				this.onStatusChange?.();
+			}
 
-		async connectWebSocket(scope) {
+			connectTranscriptWebSocket() {
+				const config = this.getConfig();
+				if (!config.transcriptWsUrl) return;
+				if (this.transcriptWs && this.transcriptWs.readyState === WebSocket.OPEN) return;
+
+				try {
+					this.transcriptWs = new WebSocket(config.transcriptWsUrl);
+				} catch (err) {
+					this.log(`⚠️ Transcript WebSocket create failed: ${err.message || err}`);
+					return;
+				}
+
+				this.transcriptWs.onopen = () => {
+					this.debug("Transcript WebSocket connected");
+				};
+
+				this.transcriptWs.onerror = err => {
+					console.warn("Transcript WebSocket error:", err);
+				};
+
+				this.transcriptWs.onmessage = event => {
+					this.handleTranscriptWebSocketMessage(event);
+				};
+
+				this.transcriptWs.onclose = () => {
+					this.debug("Transcript WebSocket closed");
+				};
+			}
+
+			closeTranscriptWebSocket() {
+				if (!this.transcriptWs) return;
+
+				try {
+					if (this.transcriptWs.readyState === WebSocket.OPEN) {
+						this.transcriptWs.send(JSON.stringify({ type: "stop" }));
+					}
+				} catch (err) {
+					console.warn("Failed to send transcript WebSocket stop:", err);
+				}
+
+				try {
+					this.transcriptWs.close();
+				} catch {}
+
+				this.transcriptWs = null;
+			}
+
+			sendTranscriptSegment(data) {
+				if (!this.transcriptWs || this.transcriptWs.readyState !== WebSocket.OPEN) {
+					this.debug("Transcript WebSocket not open; transcript segment not forwarded");
+					return;
+				}
+
+				if (!data?.text || !data?.reason) {
+					return;
+				}
+
+				const config = this.getConfig();
+				this.transcriptWs.send(JSON.stringify({
+					type: "transcript_segment",
+					scope: data.scope || this.scope,
+					reason: data.reason,
+					text: data.text,
+					start: data.start,
+					end: data.end,
+					duration: data.duration,
+					roomName: data.roomName || config.roomName,
+					participantId: data.participantId || data.userId || config.userId,
+					userId: data.userId || config.userId,
+					displayName: data.displayName || config.displayName,
+					source: data.source || sourceForScope(this.scope),
+					agentType: data.agentType || agentTypeForScope(this.scope)
+				}));
+			}
+
+			handleTranscriptWebSocketMessage(event) {
+				if (typeof event.data !== "string") {
+					return;
+				}
+
+				try {
+					const data = JSON.parse(event.data);
+					if (data.type === "idea_blocks_update") {
+						this.log(`🧠 idea blocks update: ${Array.isArray(data.idea_blocks) ? data.idea_blocks.length : 0}`);
+						return;
+					}
+					if (data.type === "transcript_update") {
+						this.debug(`Transcript relay saved: ${data.transcript_segment_id || "unknown"}`);
+						return;
+					}
+					this.debug("Transcript WS: " + event.data);
+				} catch {
+					this.debug("Transcript WS: " + event.data);
+				}
+			}
+	
+			async connectWebSocket(scope) {
 			const config = this.getConfig();
 			this.clientId = makeClientId(scope);
 
@@ -795,12 +911,13 @@
 					return;
 				}
 
-				if (data.type === "transcript" || data.type === "transcript.final") {
-					const speaker = data.displayName || data.userId || this.getConfig().displayName;
-
-					this.log(`📝 ${data.scope || this.scope} transcript / ${speaker}: ${data.text}`);
-					return;
-				}
+					if (data.type === "transcript" || data.type === "transcript.final") {
+						const speaker = data.displayName || data.userId || this.getConfig().displayName;
+	
+						this.log(`📝 ${data.scope || this.scope} transcript / ${speaker}: ${data.text}`);
+						this.sendTranscriptSegment(data);
+						return;
+					}
 
 				this.debug("Backend: " + text);
 			} catch {
@@ -1144,16 +1261,27 @@
     return `${base}/?room=${safeRoomName}&id=${safeDisplayName}`;
     }
 
-  function buildDefaultApiWsUrl(roomName, participantId) {
-    const base = String(DEFAULT_API_BASE_WS_URL || "ws://" + window.location.hostname + ":8001")
-      .trim()
-      .replace(/\/+$/g, "");
+	  function buildDefaultApiWsUrl(roomName, participantId) {
+	    const base = String(DEFAULT_API_BASE_WS_URL || "ws://" + window.location.hostname + ":8001")
+	      .trim()
+	      .replace(/\/+$/g, "");
+	
+	    return (
+	      `${base}/sessions/${encodeURIComponent(roomName)}` +
+	      `/audio-stream?participant_id=${encodeURIComponent(participantId)}`
+	    );
+	  }
 
-    return (
-      `${base}/sessions/${encodeURIComponent(roomName)}` +
-      `/audio-stream?participant_id=${encodeURIComponent(participantId)}`
-    );
-  }
+	  function buildDefaultTranscriptWsUrl(roomName, participantId) {
+	    const base = String(DEFAULT_TRANSCRIPT_BASE_WS_URL || "ws://" + window.location.hostname + ":8000")
+	      .trim()
+	      .replace(/\/+$/g, "");
+
+	    return (
+	      `${base}/ws/sessions/${encodeURIComponent(roomName)}` +
+	      `/transcript-segments?participant_id=${encodeURIComponent(participantId)}`
+	    );
+	  }
 
   function sourceForScope(scope) {
     return normalizeMode(scope) === "private"
@@ -1310,6 +1438,7 @@
       "roomNameInput",
       "jitsiUrlInput",
       "apiWsUrlInput",
+      "transcriptWsUrlInput",
       "userIdInput",
       "displayNameInput",
 
@@ -1346,6 +1475,7 @@
       roomNameInput: document.getElementById("roomNameInput"),
       jitsiUrlInput: document.getElementById("jitsiUrlInput"),
       apiWsUrlInput: document.getElementById("apiWsUrlInput"),
+      transcriptWsUrlInput: document.getElementById("transcriptWsUrlInput"),
       userIdInput: document.getElementById("userIdInput"),
       displayNameInput: document.getElementById("displayNameInput"),
 
@@ -1377,6 +1507,7 @@
     localStorageSet("omni.roomName", config.roomName);
     localStorageSet("omni.jitsiUrl", config.jitsiUrl);
     localStorageSet("omni.apiWsUrl", ui.apiWsUrlInput.value.trim());
+    localStorageSet("omni.transcriptWsUrl", ui.transcriptWsUrlInput.value.trim());
     localStorageSet("omni.userId", config.userId);
     localStorageSet("omni.displayName", config.displayName);
 
@@ -1384,6 +1515,7 @@
     log(`Room name: ${config.roomName}`);
     log(`Jitsi URL: ${config.jitsiUrl}`);
     log(`Audio WebSocket: ${config.apiWsUrl}`);
+    log(`Transcript WebSocket: ${config.transcriptWsUrl}`);
     log(`User ID: ${config.userId}`);
     log(`Display Name: ${config.displayName}`);
 
