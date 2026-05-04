@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
+from .embedding_service import create_text_embedding
 from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
 from .embedding_service import create_text_embedding
 
@@ -144,16 +145,31 @@ async def update_scoped_idea_block(
         else:
             idea_block.main_transcript.transcript = transcript_value
 
+    # Update embedding vector if summary (which is used for embedding) is being updated
+    if "summary" in update_data and update_data["summary"] is not None:
+        update_data["embedding_vector"] = await create_text_embedding(update_data["summary"])
+
     for field, value in update_data.items():
         setattr(idea_block, field, value)
 
     await db.commit()
-    return await get_scoped_idea_block(
+
+    updated_idea_block = await get_scoped_idea_block(
         idea_block_id,
         session_name=session_name,
         user_id=user_id,
         db=db,
     )
+
+    # Trigger similarity check with the updated idea block
+    await trigger_similarity_check(
+        updated_idea_block,
+        session_name=session_name,
+        user_id=user_id,
+        db=db,
+    )
+
+    return updated_idea_block
 
 
 async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
@@ -181,3 +197,33 @@ async def delete_scoped_idea_block(
     await db.execute(delete(IdeaBlockToTranscript).where(IdeaBlockToTranscript.idea_blocks_id == idea_block_id))
     await db.delete(idea_block)
     await db.commit()
+
+
+async def trigger_similarity_check(
+    updated_idea_block: IdeaBlock,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> None:
+    """
+    Check for similarities with other idea blocks and send cues if found.
+    This is a simplified version that could be enhanced with proper vector similarity search.
+    """
+    # For now, this is a placeholder. In a full implementation, you would:
+    # 1. Query other idea blocks with embeddings in the same session
+    # 2. Calculate cosine similarity between vectors
+    # 3. If similarity > threshold, create/update similarity clusters
+    # 4. Send WebSocket messages to notify clients of similarity cues
+
+    # This function is called after updating an idea block to potentially
+    # trigger similarity analysis with the updated content.
+
+    # TODO: Implement actual similarity calculation using vector embeddings
+    # For example:
+    # - Get all idea blocks in the session with embeddings
+    # - Calculate cosine similarity with updated_idea_block.embedding_vector
+    # - If similarity > 0.8, create or update similarity cluster
+    # - Send similarity_cue WebSocket messages
+
+    pass

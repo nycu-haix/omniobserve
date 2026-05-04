@@ -25,7 +25,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const isGenerating = block.status === "generating";
 	const Chevron = block.expanded ? ChevronDown : ChevronRight;
-	const canSave = draftSummary.trim().length > 0 && !isSaving;
+	const titleLength = draftSummary.trim().length;
+	const titleTooLong = titleLength > 10;
+	const canSave = titleLength > 0 && !titleTooLong && !isSaving;
 
 	useEffect(() => {
 		if (isEditing) {
@@ -209,11 +211,23 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</TabsContent>
 						<TabsContent className="grid gap-2 text-sm leading-6" value="content">
 							{isEditing ? (
-								<textarea
-									className="min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
-									value={draftSummary}
-									onChange={event => setDraftSummary(event.target.value)}
-								/>
+								<div className="grid gap-2">
+									<textarea
+										className={cn(
+											"min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
+											titleTooLong && "border-destructive focus:border-destructive"
+										)}
+										value={draftSummary}
+										onChange={event => setDraftSummary(event.target.value)}
+										placeholder="輸入標題（最多10個字）"
+									/>
+									<div className="flex items-center justify-between text-xs">
+										<span className={titleTooLong ? "text-destructive font-semibold" : "text-muted-foreground"}>
+											字數：{titleLength}/10
+										</span>
+										{titleTooLong && <span className="text-destructive font-semibold">⚠️ 超過10個字，請刪減至10字以下</span>}
+									</div>
+								</div>
 							) : (
 								block.summary || "-"
 							)}
