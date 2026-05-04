@@ -101,10 +101,6 @@ function buildTranscriptUrl(sessionId: string, participantId: string): string {
 	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
 }
 
-function buildTranscriptCreateUrl(sessionId: string, participantId: string): string {
-	return buildTranscriptUrl(sessionId, participantId);
-}
-
 function buildTranscriptDetailUrl(sessionId: string, participantId: string, transcriptId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
 	const userId = getTranscriptUserId(participantId);
@@ -335,33 +331,23 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		return () => window.clearTimeout(timer);
 	}, [lastMessage]);
 
-	const ensureTranscriptPersisted = useCallback(
+	const syncTranscriptFromDb = useCallback(
 		async (line: TranscriptLineType) => {
 			try {
-				if (isDbTranscriptId(line.id)) {
-					const existingResponse = await fetch(buildTranscriptDetailUrl(sessionId, participantId, line.id));
-					if (existingResponse.ok) {
-						const savedLine = transcriptResponseToLine((await existingResponse.json()) as TranscriptResponse);
-						setTranscriptLines(prev => appendTranscriptLine(prev, savedLine));
-						setTranscriptRefreshKey(current => current + 1);
-						return;
-					}
+				if (!isDbTranscriptId(line.id)) {
+					return;
 				}
 
-				const response = await fetch(buildTranscriptCreateUrl(sessionId, participantId), {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ transcript: line.text })
-				});
-				if (!response.ok) {
-					throw new Error("Failed to persist transcript");
+				const existingResponse = await fetch(buildTranscriptDetailUrl(sessionId, participantId, line.id));
+				if (!existingResponse.ok) {
+					throw new Error("Failed to load persisted transcript");
 				}
 
-				const savedLine = transcriptResponseToLine((await response.json()) as TranscriptResponse);
+				const savedLine = transcriptResponseToLine((await existingResponse.json()) as TranscriptResponse);
 				setTranscriptLines(prev => appendTranscriptLine(prev, savedLine));
 				setTranscriptRefreshKey(current => current + 1);
 			} catch (error) {
-				console.warn("[private-board] failed to persist live transcript", error);
+				console.warn("[private-board] failed to sync persisted transcript", error);
 			}
 		},
 		[participantId, sessionId]
@@ -380,12 +366,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
 			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
 			if (shouldSyncAudioTranscriptFromDb(lastAudioMessage, transcriptLine)) {
-				void ensureTranscriptPersisted(transcriptLine);
+				void syncTranscriptFromDb(transcriptLine);
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ensureTranscriptPersisted, lastAudioMessage]);
+	}, [lastAudioMessage, syncTranscriptFromDb]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
