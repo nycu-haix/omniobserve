@@ -212,9 +212,16 @@ async def create_frontend_board_block(
     description="Returns the participant ids currently connected to the session presence channel.",
 )
 async def get_session_presence(session_name: str) -> dict[str, Any]:
+    participants = sorted(
+        {
+            *presence_manager.get_participants(session_name),
+            *board_manager.get_participants(session_name),
+        }
+    )
+
     return {
         "session_name": session_name,
-        "participants": presence_manager.get_participants(session_name),
+        "participants": participants,
     }
 
 
