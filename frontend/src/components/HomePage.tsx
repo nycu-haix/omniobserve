@@ -2,7 +2,7 @@ import { Check, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getDefaultParticipantName, getNextAvailableParticipantId, isValidParticipantId, normalizeParticipantId } from "../lib/participantDefaults";
-import { apiUrl } from "../services/api";
+import { fetchSessionParticipants } from "../services/presence";
 import { Button } from "./ui/Button";
 
 const defaultSessionName = getDefaultRoomName();
@@ -14,18 +14,6 @@ function buildMeetingUrl(sessionName: string, participantId: string, displayName
 	params.set("name", displayName.trim() || "User");
 
 	return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
-}
-
-async function fetchSessionParticipants(sessionName: string, signal?: AbortSignal) {
-	const normalizedSessionName = sessionName.trim() || defaultSessionName;
-	const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(normalizedSessionName)}/presence`), { signal });
-
-	if (!response.ok) {
-		throw new Error("Failed to fetch session presence.");
-	}
-
-	const payload = (await response.json()) as { participants?: unknown };
-	return Array.isArray(payload.participants) ? payload.participants.filter((item): item is string => typeof item === "string") : [];
 }
 
 export function HomePage() {
