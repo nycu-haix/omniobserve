@@ -136,7 +136,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 					<Tabs value={detailTab} onValueChange={setDetailTab}>
 						<TabsList>
 							<TabsTrigger value="ai">AI 統整</TabsTrigger>
-							<TabsTrigger value="content">內容</TabsTrigger>
+							{isEditing && <TabsTrigger value="content">標題</TabsTrigger>}
 							<TabsTrigger value="transcript">逐字稿</TabsTrigger>
 							{block.hasCue && <Badge variant="secondary">Similarity</Badge>}
 						</TabsList>
