@@ -28,6 +28,24 @@ RANKING_ITEMS = [
     "vhf_radio",
 ]
 
+RANKING_ITEM_DISPLAY_NAMES = {
+    "mosquito_net": ("蚊帳", "mosquito net"),
+    "petrol": ("一罐汽油", "petrol, gasoline"),
+    "water_container": ("裝水容器", "water container"),
+    "shaving_mirror": ("刮鬍鏡／小鏡子", "shaving mirror, small mirror"),
+    "sextant": ("六分儀", "sextant"),
+    "emergency_rations": ("緊急口糧", "emergency rations"),
+    "sea_chart": ("海圖", "sea chart"),
+    "floating_cushion": ("漂浮坐墊", "floating cushion"),
+    "rope": ("繩子", "rope"),
+    "chocolate_bars": ("巧克力棒", "chocolate bars"),
+    "waterproof_sheet": ("防水布", "waterproof sheet, tarpaulin"),
+    "fishing_rod": ("釣魚竿", "fishing rod"),
+    "shark_repellent": ("驅鯊劑", "shark repellent"),
+    "rum": ("一瓶蘭姆酒", "rum"),
+    "vhf_radio": ("VHF 無線電", "VHF radio"),
+}
+
 
 async def build_task_item_ids_with_llm(text: str) -> list[int]:
     mock_ids = _build_mock_task_item_ids()
@@ -48,11 +66,18 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
             details={"hint": "Set OPENAI_API_KEY or TASK_ITEM_MOCK_IDS for local Swagger testing"},
         )
 
-    item_lines = "\n".join(f"{index}. {item}" for index, item in enumerate(RANKING_ITEMS, start=1))
+    item_lines = "\n".join(
+        _format_ranking_item_line(index, item)
+        for index, item in enumerate(RANKING_ITEMS, start=1)
+    )
     system_prompt = (
         "You are a survival-task assistant. The predefined item list uses 1-based ids:\n"
         f"{item_lines}\n\n"
         "Given the user input, decide which list items are being discussed. "
+        "The input may be in Mandarin Chinese, English, or mixed language. "
+        "Match against the item id, Chinese display name, and English aliases. "
+        "Return every matching item mentioned or clearly referred to in the input; "
+        "do not limit the answer to only the most important or most recent item. "
         'Return only JSON in this exact shape: {"task_item_ids":[...]} . '
         'If unrelated, return {"task_item_ids":[]}.'
     )
@@ -151,6 +176,11 @@ def _normalize_task_item_ids(values: list[Any]) -> list[int]:
         seen.add(value)
         normalized.append(value)
     return normalized
+
+
+def _format_ranking_item_line(index: int, item_id: str) -> str:
+    chinese_name, english_aliases = RANKING_ITEM_DISPLAY_NAMES[item_id]
+    return f"{index}. {item_id} - {chinese_name} ({english_aliases})"
 
 
 def _build_mock_task_item_ids() -> list[int] | None:
