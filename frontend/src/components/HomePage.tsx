@@ -16,11 +16,25 @@ function buildMeetingUrl(sessionName: string, participantId: string, displayName
 	return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
 }
 
+async function fetchSessionParticipants(sessionName: string, signal?: AbortSignal) {
+	const normalizedSessionName = sessionName.trim() || defaultSessionName;
+	const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(normalizedSessionName)}/presence`), { signal });
+
+	if (!response.ok) {
+		throw new Error("Failed to fetch session presence.");
+	}
+
+	const payload = (await response.json()) as { participants?: unknown };
+	return Array.isArray(payload.participants) ? payload.participants.filter((item): item is string => typeof item === "string") : [];
+}
+
 export function HomePage() {
 	const [sessionName, setSessionName] = useState(defaultSessionName);
 	const [participantId, setParticipantId] = useState("1");
 	const [displayName, setDisplayName] = useState(getDefaultParticipantName("1"));
 	const [copied, setCopied] = useState(false);
+	const [participantIdError, setParticipantIdError] = useState("");
+	const [isCheckingParticipantId, setIsCheckingParticipantId] = useState(false);
 	const participantIdEditedRef = useRef(false);
 	const displayNameEditedRef = useRef(false);
 	const isParticipantIdValid = isValidParticipantId(participantId);
@@ -32,28 +46,20 @@ export function HomePage() {
 		let abortController: AbortController | null = null;
 
 		const syncAvailableParticipant = async () => {
-			const normalizedSessionName = sessionName.trim() || defaultSessionName;
 			abortController?.abort();
 			abortController = new AbortController();
 
 			try {
-				const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(normalizedSessionName)}/presence`), {
-					signal: abortController.signal
-				});
-				if (!response.ok) {
+				const participants = await fetchSessionParticipants(sessionName, abortController.signal);
+				if (disposed) {
 					return;
 				}
 
-				const payload = (await response.json()) as { participants?: unknown };
-				if (disposed || !Array.isArray(payload.participants)) {
-					return;
-				}
-
-				const participants = payload.participants.filter((item): item is string => typeof item === "string");
 				const nextParticipantId = getNextAvailableParticipantId(participants);
 
 				if (!participantIdEditedRef.current) {
 					setParticipantId(nextParticipantId);
+					setParticipantIdError("");
 					if (!displayNameEditedRef.current) {
 						setDisplayName(getDefaultParticipantName(nextParticipantId));
 					}
@@ -86,11 +92,30 @@ export function HomePage() {
 		window.setTimeout(() => setCopied(false), 1600);
 	};
 
-	const enterMeeting = () => {
+	const enterMeeting = async () => {
 		if (!isParticipantIdValid) {
+			setParticipantIdError("Participant ID 只能是整數。");
 			return;
 		}
-		window.location.assign(meetingUrl);
+
+		setIsCheckingParticipantId(true);
+		setParticipantIdError("");
+
+		try {
+			const normalizedParticipantId = normalizeParticipantId(participantId);
+			const participants = await fetchSessionParticipants(sessionName);
+
+			if (participants.includes(normalizedParticipantId)) {
+				setParticipantIdError(`Participant ID ${normalizedParticipantId} 已經有人使用，請換一個 ID 再進入會議。`);
+				return;
+			}
+
+			window.location.assign(meetingUrl);
+		} catch {
+			setParticipantIdError("無法確認 Participant ID 是否可用，請稍後再試。");
+		} finally {
+			setIsCheckingParticipantId(false);
+		}
 	};
 
 	return (
@@ -112,6 +137,7 @@ export function HomePage() {
 								onChange={event => {
 									participantIdEditedRef.current = false;
 									displayNameEditedRef.current = false;
+									setParticipantIdError("");
 									setSessionName(event.target.value);
 								}}
 								placeholder={defaultSessionName}
@@ -128,15 +154,17 @@ export function HomePage() {
 								onChange={event => {
 									const nextParticipantId = event.target.value.replace(/\D/g, "");
 									participantIdEditedRef.current = true;
+									setParticipantIdError("");
 									setParticipantId(nextParticipantId);
 									if (!displayNameEditedRef.current) {
 										setDisplayName(getDefaultParticipantName(nextParticipantId.trim() || "1"));
 									}
 								}}
 								placeholder="1"
-								aria-invalid={!isParticipantIdValid}
+								aria-invalid={!isParticipantIdValid || !!participantIdError}
 							/>
 							{!isParticipantIdValid && <span className="text-xs font-normal text-destructive">Participant ID 只能是整數。</span>}
+							{isParticipantIdValid && participantIdError && <span className="text-xs font-normal text-destructive">{participantIdError}</span>}
 						</label>
 
 						<label className="grid gap-2 text-sm font-medium">
@@ -164,9 +192,9 @@ export function HomePage() {
 								{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
 								{copied ? "已複製" : "複製 URL"}
 							</Button>
-							<Button type="button" variant="outline" className="gap-2" onClick={enterMeeting} disabled={!isParticipantIdValid}>
+							<Button type="button" variant="outline" className="gap-2" onClick={enterMeeting} disabled={!isParticipantIdValid || isCheckingParticipantId}>
 								<ExternalLink className="h-4 w-4" />
-								進入會議
+								{isCheckingParticipantId ? "檢查中" : "進入會議"}
 							</Button>
 						</div>
 					</div>

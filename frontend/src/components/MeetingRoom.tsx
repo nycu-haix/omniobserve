@@ -6,6 +6,7 @@ import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
+import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
@@ -199,6 +200,7 @@ export default function MeetingRoom() {
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId);
+	usePresenceWebSocket(sessionId, connectionParticipantId);
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
