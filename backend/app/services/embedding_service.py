@@ -14,6 +14,7 @@ async def create_text_embedding(text: str) -> list[float]:
     if not text:
         raise HTTPException(status_code=422, detail="text is required for embedding")
 
+    logger.info("embedding_request_start text_chars=%s model=%s", len(text), OLLAMA_EMBED_MODEL)
     return await asyncio.to_thread(_create_embedding_sync, text)
 
 
@@ -43,6 +44,7 @@ def _create_embedding_sync(text: str) -> list[float]:
     embedding = _extract_first_embedding(payload)
     if len(embedding) != 1024:
         raise HTTPException(status_code=502, detail=f"Ollama embedding dimension must be 1024, got {len(embedding)}")
+    logger.info("embedding_request_done url=%s model=%s dimensions=%s", url, OLLAMA_EMBED_MODEL, len(embedding))
     return embedding
 
 

@@ -7,9 +7,11 @@ import wave
 from collections import deque
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import numpy as np
 import torch
+import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
@@ -61,6 +63,9 @@ SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
 
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
+PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").rstrip("/")
+PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
+PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 
 # Clear old wav / transcript files on backend startup
 def clear_output_files():
@@ -270,6 +275,120 @@ def save_transcript_jsonl(
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+async def relay_transcript_to_pipeline(
+    *,
+    text: str,
+    reason: str,
+    source: str,
+    scope: str,
+    agent_type: str,
+    room_name: Optional[str],
+    participant_id: Optional[str],
+    user_id: Optional[str],
+    display_name: Optional[str],
+    start: float,
+    end: float,
+    duration: float,
+) -> None:
+    if not PIPELINE_WS_BASE_URL:
+        print("Pipeline relay skipped: PIPELINE_WS_BASE_URL is empty")
+        return
+
+    if not text.strip() or not room_name:
+        print(
+            "Pipeline relay skipped: "
+            f"has_text={bool(text.strip())}, roomName={room_name}"
+        )
+        return
+
+    relay_participant_id = participant_id or user_id or display_name
+    if not relay_participant_id:
+        print(
+            "Pipeline relay skipped: "
+            f"roomName={room_name}, participantId/userId/displayName missing"
+        )
+        return
+
+    url = (
+        f"{PIPELINE_WS_BASE_URL}/ws/sessions/{quote(str(room_name), safe='')}"
+        f"/transcript-segments?participant_id={quote(str(relay_participant_id), safe='')}"
+    )
+    payload = {
+        "type": "transcript_segment",
+        "scope": scope,
+        "reason": reason,
+        "text": text,
+        "start": round(start, 2),
+        "end": round(end, 2),
+        "duration": round(duration, 2),
+        "roomName": room_name,
+        "participantId": participant_id,
+        "userId": user_id,
+        "displayName": display_name,
+        "source": source,
+        "agentType": agent_type,
+    }
+    terminal_types = (
+        {"task_items_update", "pipeline_error"}
+        if reason in PIPELINE_FINAL_REASONS
+        else {"transcript_update", "pipeline_error"}
+    )
+
+    try:
+        print(
+            "Pipeline relay sending: "
+            f"roomName={room_name}, participantId={relay_participant_id}, "
+            f"reason={reason}, scope={scope}, chars={len(text)}"
+        )
+        async with websockets.connect(url, max_size=None) as pipeline_ws:
+            print(
+                "Pipeline relay connected: "
+                f"roomName={room_name}, participantId={relay_participant_id}, reason={reason}"
+            )
+            await pipeline_ws.send(json.dumps(payload, ensure_ascii=False))
+            print(
+                "Pipeline relay payload sent: "
+                f"roomName={room_name}, participantId={relay_participant_id}, reason={reason}"
+            )
+
+            while True:
+                raw_message = await asyncio.wait_for(
+                    pipeline_ws.recv(),
+                    timeout=PIPELINE_WS_TIMEOUT_SEC,
+                )
+                try:
+                    message = json.loads(raw_message)
+                except Exception:
+                    continue
+
+                message_type = message.get("type")
+                print(
+                    "Pipeline relay received: "
+                    f"roomName={room_name}, participantId={relay_participant_id}, "
+                    f"reason={reason}, type={message_type}"
+                )
+                if message_type == "idea_blocks_update":
+                    idea_blocks = message.get("idea_blocks")
+                    print(
+                        "Pipeline relay idea blocks update: "
+                        f"count={len(idea_blocks) if isinstance(idea_blocks, list) else 0}"
+                    )
+
+                if message_type in terminal_types:
+                    print(
+                        "Pipeline relay completed: "
+                        f"roomName={room_name}, participantId={relay_participant_id}, "
+                        f"reason={reason}, response={message_type}"
+                    )
+                    return
+    except Exception as exc:
+        print(
+            "Pipeline relay failed: "
+            f"roomName={room_name}, participantId={relay_participant_id}, "
+            f"reason={reason}, error={exc}"
+        )
+
+
 def get_audio_stats(audio_chunk: np.ndarray):
     if len(audio_chunk) == 0:
         return 0.0, 0.0
@@ -468,6 +587,11 @@ async def transcribe_and_send(
     try:
         # print(f"Transcribing segment: {filename}")
 
+        print(
+            "ASR segment start: "
+            f"roomName={room_name}, participantId={participant_id or user_id}, "
+            f"reason={reason}, duration={duration:.2f}s, file={filename}"
+        )
         async with send_lock:
             transcript = await asyncio.to_thread(
                 transcribe_audio_float32,
@@ -483,7 +607,11 @@ async def transcribe_and_send(
         # traditional_transcript = to_traditional(raw_transcript)
         
         # print(f"Transcript: {traditional_transcript}")
-        print(f"Transcript: {transcript}")
+        print(
+            "ASR transcript generated: "
+            f"roomName={room_name}, participantId={participant_id or user_id}, "
+            f"reason={reason}, chars={len(transcript)}, text={transcript}"
+        )
 
         save_transcript_jsonl(
             file=str(filename),
@@ -526,6 +654,21 @@ async def transcribe_and_send(
                 })
         except Exception:
             print("Cannot send transcript because websocket is closed")
+
+        await relay_transcript_to_pipeline(
+            text=transcript,
+            reason=reason,
+            source=source,
+            scope=scope,
+            agent_type=agent_type,
+            room_name=room_name,
+            participant_id=participant_id,
+            user_id=user_id,
+            display_name=display_name,
+            start=start_time,
+            end=end_time,
+            duration=duration,
+        )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")

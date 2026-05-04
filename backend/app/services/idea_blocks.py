@@ -45,6 +45,11 @@ def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
 async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any]]:
     mock_blocks = _build_mock_idea_blocks(transcript_text)
     if mock_blocks:
+        logger.info(
+            "idea_llm_mock_used transcript_chars=%s block_count=%s",
+            len(transcript_text),
+            len(mock_blocks),
+        )
         return mock_blocks
 
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -60,6 +65,11 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
     user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
 
     try:
+        logger.info(
+            "idea_llm_request model=%s transcript_chars=%s",
+            OPENAI_MODEL,
+            len(transcript_text),
+        )
         completion = await openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             temperature=0.2,
@@ -69,9 +79,14 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
             ],
         )
         raw_content = completion.choices[0].message.content or "{}"
+        logger.info(
+            "idea_llm_response model=%s response_chars=%s",
+            OPENAI_MODEL,
+            len(raw_content),
+        )
         parsed = _parse_llm_json_payload(raw_content)
     except Exception as exc:
-        logger.exception("LLM idea block generation failed: %s", exc)
+        logger.exception("idea_llm_failed model=%s error=%s", OPENAI_MODEL, exc)
         raise ApiError(
             422,
             "IDEA_GENERATION_FAILED",
@@ -93,6 +108,10 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
     if not normalized_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea blocks could not be generated")
 
+    logger.info(
+        "idea_llm_parsed block_count=%s",
+        len(normalized_blocks),
+    )
     return normalized_blocks
 
 

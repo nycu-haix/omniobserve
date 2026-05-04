@@ -39,7 +39,7 @@ async def handle_transcript_segment(
         if transcript is not None:
             _pending_transcripts[key].append(transcript)
             logger.info(
-                "Transcript pipeline buffered segment session_name=%s user_id=%s segment_id=%s is_final=%s pending=%s",
+                "pipeline_buffer_append session_name=%s user_id=%s segment_id=%s is_final=%s pending=%s",
                 session_name,
                 user_id,
                 transcript.segment_id,
@@ -52,7 +52,7 @@ async def handle_transcript_segment(
 
         transcripts = list(_pending_transcripts.pop(key, []))
         logger.info(
-            "Transcript pipeline final flush session_name=%s user_id=%s segment_count=%s",
+            "pipeline_buffer_flush session_name=%s user_id=%s segment_count=%s",
             session_name,
             user_id,
             len(transcripts),
@@ -81,7 +81,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
     if not transcript_text:
         logger.info(
-            "Transcript pipeline skipped empty transcript batch session_name=%s user_id=%s",
+            "pipeline_skip_empty_batch session_name=%s user_id=%s",
             session_name,
             user_id,
         )
@@ -89,15 +89,21 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
 
     try:
         logger.info(
-            "Transcript pipeline started session_name=%s user_id=%s transcript_count=%s transcript_chars=%s",
+            "pipeline_generation_started session_name=%s user_id=%s transcript_count=%s transcript_chars=%s",
             session_name,
             user_id,
             len(transcripts),
             len(transcript_text),
         )
+        logger.info(
+            "pipeline_idea_llm_start session_name=%s user_id=%s transcript_chars=%s",
+            session_name,
+            user_id,
+            len(transcript_text),
+        )
         generated_blocks = await build_idea_blocks_with_llm(transcript_text)
         logger.info(
-            "Transcript pipeline generated idea blocks session_name=%s user_id=%s count=%s",
+            "pipeline_idea_llm_done session_name=%s user_id=%s count=%s",
             session_name,
             user_id,
             len(generated_blocks),
@@ -108,19 +114,44 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         for block_data in generated_blocks:
             summary = str(block_data["summary"]).strip()
             content = str(block_data["content"]).strip()
+            logger.info(
+                "pipeline_embedding_start session_name=%s user_id=%s summary_chars=%s",
+                session_name,
+                user_id,
+                len(summary),
+            )
+            embedding_vector = await create_text_embedding(summary)
+            logger.info(
+                "pipeline_embedding_done session_name=%s user_id=%s dimensions=%s",
+                session_name,
+                user_id,
+                len(embedding_vector),
+            )
             idea_block = IdeaBlock(
                 user_id=user_id,
                 session_name=session_name,
                 title=_title_from_content(content),
                 summary=summary,
                 transcript_id=None,
-                embedding_vector=await create_text_embedding(summary),
+                embedding_vector=embedding_vector,
                 similarity_id=None,
             )
             db.add(idea_block)
             await db.flush()
             idea_blocks.append(idea_block)
+            logger.info(
+                "pipeline_idea_block_saved session_name=%s user_id=%s idea_block_id=%s",
+                session_name,
+                user_id,
+                idea_block.id,
+            )
 
+            logger.info(
+                "pipeline_task_items_start session_name=%s user_id=%s idea_block_id=%s",
+                session_name,
+                user_id,
+                idea_block.id,
+            )
             task_items.extend(
                 await generate_and_save_task_items_for_idea_block(
                     db,
@@ -128,10 +159,17 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     text=summary,
                 )
             )
+            logger.info(
+                "pipeline_task_items_done session_name=%s user_id=%s idea_block_id=%s total_task_items=%s",
+                session_name,
+                user_id,
+                idea_block.id,
+                len(task_items),
+            )
 
         await db.commit()
         logger.info(
-            "Transcript pipeline committed session_name=%s user_id=%s idea_blocks=%s task_items=%s",
+            "pipeline_commit_done session_name=%s user_id=%s idea_blocks=%s task_items=%s",
             session_name,
             user_id,
             len(idea_blocks),
@@ -140,7 +178,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         return PipelineResult(idea_blocks=idea_blocks, task_items=task_items)
     except Exception as exc:
         logger.exception(
-            "Transcript pipeline failed session_name=%s user_id=%s error=%s",
+            "pipeline_generation_failed session_name=%s user_id=%s error=%s",
             session_name,
             user_id,
             exc,
