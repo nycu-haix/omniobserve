@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
-from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
+from ..config import IDEA_BLOCK_SYSTEM_PROMPT, LLM_TOPIC_DESCRIPTION, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
 from .embedding_service import create_text_embedding
@@ -62,7 +62,10 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
             details={"hint": "Set OPENAI_API_KEY or enable LLM_MOCK=1 for local Swagger testing"},
         )
 
-    system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(transcript_text=transcript_text)
+    system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(
+        topic_description=LLM_TOPIC_DESCRIPTION,
+        transcript_text=transcript_text,
+    )
     user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
 
     try:
@@ -102,11 +105,11 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
     else:
         blocks = None
 
-    if not isinstance(blocks, list) or not blocks:
+    if not isinstance(blocks, list):
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea blocks could not be generated")
 
     normalized_blocks = _normalize_blocks(blocks)
-    if not normalized_blocks:
+    if blocks and not normalized_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea blocks could not be generated")
 
     logger.info(
