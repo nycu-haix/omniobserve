@@ -519,6 +519,28 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
             transcript_text = await transcribe_ws_chunk(chunk)
             if not transcript_text:
                 return
+            if state.mic_mode != "private":
+                logger.info(
+                    "audio ws transcript skipped for non-private mic session_id=%s participant_id=%s mic_mode=%s chars=%s",
+                    session_id,
+                    participant_id,
+                    state.mic_mode,
+                    len(transcript_text),
+                )
+                await audio_manager.send_to(
+                    session_id,
+                    participant_id,
+                    {
+                        "type": "transcript",
+                        "participant_id": participant_id,
+                        "mic_mode": state.mic_mode,
+                        "text": transcript_text,
+                        "segment_id": None,
+                        "timestamp_ms": _now_ms(),
+                        "persisted": False,
+                    },
+                )
+                return
             now = utc_now()
             saved_segment = await save_ws_transcript_segment(
                 db,
@@ -611,7 +633,7 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                 {"type": "transcript_error", "segment_id": None, "reason": "stt_error"},
             )
         finally:
-            if transcript_segments:
+            if transcript_segments and state.mic_mode == "private":
                 await generate_idea_blocks_from_stream_transcripts(
                     db,
                     session_name=session_id,

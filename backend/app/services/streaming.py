@@ -129,6 +129,25 @@ async def handle_audio_stream_websocket(
                     channels=stream_context.channels,
                 )
                 if transcript_text:
+                    if stream_context.scope != Visibility.PRIVATE:
+                        logger.info(
+                            "Audio stream transcript skipped for non-private scope session_name=%s participant_id=%s scope=%s chars=%s",
+                            session_name,
+                            participant_id,
+                            stream_context.scope.value,
+                            len(transcript_text),
+                        )
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "transcript",
+                                "text": transcript_text,
+                                "is_final": False,
+                                "persisted": False,
+                            },
+                        )
+                        continue
+
                     saved_segment = await save_ws_transcript_segment(
                         db,
                         session_name=session_name,
@@ -239,7 +258,7 @@ async def handle_audio_stream_websocket(
                     await flush_buffer(force=True)
                     idea_blocks_payload: list[dict[str, Any]] = []
                     task_items_payload: list[dict[str, Any]] = []
-                    if transcript_segments:
+                    if transcript_segments and stream_context.scope == Visibility.PRIVATE:
                         try:
                             pipeline_result = await handle_transcript_segment(
                                 db,
@@ -391,6 +410,29 @@ async def handle_transcript_segments_websocket(
                     visibility.value,
                     len(text),
                 )
+                if visibility != Visibility.PRIVATE:
+                    logger.info(
+                        "pipeline_ws_skip_non_private session_name=%s participant_id=%s reason=%s visibility=%s chars=%s",
+                        session_name,
+                        participant_id,
+                        reason or "unknown",
+                        visibility.value,
+                        len(text),
+                    )
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "transcript",
+                            "text": text,
+                            "is_final": reason in FINAL_TRANSCRIPT_REASONS,
+                            "reason": reason,
+                            "persisted": False,
+                        },
+                    )
+                    if reason in FINAL_TRANSCRIPT_REASONS:
+                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
+                        await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                    continue
 
                 batch_texts: list[str] | None = None
                 batch_text = ""
