@@ -145,6 +145,7 @@
     log(`Room name: ${getConfig().roomName}`);
     log(`Jitsi URL: ${getConfig().jitsiUrl}`);
     log(`Audio WebSocket: ${getConfig().apiWsUrl}`);
+    log(`Transcript WebSocket: ${getConfig().transcriptWsUrl}`);
     log(`Initial mode: ${state.mode}`);
 
     if (AUTO_JOIN) {
