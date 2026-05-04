@@ -1,7 +1,7 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
-import { getDefaultParticipantName, getNextAvailableParticipantId } from "../lib/participantDefaults";
+import { getDefaultParticipantName, getNextAvailableParticipantId, isValidParticipantId, normalizeParticipantId } from "../lib/participantDefaults";
 import { apiUrl } from "../services/api";
 import { Button } from "./ui/Button";
 
@@ -10,7 +10,7 @@ const defaultSessionName = getDefaultRoomName();
 function buildMeetingUrl(sessionName: string, participantId: string, displayName: string) {
 	const params = new URLSearchParams();
 	params.set("room_name", sessionName.trim() || defaultSessionName);
-	params.set("id", participantId.trim() || "1");
+	params.set("id", normalizeParticipantId(participantId));
 	params.set("name", displayName.trim() || "User");
 
 	return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
@@ -23,6 +23,7 @@ export function HomePage() {
 	const [copied, setCopied] = useState(false);
 	const participantIdEditedRef = useRef(false);
 	const displayNameEditedRef = useRef(false);
+	const isParticipantIdValid = isValidParticipantId(participantId);
 	const meetingUrl = useMemo(() => buildMeetingUrl(sessionName, participantId, displayName), [displayName, participantId, sessionName]);
 
 	useEffect(() => {
@@ -77,9 +78,19 @@ export function HomePage() {
 	}, [sessionName]);
 
 	const copyUrl = async () => {
+		if (!isParticipantIdValid) {
+			return;
+		}
 		await navigator.clipboard.writeText(meetingUrl);
 		setCopied(true);
 		window.setTimeout(() => setCopied(false), 1600);
+	};
+
+	const enterMeeting = () => {
+		if (!isParticipantIdValid) {
+			return;
+		}
+		window.location.assign(meetingUrl);
 	};
 
 	return (
@@ -112,8 +123,10 @@ export function HomePage() {
 							<input
 								className="h-11 rounded-md border bg-background px-3 text-base outline-none transition focus-visible:ring-1 focus-visible:ring-ring"
 								value={participantId}
+								inputMode="numeric"
+								pattern="[0-9]*"
 								onChange={event => {
-									const nextParticipantId = event.target.value;
+									const nextParticipantId = event.target.value.replace(/\D/g, "");
 									participantIdEditedRef.current = true;
 									setParticipantId(nextParticipantId);
 									if (!displayNameEditedRef.current) {
@@ -121,7 +134,9 @@ export function HomePage() {
 									}
 								}}
 								placeholder="1"
+								aria-invalid={!isParticipantIdValid}
 							/>
+							{!isParticipantIdValid && <span className="text-xs font-normal text-destructive">Participant ID 只能是整數。</span>}
 						</label>
 
 						<label className="grid gap-2 text-sm font-medium">
@@ -145,11 +160,11 @@ export function HomePage() {
 						</div>
 
 						<div className="flex flex-col gap-2 sm:flex-row md:flex-col">
-							<Button type="button" onClick={copyUrl} className="gap-2">
+							<Button type="button" onClick={copyUrl} className="gap-2" disabled={!isParticipantIdValid}>
 								{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
 								{copied ? "已複製" : "複製 URL"}
 							</Button>
-							<Button type="button" variant="outline" className="gap-2" onClick={() => window.location.assign(meetingUrl)}>
+							<Button type="button" variant="outline" className="gap-2" onClick={enterMeeting} disabled={!isParticipantIdValid}>
 								<ExternalLink className="h-4 w-4" />
 								進入會議
 							</Button>

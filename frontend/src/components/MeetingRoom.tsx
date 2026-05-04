@@ -7,6 +7,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
 import type { MicMode } from "../types";
 import { JitsiRoom } from "./JitsiRoom";
@@ -137,9 +138,11 @@ export default function MeetingRoom() {
 	const isDraggingRef = useRef(false);
 	const pendingRankingRef = useRef<{ revision: number; items: string[] } | null>(null);
 	const { participantId, displayName, roomName } = useParticipantIdentity();
+	const isParticipantIdValid = isValidParticipantId(participantId);
+	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
-	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, participantId);
-	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, participantId, displayName);
+	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId);
+	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
 	const meetingLayoutStyle = {
@@ -337,6 +340,25 @@ export default function MeetingRoom() {
 		}
 	}, [lastMessage]);
 
+	if (!isParticipantIdValid) {
+		return (
+			<main className="grid min-h-screen place-items-center bg-background p-4 text-foreground">
+				<section className="grid max-w-md gap-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+					<div className="flex items-center gap-3">
+						<AlertCircle className="h-5 w-5 text-destructive" aria-hidden="true" />
+						<h1 className="text-lg font-semibold">Participant ID 格式錯誤</h1>
+					</div>
+					<p className="text-sm leading-6 text-muted-foreground">
+						目前 URL 的 <span className="font-mono text-foreground">id</span> 是「{participantId}」，但 Participant ID 必須是整數。請回首頁重新產生會議連結。
+					</p>
+					<Button type="button" onClick={() => window.location.assign(window.location.pathname)}>
+						回到設定首頁
+					</Button>
+				</section>
+			</main>
+		);
+	}
+
 	return (
 		<main
 			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
@@ -434,7 +456,7 @@ export default function MeetingRoom() {
 					onPointerDown={handlePrivateBoardResizeStart}
 					onKeyDown={handlePrivateBoardResizeKeyDown}
 				/>
-				<PrivateBoard sessionId={sessionId} participantId={participantId} micMode={micMode} lastMessage={lastMessage} lastAudioMessage={lastAudioMessage} isConnected={isConnected} />
+				<PrivateBoard sessionId={sessionId} participantId={participantId} lastMessage={lastMessage} lastAudioMessage={lastAudioMessage} isConnected={isConnected} />
 			</aside>
 		</main>
 	);

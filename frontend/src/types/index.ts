@@ -15,6 +15,7 @@ export interface IdeaBlock {
 export interface TranscriptLine {
 	id: string;
 	text: string;
+	time?: string;
 	source?: "public" | "private";
 	linkedBlockId?: string;
 }
