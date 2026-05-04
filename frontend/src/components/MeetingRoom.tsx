@@ -3,7 +3,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -18,6 +18,13 @@ interface LostAtSeaItem {
 	id: string;
 	label: string;
 	rank: number;
+}
+
+type RankingScope = "public" | "private";
+
+interface RankingSnapshot {
+	revision: number;
+	items: string[];
 }
 
 const INITIAL_ITEMS: LostAtSeaItem[] = [
@@ -82,20 +89,39 @@ function createRankedItems(itemIds: string[]): LostAtSeaItem[] {
 	}));
 }
 
-function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; revision: number; items: string[] } {
+function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
 	return !!message && "type" in message && message.type === "ranking_state" && "items" in message && Array.isArray(message.items);
 }
 
-function isBoardStateMessage(message: object | null): message is { type: "board_state"; revision: number; ranking: { items: string[] } } {
+function isRankingSnapshot(value: unknown): value is RankingSnapshot {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"revision" in value &&
+		typeof value.revision === "number" &&
+		"items" in value &&
+		Array.isArray(value.items)
+	);
+}
+
+function isBoardStateMessage(message: object | null): message is {
+	type: "board_state";
+	revision: number;
+	ranking?: { items: string[] };
+	public_ranking?: RankingSnapshot;
+	private_ranking?: RankingSnapshot;
+} {
 	return (
 		!!message &&
 		"type" in message &&
 		message.type === "board_state" &&
-		"ranking" in message &&
-		typeof message.ranking === "object" &&
-		message.ranking !== null &&
-		"items" in message.ranking &&
-		Array.isArray(message.ranking.items)
+		(("public_ranking" in message && isRankingSnapshot(message.public_ranking)) ||
+			("private_ranking" in message && isRankingSnapshot(message.private_ranking)) ||
+			("ranking" in message &&
+				typeof message.ranking === "object" &&
+				message.ranking !== null &&
+				"items" in message.ranking &&
+				Array.isArray(message.ranking.items)))
 	);
 }
 
@@ -122,11 +148,49 @@ function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
 	);
 }
 
+function LostAtSeaRankingPanel({
+	title,
+	status,
+	items,
+	sensors,
+	onDragStart,
+	onDragCancel,
+	onDragEnd
+}: {
+	title: string;
+	status: string;
+	items: LostAtSeaItem[];
+	sensors: ReturnType<typeof useSensors>;
+	onDragStart: () => void;
+	onDragCancel: () => void;
+	onDragEnd: (event: DragEndEvent) => void;
+}) {
+	return (
+		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
+			<header className="mb-3 flex shrink-0 items-center justify-between gap-3">
+				<h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
+				<span className="shrink-0 text-xs text-muted-foreground">{status}</span>
+			</header>
+			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
+				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
+					<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
+						{items.map(item => (
+							<SortableLostAtSeaItem key={item.id} item={item} />
+						))}
+					</div>
+				</SortableContext>
+			</DndContext>
+		</section>
+	);
+}
+
 export default function MeetingRoom() {
 	const [micMode, setMicMode] = useState<MicMode>("off");
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
-	const [items, setItems] = useState(INITIAL_ITEMS);
-	const [rankingRevision, setRankingRevision] = useState(0);
+	const [publicItems, setPublicItems] = useState(INITIAL_ITEMS);
+	const [privateItems, setPrivateItems] = useState(INITIAL_ITEMS);
+	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
+	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -135,8 +199,8 @@ export default function MeetingRoom() {
 		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
 		return clampJitsiHeight(Number.isFinite(storedHeight) ? storedHeight : DEFAULT_JITSI_HEIGHT);
 	});
-	const isDraggingRef = useRef(false);
-	const pendingRankingRef = useRef<{ revision: number; items: string[] } | null>(null);
+	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
+	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const isParticipantIdValid = isValidParticipantId(participantId);
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
@@ -190,29 +254,52 @@ export default function MeetingRoom() {
 		await startAudioStream(nextMode);
 	};
 
-	const handleDragEnd = (event: DragEndEvent) => {
-		isDraggingRef.current = false;
-		pendingRankingRef.current = null;
+	const applyRankingSnapshot = useCallback((scope: RankingScope, snapshot: RankingSnapshot) => {
+		if (scope === "private") {
+			setPrivateRankingRevision(snapshot.revision);
+			setPrivateItems(createRankedItems(snapshot.items));
+			return;
+		}
+
+		setPublicRankingRevision(snapshot.revision);
+		setPublicItems(createRankedItems(snapshot.items));
+	}, []);
+
+	const handleRankingDragCancel = (scope: RankingScope) => {
+		isDraggingRef.current[scope] = false;
+		const pendingRanking = pendingRankingRef.current[scope];
+		if (pendingRanking) {
+			applyRankingSnapshot(scope, pendingRanking);
+			pendingRankingRef.current[scope] = null;
+		}
+	};
+
+	const handleRankingDragEnd = (scope: RankingScope, event: DragEndEvent) => {
+		isDraggingRef.current[scope] = false;
+		pendingRankingRef.current[scope] = null;
 
 		const { active, over } = event;
 		if (!over || active.id === over.id) {
 			return;
 		}
 
-		const oldIndex = items.findIndex(item => item.id === active.id);
-		const newIndex = items.findIndex(item => item.id === over.id);
+		const currentItems = scope === "private" ? privateItems : publicItems;
+		const currentRevision = scope === "private" ? privateRankingRevision : publicRankingRevision;
+		const oldIndex = currentItems.findIndex(item => item.id === active.id);
+		const newIndex = currentItems.findIndex(item => item.id === over.id);
 		if (oldIndex < 0 || newIndex < 0) {
 			return;
 		}
 
 		sendMessage({
 			type: "ranking_move",
+			scope,
 			itemId: String(active.id),
 			toIndex: newIndex,
-			baseRevision: rankingRevision
+			baseRevision: currentRevision
 		});
 
-		setItems(current => {
+		const updateItems = (current: LostAtSeaItem[]) => {
 			const currentOldIndex = current.findIndex(item => item.id === active.id);
 			const currentNewIndex = current.findIndex(item => item.id === over.id);
 			if (currentOldIndex < 0 || currentNewIndex < 0) {
@@ -222,7 +309,13 @@ export default function MeetingRoom() {
 				...item,
 				rank: index + 1
 			}));
-		});
+		};
+
+		if (scope === "private") {
+			setPrivateItems(updateItems);
+		} else {
+			setPublicItems(updateItems);
+		}
 	};
 
 	useEffect(() => {
@@ -313,32 +406,39 @@ export default function MeetingRoom() {
 
 	useEffect(() => {
 		if (isBoardStateMessage(lastMessage)) {
-			const nextRanking = {
-				revision: lastMessage.revision,
-				items: lastMessage.ranking.items
-			};
-			if (isDraggingRef.current) {
-				pendingRankingRef.current = nextRanking;
-				return;
+			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
+			const privateRanking = lastMessage.private_ranking;
+			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
+			if (publicRanking) {
+				rankings.push(["public", publicRanking]);
 			}
-			setRankingRevision(nextRanking.revision);
-			setItems(createRankedItems(nextRanking.items));
+			if (privateRanking) {
+				rankings.push(["private", privateRanking]);
+			}
+
+			rankings.forEach(([scope, nextRanking]) => {
+				if (isDraggingRef.current[scope]) {
+					pendingRankingRef.current[scope] = nextRanking;
+					return;
+				}
+				applyRankingSnapshot(scope, nextRanking);
+			});
 			return;
 		}
 
 		if (isRankingStateMessage(lastMessage)) {
+			const scope = lastMessage.scope === "private" ? "private" : "public";
 			const nextRanking = {
 				revision: lastMessage.revision,
 				items: lastMessage.items
 			};
-			if (isDraggingRef.current) {
-				pendingRankingRef.current = nextRanking;
+			if (isDraggingRef.current[scope]) {
+				pendingRankingRef.current[scope] = nextRanking;
 				return;
 			}
-			setRankingRevision(nextRanking.revision);
-			setItems(createRankedItems(nextRanking.items));
+			applyRankingSnapshot(scope, nextRanking);
 		}
-	}, [lastMessage]);
+	}, [applyRankingSnapshot, lastMessage]);
 
 	if (!isParticipantIdValid) {
 		return (
@@ -385,32 +485,32 @@ export default function MeetingRoom() {
 				<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 items-center justify-between">
 						<h2 className="text-base font-semibold">海上求生排序</h2>
-						<span className="text-sm text-muted-foreground">協作中</span>
+						<span className="text-sm text-muted-foreground">Public / Private</span>
 					</header>
-					<DndContext
-						sensors={sensors}
-						collisionDetection={closestCenter}
-						onDragStart={() => {
-							isDraggingRef.current = true;
-						}}
-						onDragCancel={() => {
-							isDraggingRef.current = false;
-							if (pendingRankingRef.current) {
-								setRankingRevision(pendingRankingRef.current.revision);
-								setItems(createRankedItems(pendingRankingRef.current.items));
-								pendingRankingRef.current = null;
-							}
-						}}
-						onDragEnd={handleDragEnd}
-					>
-						<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-							<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
-								{items.map(item => (
-									<SortableLostAtSeaItem key={item.id} item={item} />
-								))}
-							</div>
-						</SortableContext>
-					</DndContext>
+					<div className="grid min-h-0 flex-1 gap-3 overflow-y-auto pr-1 lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
+						<LostAtSeaRankingPanel
+							title="Public 排序"
+							status="協作中"
+							items={publicItems}
+							sensors={sensors}
+							onDragStart={() => {
+								isDraggingRef.current.public = true;
+							}}
+							onDragCancel={() => handleRankingDragCancel("public")}
+							onDragEnd={event => handleRankingDragEnd("public", event)}
+						/>
+						<LostAtSeaRankingPanel
+							title="Private 排序"
+							status="個人"
+							items={privateItems}
+							sensors={sensors}
+							onDragStart={() => {
+								isDraggingRef.current.private = true;
+							}}
+							onDragCancel={() => handleRankingDragCancel("private")}
+							onDragEnd={event => handleRankingDragEnd("private", event)}
+						/>
+					</div>
 				</section>
 
 				<div className="relative flex items-center justify-center">

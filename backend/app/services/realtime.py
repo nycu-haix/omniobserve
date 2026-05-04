@@ -122,7 +122,8 @@ cue_manager = ConnectionManager()
 presence_manager = ConnectionManager()
 
 audio_connections: dict[str, dict[str, AudioConnectionState]] = defaultdict(dict)
-ranking_state: dict[str, dict[str, Any]] = {}
+public_ranking_state: dict[str, dict[str, Any]] = {}
+private_ranking_state: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
 session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 board_blocks: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
     lambda: {"public_blocks": [], "private_blocks": []}
@@ -142,37 +143,69 @@ def _normalize_int(value: Any, default: int) -> int:
     return parsed if parsed >= 0 else default
 
 
-def _get_ranking_state(session_id: str) -> dict[str, Any]:
-    if session_id not in ranking_state:
-        ranking_state[session_id] = {
-            "revision": 0,
-            "items": list(DEFAULT_RANKING_ITEMS),
-        }
+def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
+    current_items = state.get("items")
+    if not isinstance(current_items, list):
+        current_items = []
+    normalized_items = [
+        item
+        for index, item in enumerate(current_items)
+        if isinstance(item, str)
+        and item in DEFAULT_RANKING_ITEM_SET
+        and current_items.index(item) == index
+    ]
+    normalized_items.extend(
+        item for item in DEFAULT_RANKING_ITEMS if item not in normalized_items
+    )
+    if normalized_items != current_items:
+        state["items"] = normalized_items
+        state["revision"] = _normalize_int(state.get("revision"), 0) + 1
+    return state
+
+
+def _create_ranking_state() -> dict[str, Any]:
+    return {
+        "revision": 0,
+        "items": list(DEFAULT_RANKING_ITEMS),
+    }
+
+
+def _get_public_ranking_state(session_id: str) -> dict[str, Any]:
+    if session_id not in public_ranking_state:
+        public_ranking_state[session_id] = _create_ranking_state()
     else:
-        current_items = ranking_state[session_id].get("items")
-        if not isinstance(current_items, list):
-            current_items = []
-        normalized_items = [
-            item
-            for index, item in enumerate(current_items)
-            if isinstance(item, str)
-            and item in DEFAULT_RANKING_ITEM_SET
-            and current_items.index(item) == index
-        ]
-        normalized_items.extend(
-            item for item in DEFAULT_RANKING_ITEMS if item not in normalized_items
-        )
-        if normalized_items != current_items:
-            ranking_state[session_id]["items"] = normalized_items
-            ranking_state[session_id]["revision"] = _normalize_int(
-                ranking_state[session_id].get("revision"),
-                0,
-            ) + 1
-    return ranking_state[session_id]
+        _normalize_ranking_state(public_ranking_state[session_id])
+    return public_ranking_state[session_id]
+
+
+def _get_private_ranking_state(session_id: str, participant_id: str) -> dict[str, Any]:
+    if participant_id not in private_ranking_state[session_id]:
+        private_ranking_state[session_id][participant_id] = _create_ranking_state()
+    else:
+        _normalize_ranking_state(private_ranking_state[session_id][participant_id])
+    return private_ranking_state[session_id][participant_id]
+
+
+def _get_ranking_state(session_id: str, participant_id: str, scope: str) -> dict[str, Any]:
+    if scope == "private":
+        return _get_private_ranking_state(session_id, participant_id)
+    return _get_public_ranking_state(session_id)
+
+
+def _ranking_payload(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "revision": state["revision"],
+        "items": list(state["items"]),
+    }
+
+
+def _normalize_ranking_scope(value: Any) -> str:
+    return "private" if str(value).lower() == "private" else "public"
 
 
 def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]:
-    state = _get_ranking_state(session_id)
+    public_state = _get_public_ranking_state(session_id)
+    private_state = _get_private_ranking_state(session_id, participant_id)
     blocks = board_blocks[session_id]
     private_blocks = [
         block
@@ -182,8 +215,10 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
     return {
         "type": "board_state",
         "session_name": session_id,
-        "revision": state["revision"],
-        "ranking": {"items": list(state["items"])},
+        "revision": public_state["revision"],
+        "ranking": {"items": list(public_state["items"])},
+        "public_ranking": _ranking_payload(public_state),
+        "private_ranking": _ranking_payload(private_state),
         "public_blocks": list(blocks["public_blocks"]),
         "private_blocks": private_blocks,
     }
@@ -242,52 +277,58 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                 continue
 
             if message_type == "ranking_move":
+                scope = _normalize_ranking_scope(payload.get("scope"))
                 item_id = str(payload.get("itemId", ""))
                 to_index = _normalize_int(payload.get("toIndex"), 0)
                 base_revision = payload.get("baseRevision")
                 logger.info(
-                    "ranking_move received session_id=%s participant_id=%s item_id=%s to_index=%s base_revision=%s",
+                    "ranking_move received session_id=%s participant_id=%s scope=%s item_id=%s to_index=%s base_revision=%s",
                     session_id,
                     participant_id,
+                    scope,
                     item_id,
                     to_index,
                     base_revision,
                 )
                 async with session_locks[session_id]:
-                    state = _get_ranking_state(session_id)
+                    state = _get_ranking_state(session_id, participant_id, scope)
                     try:
                         state["items"] = _apply_ranking_move(list(state["items"]), item_id, to_index)
                     except ValueError as exc:
                         logger.warning(
-                            "ranking_move rejected session_id=%s participant_id=%s reason=%s",
+                            "ranking_move rejected session_id=%s participant_id=%s scope=%s reason=%s",
                             session_id,
                             participant_id,
+                            scope,
                             exc,
                         )
                         await board_manager.send_to(
                             session_id,
                             participant_id,
-                            {"type": "ranking_error", "reason": str(exc), "current": state},
+                            {"type": "ranking_error", "scope": scope, "reason": str(exc), "current": _ranking_payload(state)},
                         )
                         continue
                     state["revision"] += 1
                     logger.info(
-                        "ranking_state broadcast session_id=%s revision=%s updated_by=%s items=%s targets=%s",
+                        "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s",
                         session_id,
                         state["revision"],
                         participant_id,
+                        scope,
                         state["items"],
                         board_manager.get_participants(session_id),
                     )
-                    await board_manager.broadcast(
-                        session_id,
-                        {
-                            "type": "ranking_state",
-                            "revision": state["revision"],
-                            "items": list(state["items"]),
-                            "updatedBy": participant_id,
-                        },
-                    )
+                    message = {
+                        "type": "ranking_state",
+                        "scope": scope,
+                        "revision": state["revision"],
+                        "items": list(state["items"]),
+                        "updatedBy": participant_id,
+                    }
+                    if scope == "private":
+                        await board_manager.send_to(session_id, participant_id, message)
+                    else:
+                        await board_manager.broadcast(session_id, message)
                 continue
 
             if message_type in {"block_publish", "block_discard", "block_edit"}:
