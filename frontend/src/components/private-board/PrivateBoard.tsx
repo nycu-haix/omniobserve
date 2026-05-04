@@ -42,27 +42,27 @@ interface IdeaBlockResponse {
 
 type AudioTranscriptMessage =
 	| {
-		type: "transcript_update";
-		transcript_segment_id?: string | number | null;
-		mic_mode?: string | null;
-		scope?: string | null;
-		text?: string;
-		timestamp_ms?: number | null;
-		local_mic_mode?: string | null;
-		reason?: string | null;
-		persisted?: boolean | null;
-	}
+			type: "transcript_update";
+			transcript_segment_id?: string | number | null;
+			mic_mode?: string | null;
+			scope?: string | null;
+			text?: string;
+			timestamp_ms?: number | null;
+			local_mic_mode?: string | null;
+			reason?: string | null;
+			persisted?: boolean | null;
+	  }
 	| {
-		type: "transcript";
-		segment_id?: string | number | null;
-		mic_mode?: string | null;
-		scope?: string | null;
-		text?: string;
-		timestamp_ms?: number | null;
-		local_mic_mode?: string | null;
-		reason?: string | null;
-		persisted?: boolean | null;
-	};
+			type: "transcript";
+			segment_id?: string | number | null;
+			mic_mode?: string | null;
+			scope?: string | null;
+			text?: string;
+			timestamp_ms?: number | null;
+			local_mic_mode?: string | null;
+			reason?: string | null;
+			persisted?: boolean | null;
+	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 
@@ -214,12 +214,12 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 		return blocks.map(block =>
 			block.id === nextBlock.id
 				? {
-					...block,
-					...nextBlock,
-					expanded: block.expanded,
-					cueText: block.cueText,
-					hasCue: block.hasCue || nextBlock.hasCue
-				}
+						...block,
+						...nextBlock,
+						expanded: block.expanded,
+						cueText: block.cueText,
+						hasCue: block.hasCue || nextBlock.hasCue
+					}
 				: block
 		);
 	}, baseBlocks);
@@ -446,12 +446,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			prev.map(block =>
 				block.id === id
 					? {
-						...block,
-						...savedBlock,
-						expanded: block.expanded,
-						cueText: block.cueText,
-						hasCue: block.hasCue || savedBlock.hasCue
-					}
+							...block,
+							...savedBlock,
+							expanded: block.expanded,
+							cueText: block.cueText,
+							hasCue: block.hasCue || savedBlock.hasCue
+						}
 					: block
 			)
 		);
