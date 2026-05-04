@@ -161,7 +161,7 @@ export function useAudioStream(
 
 		return new Promise(resolve => {
 			let done = false;
-			const timeout = window.setTimeout(() => finish(), 5000);
+			const timeout = window.setTimeout(() => finish(), 15000);
 
 			const finish = () => {
 				if (done) {
@@ -181,7 +181,7 @@ export function useAudioStream(
 				}
 				try {
 					const message = JSON.parse(event.data) as AudioStreamMessage;
-					if (message.type === "idea_blocks_update" || (message.type === "transcript_update" && message.is_final === true)) {
+					if (message.type === "idea_blocks_update" || message.type === "task_items_update" || message.type === "pipeline_error") {
 						finish();
 					}
 				} catch {
