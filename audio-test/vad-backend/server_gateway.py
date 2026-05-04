@@ -276,6 +276,8 @@ def save_transcript_jsonl(
 
 
 async def relay_transcript_to_pipeline(
+    websocket: WebSocket,
+    send_lock: asyncio.Lock,
     *,
     text: str,
     reason: str,
@@ -370,6 +372,19 @@ async def relay_transcript_to_pipeline(
                     "pipeline_error",
                 }:
                     pipeline_messages.append(message)
+                    try:
+                        async with send_lock:
+                            await websocket.send_json(message)
+                        print(
+                            "Pipeline relay forwarded to client: "
+                            f"roomName={room_name}, participantId={relay_participant_id}, "
+                            f"reason={reason}, type={message_type}"
+                        )
+                    except Exception:
+                        print(
+                            "Cannot forward pipeline message because websocket is closed: "
+                            f"type={message_type}"
+                        )
                 print(
                     "Pipeline relay received: "
                     f"roomName={room_name}, participantId={relay_participant_id}, "
@@ -666,7 +681,9 @@ async def transcribe_and_send(
             print("Cannot send transcript because websocket is closed")
 
         async with relay_lock:
-            pipeline_messages = await relay_transcript_to_pipeline(
+            await relay_transcript_to_pipeline(
+                websocket=websocket,
+                send_lock=send_lock,
                 text=transcript,
                 reason=reason,
                 source=source,
@@ -680,21 +697,6 @@ async def transcribe_and_send(
                 end=end_time,
                 duration=duration,
             )
-
-        for pipeline_message in pipeline_messages:
-            try:
-                async with send_lock:
-                    await websocket.send_json(pipeline_message)
-                print(
-                    "Pipeline relay forwarded to client: "
-                    f"roomName={room_name}, participantId={participant_id or user_id}, "
-                    f"reason={reason}, type={pipeline_message.get('type')}"
-                )
-            except Exception:
-                print(
-                    "Cannot forward pipeline message because websocket is closed: "
-                    f"type={pipeline_message.get('type')}"
-                )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")

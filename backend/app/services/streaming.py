@@ -397,26 +397,24 @@ async def handle_transcript_segments_websocket(
                 async with _pending_transcript_batch_locks[batch_key]:
                     if reason == "max_speech_ms":
                         _pending_transcript_batch_texts[batch_key].append(text)
-                        batch_segments = len(_pending_transcript_batch_texts[batch_key])
-                        batch_chars = sum(len(item) for item in _pending_transcript_batch_texts[batch_key])
+                        pending_segments = len(_pending_transcript_batch_texts[batch_key])
+                        pending_chars = sum(len(item) for item in _pending_transcript_batch_texts[batch_key])
                         logger.info(
                             "pipeline_ws_batch_buffered session_name=%s participant_id=%s reason=%s batch_segments=%s batch_chars=%s",
                             session_name,
                             participant_id,
                             reason,
-                            batch_segments,
-                            batch_chars,
+                            pending_segments,
+                            pending_chars,
                         )
                         await send_ws_json_safe(
                             websocket,
                             {
-                                "type": "transcript_update",
-                                "transcript_segment_id": None,
+                                "type": "transcript",
                                 "text": text,
                                 "is_final": False,
                                 "reason": reason,
                                 "persisted": False,
-                                "batch_segments": batch_segments,
                             },
                         )
                         continue
@@ -455,7 +453,7 @@ async def handle_transcript_segments_websocket(
 
                 if saved_segment is None:
                     async with _pending_transcript_batch_locks[batch_key]:
-                        _pending_transcript_batch_texts[batch_key] = batch_texts
+                        _pending_transcript_batch_texts[batch_key] = batch_texts or []
                     logger.info(
                         "pipeline_ws_batch_save_failed session_name=%s participant_id=%s reason=%s",
                         session_name,
