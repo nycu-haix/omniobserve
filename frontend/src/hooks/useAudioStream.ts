@@ -16,6 +16,11 @@ interface ActiveAudioMeta {
 	clientId: string;
 }
 
+interface PendingTranscriptSegment {
+	message: AudioStreamMessage;
+	meta: ActiveAudioMeta;
+}
+
 const TARGET_SAMPLE_RATE = 16000;
 const OUTPUT_CHUNK_SIZE = 512;
 
@@ -36,6 +41,21 @@ function getAudioWsBaseUrl(): string {
 	const baseUrl = audioBaseUrl || generalWsBaseUrl || `${protocol}://${window.location.host}`;
 
 	return baseUrl.replace(/\/+$/, "");
+}
+
+function getTranscriptWsBaseUrl(): string {
+	const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+
+	const transcriptBaseUrl = import.meta.env.VITE_TRANSCRIPT_WS_BASE_URL as string | undefined;
+	const generalWsBaseUrl = import.meta.env.VITE_WS_BASE_URL as string | undefined;
+
+	const baseUrl = transcriptBaseUrl || generalWsBaseUrl || `${protocol}://${window.location.host}`;
+
+	return baseUrl.replace(/\/+$/, "");
+}
+
+function buildTranscriptWsUrl(sessionId: string, participantId: string): string {
+	return `${getTranscriptWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/transcript-segments?participant_id=${encodeURIComponent(participantId)}`;
 }
 
 function sourceForMode(mode: AudioStreamMode): string {
@@ -96,6 +116,30 @@ function calculateRms(audio: Float32Array): number {
 	return Math.sqrt(sum / audio.length);
 }
 
+function stringValue(value: unknown): string | undefined {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : undefined;
+	}
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return String(value);
+	}
+	return undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isRelayableTranscriptMessage(message: AudioStreamMessage): boolean {
+	const messageType = stringValue(message.type);
+	return (
+		(messageType === "transcript_segment" || messageType === "transcript_update" || messageType === "transcript") &&
+		!!stringValue(message.text) &&
+		!!stringValue(message.reason)
+	);
+}
+
 export function useAudioStream(
 	sessionId: string,
 	participantId?: string,
@@ -114,6 +158,7 @@ export function useAudioStream(
 	const [audioError, setAudioError] = useState<string | null>(null);
 
 	const socketRef = useRef<WebSocket | null>(null);
+	const transcriptSocketRef = useRef<WebSocket | null>(null);
 	const mediaStreamRef = useRef<MediaStream | null>(null);
 	const audioContextRef = useRef<AudioContext | null>(null);
 	const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -124,6 +169,7 @@ export function useAudioStream(
 	const sentChunksRef = useRef(0);
 	const stoppingRef = useRef(false);
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
+	const pendingTranscriptSegmentsRef = useRef<PendingTranscriptSegment[]>([]);
 
 	const cleanupAudioResources = useCallback(() => {
 		processorNodeRef.current?.disconnect();
@@ -152,6 +198,156 @@ export function useAudioStream(
 		audioContextRef.current = null;
 		pendingSamplesRef.current = new Float32Array(0);
 		sentChunksRef.current = 0;
+	}, []);
+
+	const flushPendingTranscriptSegments = useCallback(() => {
+		const socket = transcriptSocketRef.current;
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			return;
+		}
+
+		const pendingSegments = pendingTranscriptSegmentsRef.current;
+		pendingTranscriptSegmentsRef.current = [];
+
+		for (const segment of pendingSegments) {
+			const text = stringValue(segment.message.text);
+			const reason = stringValue(segment.message.reason)?.toLowerCase();
+			if (!text || !reason) {
+				continue;
+			}
+
+			socket.send(
+				JSON.stringify({
+					type: "transcript_segment",
+					scope: stringValue(segment.message.scope) || segment.meta.mode,
+					reason,
+					text,
+					start: numberValue(segment.message.start),
+					end: numberValue(segment.message.end),
+					duration: numberValue(segment.message.duration),
+					roomName: segment.meta.sessionId,
+					sessionName: segment.meta.sessionId,
+					participantId: segment.meta.participantId,
+					userId: segment.meta.participantId,
+					displayName: segment.meta.displayName,
+					source: stringValue(segment.message.source) || sourceForMode(segment.meta.mode),
+					agentType: stringValue(segment.message.agentType) || agentTypeForMode(segment.meta.mode)
+				})
+			);
+		}
+	}, []);
+
+	const connectTranscriptSocket = useCallback(
+		(meta: ActiveAudioMeta) => {
+			const existingSocket = transcriptSocketRef.current;
+			if (existingSocket && (existingSocket.readyState === WebSocket.OPEN || existingSocket.readyState === WebSocket.CONNECTING)) {
+				return;
+			}
+
+			const wsUrl = buildTranscriptWsUrl(meta.sessionId, meta.participantId);
+			console.info("[transcript-ws] connecting", {
+				sessionId: meta.sessionId,
+				participantId: meta.participantId,
+				wsUrl
+			});
+
+			const socket = new WebSocket(wsUrl);
+			transcriptSocketRef.current = socket;
+
+			socket.onopen = () => {
+				if (transcriptSocketRef.current !== socket) {
+					return;
+				}
+				console.info("[transcript-ws] open", {
+					sessionId: meta.sessionId,
+					participantId: meta.participantId
+				});
+				flushPendingTranscriptSegments();
+			};
+
+			socket.onmessage = event => {
+				if (typeof event.data !== "string") {
+					console.info("[transcript-ws] receive binary", event.data);
+					return;
+				}
+
+				try {
+					const parsedMessage = JSON.parse(event.data) as AudioStreamMessage;
+					console.info("[transcript-ws] receive", parsedMessage);
+					if (parsedMessage.type === "transcript_update" || parsedMessage.type === "idea_blocks_update") {
+						setLastAudioMessage(parsedMessage);
+					}
+				} catch {
+					console.info("[transcript-ws] receive raw", event.data);
+				}
+			};
+
+			socket.onerror = event => {
+				console.error("[transcript-ws] error", event);
+			};
+
+			socket.onclose = event => {
+				console.warn("[transcript-ws] close", {
+					code: event.code,
+					reason: event.reason,
+					wasClean: event.wasClean
+				});
+
+				if (transcriptSocketRef.current === socket) {
+					transcriptSocketRef.current = null;
+				}
+			};
+		},
+		[flushPendingTranscriptSegments]
+	);
+
+	const sendTranscriptSegment = useCallback(
+		(message: AudioStreamMessage): boolean => {
+			const meta = activeMetaRef.current;
+			if (!meta || !isRelayableTranscriptMessage(message)) {
+				return false;
+			}
+
+			pendingTranscriptSegmentsRef.current.push({ message, meta });
+			flushPendingTranscriptSegments();
+			return true;
+		},
+		[flushPendingTranscriptSegments]
+	);
+
+	const closeTranscriptSocket = useCallback((meta: ActiveAudioMeta | null) => {
+		const socket = transcriptSocketRef.current;
+		transcriptSocketRef.current = null;
+		pendingTranscriptSegmentsRef.current = [];
+
+		if (!socket) {
+			return;
+		}
+
+		try {
+			if (socket.readyState === WebSocket.OPEN) {
+				socket.send(
+					JSON.stringify({
+						type: "stop",
+						roomName: meta?.sessionId,
+						sessionName: meta?.sessionId,
+						participantId: meta?.participantId,
+						userId: meta?.participantId,
+						displayName: meta?.displayName
+					})
+				);
+			}
+		} catch (error) {
+			console.warn("[transcript-ws] failed to send stop", error);
+		}
+
+		if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+			try {
+				socket.close(1000, "client_stop");
+			} catch (error) {
+				console.warn("[transcript-ws] failed to close socket", error);
+			}
+		}
 	}, []);
 
 	const waitForAudioStopAck = useCallback((socket: WebSocket): Promise<void> => {
@@ -204,6 +400,7 @@ export function useAudioStream(
 
 			socketRef.current = null;
 			activeMetaRef.current = null;
+			closeTranscriptSocket(meta);
 
 			try {
 				if (socket && socket.readyState === WebSocket.OPEN) {
@@ -259,7 +456,7 @@ export function useAudioStream(
 				}
 			}
 		},
-		[cleanupAudioResources, waitForAudioStopAck]
+		[cleanupAudioResources, closeTranscriptSocket, waitForAudioStopAck]
 	);
 
 	const sendAudioSamples = useCallback((samples: Float32Array) => {
@@ -334,6 +531,8 @@ export function useAudioStream(
 				displayName: resolvedDisplayName,
 				clientId
 			};
+
+			connectTranscriptSocket(activeMetaRef.current);
 
 			const wsBaseUrl = getAudioWsBaseUrl();
 			const wsUrl = `${wsBaseUrl}/sessions/${encodeURIComponent(sessionId)}` + `/audio-stream?participant_id=${encodeURIComponent(participantId)}`;
@@ -459,6 +658,9 @@ export function useAudioStream(
 						const parsedMessage = JSON.parse(event.data) as AudioStreamMessage;
 						parsedMessage.local_mic_mode = currentMode;
 						console.info("[audio-ws] receive", parsedMessage);
+						if (sendTranscriptSegment(parsedMessage)) {
+							return;
+						}
 						setLastAudioMessage(parsedMessage);
 					} catch {
 						console.info("[audio-ws] receive raw", event.data);
@@ -494,6 +696,7 @@ export function useAudioStream(
 					}
 				};
 			} catch (error) {
+				closeTranscriptSocket(activeMetaRef.current);
 				cleanupAudioResources();
 
 				const message = error instanceof Error ? error.message : String(error);
@@ -503,7 +706,7 @@ export function useAudioStream(
 				setIsAudioStreaming(false);
 			}
 		},
-		[cleanupAudioResources, displayName, participantId, sendAudioSamples, sessionId, stopAudioStream]
+		[cleanupAudioResources, closeTranscriptSocket, connectTranscriptSocket, displayName, participantId, sendAudioSamples, sendTranscriptSegment, sessionId, stopAudioStream]
 	);
 
 	useEffect(() => {

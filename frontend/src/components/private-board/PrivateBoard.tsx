@@ -80,6 +80,10 @@ function isAudioTranscriptMessage(message: object | null): message is AudioTrans
 	);
 }
 
+function isAudioIdeaBlocksUpdateMessage(message: object | null): boolean {
+	return !!message && "type" in message && message.type === "idea_blocks_update";
+}
+
 const fallbackBlock = (): IdeaBlock => ({
 	id: `local-${Date.now()}`,
 	summary: "正在生成...",
@@ -376,6 +380,14 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		return () => window.clearTimeout(timer);
 	}, [ensureTranscriptPersisted, lastAudioMessage]);
+
+	useEffect(() => {
+		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
+			return;
+		}
+
+		setIdeaBlockRefreshKey(current => current + 1);
+	}, [lastAudioMessage]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
