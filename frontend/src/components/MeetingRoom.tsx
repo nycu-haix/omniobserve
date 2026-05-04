@@ -4,18 +4,15 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
-import { apiUrl } from "../services/api";
 import type { MicMode } from "../types";
 import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/Tabs";
 
 interface LostAtSeaItem {
 	id: string;
@@ -28,10 +25,6 @@ type RankingScope = "public" | "private";
 interface RankingSnapshot {
 	revision: number;
 	items: string[];
-}
-
-interface TopicDescriptionResponse {
-	topic_description: string;
 }
 
 const INITIAL_ITEMS: LostAtSeaItem[] = [
@@ -191,9 +184,6 @@ export default function MeetingRoom() {
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
-	const [topicDescription, setTopicDescription] = useState("");
-	const [topicDescriptionError, setTopicDescriptionError] = useState<string | null>(null);
-	const [isTopicDescriptionLoading, setIsTopicDescriptionLoading] = useState(true);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -230,41 +220,6 @@ export default function MeetingRoom() {
 			}
 		};
 		void queryPermission();
-	}, []);
-
-	useEffect(() => {
-		const controller = new AbortController();
-
-		const loadTopicDescription = async () => {
-			setIsTopicDescriptionLoading(true);
-			setTopicDescriptionError(null);
-
-			try {
-				const response = await fetch(apiUrl("/api/topic-description"), {
-					signal: controller.signal
-				});
-				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}`);
-				}
-
-				const data = (await response.json()) as TopicDescriptionResponse;
-				setTopicDescription(data.topic_description);
-			} catch (err) {
-				if (err instanceof DOMException && err.name === "AbortError") {
-					return;
-				}
-				console.error("Failed to load topic description", err);
-				setTopicDescriptionError("題目敘述載入失敗");
-			} finally {
-				if (!controller.signal.aborted) {
-					setIsTopicDescriptionLoading(false);
-				}
-			}
-		};
-
-		void loadTopicDescription();
-
-		return () => controller.abort();
 	}, []);
 
 	const requestMicPermission = async () => {
@@ -520,7 +475,7 @@ export default function MeetingRoom() {
 					/>
 				</div>
 
-				<Tabs defaultValue="ranking" className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
+				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
 						<div className="flex min-w-0 flex-wrap items-center gap-3">
 							<button
@@ -531,14 +486,10 @@ export default function MeetingRoom() {
 							>
 								海上求生排序
 							</button>
-							<TabsList>
-								<TabsTrigger value="ranking">排序</TabsTrigger>
-								<TabsTrigger value="description">題目敘述</TabsTrigger>
-							</TabsList>
 						</div>
 					</header>
 					{isTaskDetailOpen && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{LOST_AT_SEA_TASK_DETAIL}</p>}
-					<TabsContent value="ranking" className="mt-0 grid h-full min-h-0 gap-3 overflow-y-auto pr-1 data-[state=inactive]:hidden lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
+					<div className="grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
 						<LostAtSeaRankingPanel
 							title="Public 排序"
 							status="協作中"
@@ -561,29 +512,8 @@ export default function MeetingRoom() {
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 						/>
-					</TabsContent>
-					<TabsContent value="description" className="mt-0 h-full min-h-0 overflow-y-auto rounded-lg border bg-background p-4 data-[state=inactive]:hidden">
-						{isTopicDescriptionLoading ? (
-							<p className="text-sm leading-7 text-muted-foreground">載入題目敘述中...</p>
-						) : topicDescriptionError ? (
-							<p className="text-sm leading-7 text-destructive">{topicDescriptionError}</p>
-						) : (
-							<div className="text-sm leading-7 text-foreground">
-								<ReactMarkdown
-									components={{
-										p: ({ children }) => <p className="mb-5 last:mb-0">{children}</p>,
-										strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-										ul: ({ children }) => <ul className="mb-5 list-disc space-y-2 pl-5 last:mb-0">{children}</ul>,
-										ol: ({ children }) => <ol className="mb-5 list-decimal space-y-2 pl-5 last:mb-0">{children}</ol>,
-										li: ({ children }) => <li>{children}</li>
-									}}
-								>
-									{topicDescription}
-								</ReactMarkdown>
-							</div>
-						)}
-					</TabsContent>
-				</Tabs>
+					</div>
+				</section>
 
 				<div className="relative flex items-center justify-center pt-2">
 					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
