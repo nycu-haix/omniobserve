@@ -458,6 +458,23 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		setTranscriptRefreshKey(current => current + 1);
 	};
 
+	const deleteIdeaBlock = async (id: string) => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			setIdeaBlocks(prev => prev.filter(block => block.id !== id));
+			return;
+		}
+
+		const response = await fetch(buildIdeaBlockDetailUrl(sessionId, participantId, id), {
+			method: "DELETE"
+		});
+
+		if (!response.ok) {
+			throw new Error("Failed to delete idea block");
+		}
+
+		setIdeaBlocks(prev => prev.filter(block => block.id !== id));
+	};
+
 	const addBlock = async () => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 			const newBlock = fallbackBlock();
@@ -513,7 +530,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										blockRefs.current[block.id] = node;
 									}}
 								>
-									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} />
+									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} />
 								</div>
 							))}
 						</div>

@@ -6,7 +6,6 @@ import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
-import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
@@ -56,7 +55,7 @@ const MIN_JITSI_HEIGHT = 240;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const LOST_AT_SEA_TASK_DETAIL =
-	"你和你的團隊被困在南太平洋的一艘橡皮救生筏上，具體位置不詳，周圍看不到陸地。團隊無法確定方向，也沒有足夠能力自行划回岸邊，因此主要策略是留在救生筏上、保存體力並等待救援。請根據物品對生存的重要程度進行排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。每個物品需附上簡短理由。";
+	"你和你的團隊被困在南太平洋的一艘橡皮救生筏上，具體位置不詳，周圍看不到陸地。團隊無法確定方向，也沒有足夠能力自行划回岸邊，因此主要策略是留在救生筏上、保存體力並等待救援。請根據物品對生存的重要程度進行排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。在公開討論以及私人想法輸出的時候，明確提及物品名稱並且附上簡短理由。";
 
 function clampPrivateBoardWidth(width: number) {
 	const availableWidth = window.innerWidth - 32 - 16;
@@ -200,7 +199,6 @@ export default function MeetingRoom() {
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId);
-	usePresenceWebSocket(sessionId, connectionParticipantId);
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;

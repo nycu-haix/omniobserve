@@ -1,5 +1,5 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, Pencil, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, Pencil, Trash2, X } from "lucide-react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -12,9 +12,10 @@ interface IdeaBlockItemProps {
 	isHighlighted?: boolean;
 	onToggle: (id: string) => void;
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string }) => Promise<void> | void;
+	onDelete?: (id: string) => Promise<void> | void;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }: IdeaBlockItemProps) {
+export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete }: IdeaBlockItemProps) {
 	const [detailTab, setDetailTab] = useState("ai");
 	const [isEditing, setIsEditing] = useState(false);
 	const [draftSummary, setDraftSummary] = useState(block.summary);
@@ -42,7 +43,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 		setDraftTranscript(block.transcript || "");
 		setSaveError(null);
 		setIsEditing(true);
-		setDetailTab("ai");
+		setDetailTab("content");
 		if (!block.expanded) {
 			onToggle(block.id);
 		}
@@ -54,6 +55,36 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 		setDraftTranscript(block.transcript || "");
 		setSaveError(null);
 		setIsEditing(false);
+		setDetailTab("ai");
+	};
+
+	const [isDeleting, setIsDeleting] = useState(false);
+	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+	const deleteBlock = async (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		setShowDeleteConfirm(true);
+	};
+
+	const confirmDelete = async () => {
+		if (!onDelete || isDeleting) {
+			return;
+		}
+
+		setIsDeleting(true);
+		setShowDeleteConfirm(false);
+		setSaveError(null);
+		try {
+			await onDelete(block.id);
+		} catch (error) {
+			setSaveError(error instanceof Error ? error.message : "Failed to delete idea block");
+		} finally {
+			setIsDeleting(false);
+		}
+	};
+
+	const cancelDelete = () => {
+		setShowDeleteConfirm(false);
 	};
 
 	const saveDraft = async () => {
@@ -70,6 +101,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 				transcript: draftTranscript.trim()
 			});
 			setIsEditing(false);
+			setDetailTab("ai");
 		} catch (error) {
 			setSaveError(error instanceof Error ? error.message : "Failed to save idea block");
 		} finally {
@@ -82,7 +114,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 			role="button"
 			tabIndex={isGenerating ? -1 : 0}
 			className={cn(
-				"flex min-h-11 w-full items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				block.hasCue && "border-primary bg-accent",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
@@ -101,19 +133,43 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 			}}
 		>
 			{isGenerating ? <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-			<span className="min-w-0 flex-1 truncate">{isGenerating ? "正在生成..." : block.summary}</span>
+			<span className="min-w-0 max-w-full overflow-hidden break-words text-sm leading-6">{isGenerating ? "正在生成..." : block.summary}</span>
 			{!isGenerating && (
-				<Button
-					aria-label="Edit idea block"
-					size="icon"
-					variant="ghost"
-					onClick={event => {
-						event.stopPropagation();
-						startEditing();
-					}}
-				>
-					<Pencil className="h-4 w-4" />
-				</Button>
+				<div className="relative flex flex-shrink-0 items-center gap-2">
+					<Button
+						aria-label="Edit idea block"
+						size="icon"
+						variant="ghost"
+						onClick={event => {
+							event.stopPropagation();
+							startEditing();
+						}}
+					>
+						<Pencil className="h-4 w-4" />
+					</Button>
+					<Button
+						aria-label="Delete idea block"
+						size="icon"
+						variant="ghost"
+						onClick={deleteBlock}
+						disabled={isDeleting}
+					>
+						<Trash2 className="h-4 w-4" />
+					</Button>
+					{showDeleteConfirm && (
+						<div className="absolute top-full right-0 mt-1 z-5 bg-white border border-gray-200 rounded-md shadow-lg p-2">
+							<div className="flex items-center gap-2">
+								<span className="text-xs text-muted-foreground">刪除</span>
+								<Button size="sm" variant="destructive" onClick={confirmDelete} disabled={isDeleting}>
+									確定
+								</Button>
+								<Button size="sm" variant="ghost" onClick={cancelDelete}>
+									取消
+								</Button>
+							</div>
+						</div>
+					)}
+				</div>
 			)}
 		</div>
 	);
@@ -132,11 +188,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 			)}
 
 			{block.expanded && !isGenerating && (
-				<div className="ml-7 rounded-lg border bg-background p-3">
+				<div className="ml-7 rounded-lg border bg-background p-3 overflow-hidden">
 					<Tabs value={detailTab} onValueChange={setDetailTab}>
 						<TabsList>
-							<TabsTrigger value="ai">AI 統整</TabsTrigger>
 							{isEditing && <TabsTrigger value="content">標題</TabsTrigger>}
+							<TabsTrigger value="ai">AI 統整</TabsTrigger>
 							<TabsTrigger value="transcript">逐字稿</TabsTrigger>
 							{block.hasCue && <Badge variant="secondary">Similarity</Badge>}
 						</TabsList>
@@ -153,15 +209,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave }
 						</TabsContent>
 						<TabsContent className="grid gap-2 text-sm leading-6" value="content">
 							{isEditing ? (
-								<>
-									<textarea
-										className="min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
-										maxLength={10}
-										value={draftSummary}
-										onChange={event => setDraftSummary(event.target.value)}
-									/>
-									<p className="text-xs text-muted-foreground">{draftSummary.length}/10</p>
-								</>
+								<textarea
+									className="min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+									value={draftSummary}
+									onChange={event => setDraftSummary(event.target.value)}
+								/>
 							) : (
 								block.summary || "-"
 							)}
