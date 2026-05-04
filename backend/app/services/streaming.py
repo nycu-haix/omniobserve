@@ -327,6 +327,9 @@ def _timestamp_from_seconds(value: Any) -> datetime:
     return utc_now()
 
 
+FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
+
+
 async def handle_transcript_segments_websocket(
     websocket: WebSocket,
     *,
@@ -334,6 +337,11 @@ async def handle_transcript_segments_websocket(
     participant_id: str,
 ) -> None:
     await websocket.accept()
+    logger.info(
+        "pipeline_ws_connected session_name=%s participant_id=%s",
+        session_name,
+        participant_id,
+    )
 
     pending_idea_segments: list[StreamTranscript] = []
 
@@ -349,6 +357,11 @@ async def handle_transcript_segments_websocket(
                     await send_ws_json_safe(websocket, {"type": "pong"})
                     continue
                 if message_type == "stop":
+                    logger.info(
+                        "pipeline_ws_stop session_name=%s participant_id=%s",
+                        session_name,
+                        participant_id,
+                    )
                     await send_ws_json_safe(websocket, {"type": "transcript_segments_stopped"})
                     await websocket.close()
                     return
@@ -359,7 +372,21 @@ async def handle_transcript_segments_websocket(
                 reason = str(payload.get("reason") or "").strip().lower()
                 visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
                 if not text:
+                    logger.info(
+                        "pipeline_ws_skip_empty_transcript session_name=%s participant_id=%s reason=%s",
+                        session_name,
+                        participant_id,
+                        reason or "unknown",
+                    )
                     continue
+                logger.info(
+                    "pipeline_ws_transcript_received session_name=%s participant_id=%s reason=%s visibility=%s chars=%s",
+                    session_name,
+                    participant_id,
+                    reason or "unknown",
+                    visibility.value,
+                    len(text),
+                )
 
                 timestamp = _timestamp_from_seconds(payload.get("start"))
                 saved_segment = await save_ws_transcript_segment(
@@ -372,6 +399,12 @@ async def handle_transcript_segments_websocket(
                     ended_at=timestamp,
                 )
                 if saved_segment is None:
+                    logger.info(
+                        "pipeline_ws_transcript_save_failed session_name=%s participant_id=%s reason=%s",
+                        session_name,
+                        participant_id,
+                        reason or "unknown",
+                    )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -393,6 +426,13 @@ async def handle_transcript_segments_websocket(
                 )
 
                 if reason == "max_speech_ms":
+                    logger.info(
+                        "pipeline_ws_transcript_buffer session_name=%s participant_id=%s segment_id=%s reason=%s",
+                        session_name,
+                        participant_id,
+                        saved_segment.segment_id,
+                        reason,
+                    )
                     await handle_transcript_segment(
                         db,
                         session_name=session_name,
@@ -404,7 +444,14 @@ async def handle_transcript_segments_websocket(
                     pending_idea_segments.append(saved_segment)
                     continue
 
-                if reason == "silence":
+                if reason in FINAL_TRANSCRIPT_REASONS:
+                    logger.info(
+                        "pipeline_ws_transcript_final session_name=%s participant_id=%s segment_id=%s reason=%s",
+                        session_name,
+                        participant_id,
+                        saved_segment.segment_id,
+                        reason,
+                    )
                     await handle_transcript_segment(
                         db,
                         session_name=session_name,
@@ -415,6 +462,12 @@ async def handle_transcript_segments_websocket(
                     )
                     pending_idea_segments = []
                     try:
+                        logger.info(
+                            "pipeline_ws_generation_start session_name=%s participant_id=%s reason=%s",
+                            session_name,
+                            participant_id,
+                            reason,
+                        )
                         pipeline_result = await handle_transcript_segment(
                             db,
                             session_name=session_name,
@@ -425,9 +478,10 @@ async def handle_transcript_segments_websocket(
                         )
                     except Exception:
                         logger.exception(
-                            "Transcript segment pipeline failed session_name=%s participant_id=%s",
+                            "pipeline_ws_generation_failed session_name=%s participant_id=%s reason=%s",
                             session_name,
                             participant_id,
+                            reason,
                         )
                         await send_ws_json_safe(
                             websocket,
@@ -443,6 +497,13 @@ async def handle_transcript_segments_websocket(
                         if pipeline_result is not None
                         else {"idea_blocks": [], "task_items": []}
                     )
+                    logger.info(
+                        "pipeline_ws_generation_done session_name=%s participant_id=%s idea_blocks=%s task_items=%s",
+                        session_name,
+                        participant_id,
+                        len(serialized_result["idea_blocks"]),
+                        len(serialized_result["task_items"]),
+                    )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -457,11 +518,25 @@ async def handle_transcript_segments_websocket(
                             "task_items": serialized_result["task_items"],
                         },
                     )
+                    continue
+
+                logger.info(
+                    "pipeline_ws_transcript_ignored_for_generation session_name=%s participant_id=%s segment_id=%s reason=%s",
+                    session_name,
+                    participant_id,
+                    saved_segment.segment_id,
+                    reason or "unknown",
+                )
 
         except WebSocketDisconnect:
+            logger.info(
+                "pipeline_ws_disconnected session_name=%s participant_id=%s",
+                session_name,
+                participant_id,
+            )
             return
         except Exception as exc:
-            logger.exception("Unhandled transcript segment WebSocket error: %s", exc)
+            logger.exception("pipeline_ws_unhandled_error session_name=%s participant_id=%s error=%s", session_name, participant_id, exc)
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1011)
 

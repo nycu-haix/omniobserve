@@ -13,7 +13,10 @@ export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 
 	return (
 		<div className={cn("flex items-start gap-2 border-b py-2 text-sm leading-6", isPrivate ? "justify-end text-right" : "justify-between")}>
-			<span className={cn("min-w-0 max-w-[82%]", isPrivate && "rounded-md bg-muted px-3 py-1")}>{line.text}</span>
+			<span className={cn("min-w-0 max-w-[82%]", isPrivate && "rounded-md bg-muted px-3 py-1")}>
+				{line.text}
+				{line.time && <span className="ml-2 whitespace-nowrap text-xs text-muted-foreground">{line.time}</span>}
+			</span>
 			{line.linkedBlockId && (
 				<Button className="shrink-0" variant="ghost" size="sm" onClick={() => onJumpToBlock?.(line.linkedBlockId as string)}>
 					<CornerDownRight className="h-4 w-4" />

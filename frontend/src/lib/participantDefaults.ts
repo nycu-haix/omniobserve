@@ -7,6 +7,15 @@ export const PARTICIPANT_NAME_MAP: Record<string, string> = {
 
 export const DEFAULT_PARTICIPANT_IDS = Object.keys(PARTICIPANT_NAME_MAP);
 
+export function isValidParticipantId(participantId: string) {
+	return /^\d+$/.test(participantId.trim());
+}
+
+export function normalizeParticipantId(participantId: string) {
+	const trimmedParticipantId = participantId.trim();
+	return isValidParticipantId(trimmedParticipantId) ? trimmedParticipantId : "1";
+}
+
 export function getDefaultParticipantName(participantId: string) {
 	return PARTICIPANT_NAME_MAP[participantId] || `Guest ${participantId}`;
 }

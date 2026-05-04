@@ -32,6 +32,11 @@ RANKING_ITEMS = [
 async def build_task_item_ids_with_llm(text: str) -> list[int]:
     mock_ids = _build_mock_task_item_ids()
     if mock_ids is not None:
+        logger.info(
+            "task_item_llm_mock_used text_chars=%s task_item_ids=%s",
+            len(text),
+            mock_ids,
+        )
         return mock_ids
 
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -54,6 +59,11 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
     user_prompt = f"User input:\n{text.strip()}"
 
     try:
+        logger.info(
+            "task_item_llm_request model=%s text_chars=%s",
+            OPENAI_MODEL,
+            len(text),
+        )
         completion = await openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             temperature=0,
@@ -63,11 +73,16 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
             ],
         )
         raw_content = completion.choices[0].message.content or "{}"
+        logger.info(
+            "task_item_llm_response model=%s response_chars=%s",
+            OPENAI_MODEL,
+            len(raw_content),
+        )
         parsed = _parse_llm_json_payload(raw_content)
     except ApiError:
         raise
     except Exception as exc:
-        logger.exception("LLM task item generation failed: %s", exc)
+        logger.exception("task_item_llm_failed model=%s error=%s", OPENAI_MODEL, exc)
         raise ApiError(
             422,
             "TASK_ITEM_GENERATION_FAILED",
@@ -82,7 +97,12 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
     if not isinstance(ids, list):
         raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
 
-    return _normalize_task_item_ids(ids)
+    normalized_ids = _normalize_task_item_ids(ids)
+    logger.info(
+        "task_item_llm_parsed task_item_ids=%s",
+        normalized_ids,
+    )
+    return normalized_ids
 
 
 async def generate_and_save_task_items_for_idea_block(
@@ -93,7 +113,7 @@ async def generate_and_save_task_items_for_idea_block(
 ) -> list[TaskItem]:
     task_item_ids = await build_task_item_ids_with_llm(text)
     logger.info(
-        "Generated task item ids idea_block_id=%s task_item_ids=%s",
+        "task_item_ids_generated idea_block_id=%s task_item_ids=%s",
         idea_block_id,
         task_item_ids,
     )
@@ -102,10 +122,19 @@ async def generate_and_save_task_items_for_idea_block(
         for task_item_id in task_item_ids
     ]
     if not task_items:
+        logger.info(
+            "task_item_rows_skipped_empty idea_block_id=%s",
+            idea_block_id,
+        )
         return []
 
     db.add_all(task_items)
     await db.flush()
+    logger.info(
+        "task_item_rows_saved idea_block_id=%s count=%s",
+        idea_block_id,
+        len(task_items),
+    )
     return task_items
 
 

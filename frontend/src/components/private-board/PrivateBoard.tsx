@@ -1,9 +1,9 @@
 import { Plus } from "lucide-react";
 import type { UIEvent } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, MicMode, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
@@ -13,7 +13,6 @@ import { TranscriptLine } from "./TranscriptLine";
 interface PrivateBoardProps {
 	sessionId: string;
 	participantId: string;
-	micMode: MicMode;
 	lastMessage: object | null;
 	lastAudioMessage: object | null;
 	isConnected: boolean;
@@ -33,6 +32,14 @@ interface TranscriptResponse {
 	transcript: string;
 }
 
+interface IdeaBlockResponse {
+	id: number;
+	title: string;
+	summary: string;
+	transcript: string | null;
+	similarity_id: string | null;
+}
+
 type AudioTranscriptMessage =
 	| {
 			type: "transcript_update";
@@ -40,6 +47,7 @@ type AudioTranscriptMessage =
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
+			timestamp_ms?: number | null;
 			local_mic_mode?: string | null;
 	  }
 	| {
@@ -48,6 +56,7 @@ type AudioTranscriptMessage =
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
+			timestamp_ms?: number | null;
 			local_mic_mode?: string | null;
 	  };
 
@@ -77,37 +86,87 @@ const fallbackBlock = (): IdeaBlock => ({
 	status: "generating"
 });
 
-function buildTranscriptUrl(sessionId: string, participantId: string): string | null {
+function getTranscriptUserId(participantId: string): number {
 	const userId = Number(participantId);
+	return Number.isInteger(userId) ? userId : 0;
+}
 
-	if (!Number.isInteger(userId)) {
-		return null;
-	}
+function buildTranscriptUrl(sessionId: string, participantId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	const userId = getTranscriptUserId(participantId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
+}
 
-	const path = `/api/sessions/${encodeURIComponent(sessionId)}/transcripts`;
-	return apiUrl(`${path}?user_id=${encodeURIComponent(String(userId))}`);
+function buildTranscriptCreateUrl(sessionId: string, participantId: string): string {
+	return buildTranscriptUrl(sessionId, participantId);
+}
+
+function buildTranscriptDetailUrl(sessionId: string, participantId: string, transcriptId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	const userId = getTranscriptUserId(participantId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts/${encodeURIComponent(transcriptId)}`);
+}
+
+function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	const userId = getTranscriptUserId(participantId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/idea-blocks`);
 }
 
 function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType {
 	return {
 		id: String(item.id),
+		time: formatTranscriptTime(item.time_stamp),
 		text: item.transcript
 	};
 }
 
-function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage, fallbackMicMode: MicMode): TranscriptLineType["source"] {
-	const source = message.local_mic_mode ?? message.mic_mode ?? message.scope ?? fallbackMicMode;
+function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
+	return {
+		id: String(item.id),
+		summary: item.title || item.summary,
+		aiSummary: item.summary,
+		transcript: item.transcript ?? undefined,
+		hasCue: !!item.similarity_id,
+		status: "ready"
+	};
+}
+
+function formatTranscriptTime(value: string | number | null | undefined): string | undefined {
+	if (value == null) {
+		return undefined;
+	}
+
+	const date = new Date(typeof value === "number" ? value : value);
+	if (Number.isNaN(date.getTime())) {
+		return undefined;
+	}
+
+	return new Intl.DateTimeFormat("zh-TW", {
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: false
+	}).format(date);
+}
+
+function isDbTranscriptId(transcriptId: string): boolean {
+	return /^\d+$/.test(transcriptId);
+}
+
+function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): TranscriptLineType["source"] {
+	const source = message.local_mic_mode ?? message.mic_mode ?? message.scope;
 	if (source === "public" || source === "private") {
 		return source;
 	}
 	return undefined;
 }
 
-function audioTranscriptMessageToLine(message: AudioTranscriptMessage, fallbackMicMode: MicMode): TranscriptLineType {
+function audioTranscriptMessageToLine(message: AudioTranscriptMessage): TranscriptLineType {
 	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
 	return {
-		id: segmentId == null ? `audio-${Date.now()}` : `audio-${String(segmentId)}`,
-		source: transcriptSourceFromAudioMessage(message, fallbackMicMode),
+		id: segmentId == null ? `audio-${Date.now()}` : String(segmentId),
+		source: transcriptSourceFromAudioMessage(message),
+		time: formatTranscriptTime(message.timestamp_ms),
 		text: message.text?.trim() ?? ""
 	};
 }
@@ -120,13 +179,9 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 
 	const existingLine = lines.find(item => item.id === line.id);
 	if (!existingLine) {
-		const duplicateTextLine = lines.find(item => item.text.trim() === normalizedText && item.source === line.source);
-		if (duplicateTextLine) {
-			return lines;
-		}
 		return [...lines, { ...line, text: normalizedText }];
 	}
-	if (existingLine.text.trim() === normalizedText) {
+	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time) {
 		return lines;
 	}
 	return lines.map(item => (item.id === line.id ? { ...line, text: normalizedText } : item));
@@ -134,6 +189,27 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
 	return nextLines.reduce((lines, line) => appendTranscriptLine(lines, line), baseLines);
+}
+
+function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): IdeaBlock[] {
+	return nextBlocks.reduce((blocks, nextBlock) => {
+		const existingBlock = blocks.find(block => block.id === nextBlock.id);
+		if (!existingBlock) {
+			return [...blocks, nextBlock];
+		}
+
+		return blocks.map(block =>
+			block.id === nextBlock.id
+				? {
+						...block,
+						...nextBlock,
+						expanded: block.expanded,
+						cueText: block.cueText,
+						hasCue: block.hasCue || nextBlock.hasCue
+					}
+				: block
+		);
+	}, baseBlocks);
 }
 
 function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
@@ -147,16 +223,18 @@ function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, o
 	);
 }
 
-export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, lastAudioMessage, isConnected }: PrivateBoardProps) {
+export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioMessage, isConnected }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
 	const [websocketTranscriptLines, setWebsocketTranscriptLines] = useState<TranscriptLineType[]>([]);
 	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
+	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
 		"websocket-transcript": true,
 		transcript: true,
@@ -171,14 +249,8 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 		const controller = new AbortController();
 
 		async function loadTranscripts() {
-			setTranscriptLines([]);
 			try {
 				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
-				if (!transcriptUrl) {
-					setTranscriptLines([]);
-					return;
-				}
-
 				const response = await fetch(transcriptUrl, { signal: controller.signal });
 				if (!response.ok) {
 					throw new Error("Failed to load transcripts");
@@ -200,30 +272,46 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 	}, [participantId, sessionId, transcriptRefreshKey]);
 
 	useEffect(() => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			return;
+		}
+
+		const controller = new AbortController();
+
+		async function loadIdeaBlocks() {
+			try {
+				const response = await fetch(buildIdeaBlocksUrl(sessionId, participantId), { signal: controller.signal });
+				if (!response.ok) {
+					throw new Error("Failed to load idea blocks");
+				}
+
+				const ideaBlocksFromDb = ((await response.json()) as IdeaBlockResponse[]).map(ideaBlockResponseToBlock);
+				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.warn("[private-board] failed to load idea blocks", error);
+			}
+		}
+
+		void loadIdeaBlocks();
+
+		return () => controller.abort();
+	}, [ideaBlockRefreshKey, participantId, sessionId]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
 
 		const timer = window.setTimeout(() => {
 			if (lastMessage.type === "new_idea_block") {
-				setIdeaBlocks(prev => (prev.some(block => block.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
+				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
 			if (lastMessage.type === "update_idea_block") {
-				setIdeaBlocks(prev =>
-					prev.some(block => block.id === lastMessage.payload.id)
-						? prev.map(block => (block.id === lastMessage.payload.id ? { ...block, ...lastMessage.payload, status: "ready" } : block))
-						: [
-								...prev,
-								{
-									id: lastMessage.payload.id,
-									summary: lastMessage.payload.summary ?? "",
-									aiSummary: lastMessage.payload.aiSummary,
-									transcript: lastMessage.payload.transcript,
-									status: "ready"
-								}
-							]
-				);
+				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
@@ -239,18 +327,55 @@ export function PrivateBoard({ sessionId, participantId, micMode, lastMessage, l
 		return () => window.clearTimeout(timer);
 	}, [lastMessage]);
 
+	const ensureTranscriptPersisted = useCallback(
+		async (line: TranscriptLineType) => {
+			try {
+				if (isDbTranscriptId(line.id)) {
+					const existingResponse = await fetch(buildTranscriptDetailUrl(sessionId, participantId, line.id));
+					if (existingResponse.ok) {
+						const savedLine = transcriptResponseToLine((await existingResponse.json()) as TranscriptResponse);
+						setTranscriptLines(prev => appendTranscriptLine(prev, savedLine));
+						setTranscriptRefreshKey(current => current + 1);
+						return;
+					}
+				}
+
+				const response = await fetch(buildTranscriptCreateUrl(sessionId, participantId), {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ transcript: line.text })
+				});
+				if (!response.ok) {
+					throw new Error("Failed to persist transcript");
+				}
+
+				const savedLine = transcriptResponseToLine((await response.json()) as TranscriptResponse);
+				setTranscriptLines(prev => appendTranscriptLine(prev, savedLine));
+				setTranscriptRefreshKey(current => current + 1);
+			} catch (error) {
+				console.warn("[private-board] failed to persist live transcript", error);
+			}
+		},
+		[participantId, sessionId]
+	);
+
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
 			return;
 		}
+		if (lastProcessedAudioMessageRef.current === lastAudioMessage) {
+			return;
+		}
+		lastProcessedAudioMessageRef.current = lastAudioMessage;
 
 		const timer = window.setTimeout(() => {
-			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, audioTranscriptMessageToLine(lastAudioMessage, micMode)));
-			setTranscriptRefreshKey(current => current + 1);
+			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
+			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
+			void ensureTranscriptPersisted(transcriptLine);
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, micMode]);
+	}, [ensureTranscriptPersisted, lastAudioMessage]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
