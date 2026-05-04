@@ -4,4 +4,4 @@ __pycache__/
 node_modules/
 /audio-test/vad-backend/segments
 .DS_Store
-**/.env
+.env

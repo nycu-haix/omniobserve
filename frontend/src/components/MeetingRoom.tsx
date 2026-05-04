@@ -94,14 +94,7 @@ function isRankingStateMessage(message: object | null): message is { type: "rank
 }
 
 function isRankingSnapshot(value: unknown): value is RankingSnapshot {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"revision" in value &&
-		typeof value.revision === "number" &&
-		"items" in value &&
-		Array.isArray(value.items)
-	);
+	return typeof value === "object" && value !== null && "revision" in value && typeof value.revision === "number" && "items" in value && Array.isArray(value.items);
 }
 
 function isBoardStateMessage(message: object | null): message is {
@@ -117,11 +110,7 @@ function isBoardStateMessage(message: object | null): message is {
 		message.type === "board_state" &&
 		(("public_ranking" in message && isRankingSnapshot(message.public_ranking)) ||
 			("private_ranking" in message && isRankingSnapshot(message.private_ranking)) ||
-			("ranking" in message &&
-				typeof message.ranking === "object" &&
-				message.ranking !== null &&
-				"items" in message.ranking &&
-				Array.isArray(message.ranking.items)))
+			("ranking" in message && typeof message.ranking === "object" && message.ranking !== null && "items" in message.ranking && Array.isArray(message.ranking.items)))
 	);
 }
 
