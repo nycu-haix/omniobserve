@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import type { UIEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
@@ -105,12 +105,6 @@ function buildTranscriptUrl(sessionId: string, participantId: string): string {
 	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
 }
 
-function buildTranscriptDetailUrl(sessionId: string, participantId: string, transcriptId: string): string {
-	const encodedSessionId = encodeURIComponent(sessionId);
-	const userId = getTranscriptUserId(participantId);
-	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts/${encodeURIComponent(transcriptId)}`);
-}
-
 function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
 	const userId = getTranscriptUserId(participantId);
@@ -125,6 +119,7 @@ function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType 
 	return {
 		id: String(item.id),
 		source: "private",
+		origin: "history",
 		time: formatTranscriptTime(item.time_stamp),
 		text: item.transcript
 	};
@@ -158,10 +153,6 @@ function formatTranscriptTime(value: string | number | null | undefined): string
 	}).format(date);
 }
 
-function isDbTranscriptId(transcriptId: string): boolean {
-	return /^\d+$/.test(transcriptId);
-}
-
 function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): TranscriptLineType["source"] {
 	const source = message.local_mic_mode ?? message.mic_mode ?? message.scope;
 	if (source === "public" || source === "private") {
@@ -175,17 +166,18 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 	return {
 		id: segmentId == null ? `audio-${Date.now()}` : String(segmentId),
 		source: transcriptSourceFromAudioMessage(message),
+		origin: "live",
 		time: formatTranscriptTime(message.timestamp_ms),
 		text: message.text?.trim() ?? ""
 	};
 }
 
-function shouldSyncAudioTranscriptFromDb(message: AudioTranscriptMessage, line: TranscriptLineType): boolean {
-	return message.type === "transcript_update" && isDbTranscriptId(line.id);
-}
-
 function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage): boolean {
-	return message.type === "transcript_update" || (message.type === "transcript" && message.persisted !== false);
+	if (message.type === "transcript_update") {
+		return true;
+	}
+
+	return transcriptSourceFromAudioMessage(message) === "public" || message.persisted === true;
 }
 
 function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
@@ -234,11 +226,23 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 }
 
 function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
+	const firstLiveLineIndex = lines.findIndex(line => line.origin === "live");
+	const shouldShowLiveDivider = firstLiveLineIndex > 0 && lines.some((line, index) => index < firstLiveLineIndex && line.origin === "history");
+
 	return (
 		<div className="grid gap-1">
 			{lines.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">{emptyText}</div>}
-			{lines.map(line => (
-				<TranscriptLine key={line.id} line={line} onJumpToBlock={onJumpToBlock} />
+			{lines.map((line, index) => (
+				<div key={line.id} className="contents">
+					{shouldShowLiveDivider && index === firstLiveLineIndex && (
+						<div className="my-3 flex items-center gap-3 text-xs text-muted-foreground">
+							<div className="h-px flex-1 bg-border" />
+							<span className="shrink-0">即時逐字稿</span>
+							<div className="h-px flex-1 bg-border" />
+						</div>
+					)}
+					<TranscriptLine line={line} onJumpToBlock={onJumpToBlock} />
+				</div>
 			))}
 		</div>
 	);
@@ -335,7 +339,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setTranscriptLines(prev => appendTranscriptLine(prev, lastMessage.payload));
+				setTranscriptLines(prev => appendTranscriptLine(prev, { ...lastMessage.payload, origin: "live" }));
 			}
 
 			if (lastMessage.type === "similarity_cue") {
@@ -346,28 +350,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		return () => window.clearTimeout(timer);
 	}, [lastMessage]);
-
-	const syncTranscriptFromDb = useCallback(
-		async (line: TranscriptLineType) => {
-			try {
-				if (!isDbTranscriptId(line.id)) {
-					return;
-				}
-
-				const existingResponse = await fetch(buildTranscriptDetailUrl(sessionId, participantId, line.id));
-				if (!existingResponse.ok) {
-					throw new Error("Failed to load persisted transcript");
-				}
-
-				const savedLine = transcriptResponseToLine((await existingResponse.json()) as TranscriptResponse);
-				setTranscriptLines(prev => appendTranscriptLine(prev, savedLine));
-				setTranscriptRefreshKey(current => current + 1);
-			} catch (error) {
-				console.warn("[private-board] failed to sync persisted transcript", error);
-			}
-		},
-		[participantId, sessionId]
-	);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -390,13 +372,10 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
 				setTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
 			}
-			if (shouldSyncAudioTranscriptFromDb(lastAudioMessage, transcriptLine)) {
-				void syncTranscriptFromDb(transcriptLine);
-			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, syncTranscriptFromDb]);
+	}, [lastAudioMessage]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {

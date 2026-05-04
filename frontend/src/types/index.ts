@@ -17,6 +17,7 @@ export interface TranscriptLine {
 	text: string;
 	time?: string;
 	source?: "public" | "private";
+	origin?: "history" | "live";
 	linkedBlockId?: string;
 }
 
