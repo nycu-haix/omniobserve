@@ -118,13 +118,14 @@ function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
+	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
 
 	return (
 		<div
 			ref={setNodeRef}
 			className={cn("flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2", isDragging && "opacity-50")}
 			style={{
-				transform: CSS.Transform.toString(transform),
+				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
 			{...attributes}
