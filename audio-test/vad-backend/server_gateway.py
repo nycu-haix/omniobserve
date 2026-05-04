@@ -333,7 +333,7 @@ async def relay_transcript_to_pipeline(
     terminal_types = (
         {"task_items_update", "pipeline_error"}
         if reason in PIPELINE_FINAL_REASONS
-        else {"transcript_update", "pipeline_error"}
+        else {"transcript", "pipeline_error"}
     )
     pipeline_messages = []
 

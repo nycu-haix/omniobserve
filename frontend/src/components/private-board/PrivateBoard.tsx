@@ -49,6 +49,8 @@ type AudioTranscriptMessage =
 			text?: string;
 			timestamp_ms?: number | null;
 			local_mic_mode?: string | null;
+			reason?: string | null;
+			persisted?: boolean | null;
 	  }
 	| {
 			type: "transcript";
@@ -58,6 +60,8 @@ type AudioTranscriptMessage =
 			text?: string;
 			timestamp_ms?: number | null;
 			local_mic_mode?: string | null;
+			reason?: string | null;
+			persisted?: boolean | null;
 	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
@@ -175,6 +179,14 @@ function shouldSyncAudioTranscriptFromDb(message: AudioTranscriptMessage, line: 
 	return message.type === "transcript_update" && isDbTranscriptId(line.id);
 }
 
+function shouldAppendAudioTranscriptToWebSocketTab(message: AudioTranscriptMessage): boolean {
+	return message.type === "transcript" && message.persisted !== false;
+}
+
+function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
+	return [message.type, line.source ?? "", message.reason ?? "", line.text.trim()].join("|");
+}
+
 function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineType): TranscriptLineType[] {
 	const normalizedText = line.text.trim();
 	if (!normalizedText) {
@@ -239,6 +251,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
+	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
 		"websocket-transcript": true,
 		transcript: true,
@@ -364,7 +377,16 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
-			setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
+			if (shouldAppendAudioTranscriptToWebSocketTab(lastAudioMessage)) {
+				const signature = audioTranscriptDisplaySignature(lastAudioMessage, transcriptLine);
+				const displayed = lastDisplayedAudioTranscriptRef.current;
+				const now = Date.now();
+				if (displayed && displayed.signature === signature && now - displayed.displayedAt < 2000) {
+					return;
+				}
+				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
+				setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
+			}
 			if (shouldSyncAudioTranscriptFromDb(lastAudioMessage, transcriptLine)) {
 				void syncTranscriptFromDb(transcriptLine);
 			}
