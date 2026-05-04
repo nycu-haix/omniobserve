@@ -27,4 +27,4 @@ export interface SimilarityCueData {
 }
 
 export type MicMode = "public" | "private" | "off";
-export type BoardTab = "websocket-transcript" | "transcript" | "ideablock";
+export type BoardTab = "transcript" | "ideablock";

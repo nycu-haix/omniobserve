@@ -42,27 +42,27 @@ interface IdeaBlockResponse {
 
 type AudioTranscriptMessage =
 	| {
-			type: "transcript_update";
-			transcript_segment_id?: string | number | null;
-			mic_mode?: string | null;
-			scope?: string | null;
-			text?: string;
-			timestamp_ms?: number | null;
-			local_mic_mode?: string | null;
-			reason?: string | null;
-			persisted?: boolean | null;
-	  }
+		type: "transcript_update";
+		transcript_segment_id?: string | number | null;
+		mic_mode?: string | null;
+		scope?: string | null;
+		text?: string;
+		timestamp_ms?: number | null;
+		local_mic_mode?: string | null;
+		reason?: string | null;
+		persisted?: boolean | null;
+	}
 	| {
-			type: "transcript";
-			segment_id?: string | number | null;
-			mic_mode?: string | null;
-			scope?: string | null;
-			text?: string;
-			timestamp_ms?: number | null;
-			local_mic_mode?: string | null;
-			reason?: string | null;
-			persisted?: boolean | null;
-	  };
+		type: "transcript";
+		segment_id?: string | number | null;
+		mic_mode?: string | null;
+		scope?: string | null;
+		text?: string;
+		timestamp_ms?: number | null;
+		local_mic_mode?: string | null;
+		reason?: string | null;
+		persisted?: boolean | null;
+	};
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 
@@ -124,6 +124,7 @@ function buildIdeaBlockDetailUrl(sessionId: string, participantId: string, ideaB
 function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType {
 	return {
 		id: String(item.id),
+		source: "private",
 		time: formatTranscriptTime(item.time_stamp),
 		text: item.transcript
 	};
@@ -183,8 +184,8 @@ function shouldSyncAudioTranscriptFromDb(message: AudioTranscriptMessage, line: 
 	return message.type === "transcript_update" && isDbTranscriptId(line.id);
 }
 
-function shouldAppendAudioTranscriptToWebSocketTab(message: AudioTranscriptMessage): boolean {
-	return message.type === "transcript" && message.persisted !== false;
+function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage): boolean {
+	return message.type === "transcript_update" || (message.type === "transcript" && message.persisted !== false);
 }
 
 function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
@@ -221,12 +222,12 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 		return blocks.map(block =>
 			block.id === nextBlock.id
 				? {
-						...block,
-						...nextBlock,
-						expanded: block.expanded,
-						cueText: block.cueText,
-						hasCue: block.hasCue || nextBlock.hasCue
-					}
+					...block,
+					...nextBlock,
+					expanded: block.expanded,
+					cueText: block.cueText,
+					hasCue: block.hasCue || nextBlock.hasCue
+				}
 				: block
 		);
 	}, baseBlocks);
@@ -247,7 +248,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
-	const [websocketTranscriptLines, setWebsocketTranscriptLines] = useState<TranscriptLineType[]>([]);
 	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
@@ -257,7 +257,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
-		"websocket-transcript": true,
 		transcript: true,
 		ideablock: true
 	});
@@ -336,7 +335,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, lastMessage.payload));
+				setTranscriptLines(prev => appendTranscriptLine(prev, lastMessage.payload));
 			}
 
 			if (lastMessage.type === "similarity_cue") {
@@ -381,7 +380,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
-			if (shouldAppendAudioTranscriptToWebSocketTab(lastAudioMessage)) {
+			if (shouldAppendAudioTranscriptToTranscriptTab(lastAudioMessage)) {
 				const signature = audioTranscriptDisplaySignature(lastAudioMessage, transcriptLine);
 				const displayed = lastDisplayedAudioTranscriptRef.current;
 				const now = Date.now();
@@ -389,7 +388,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					return;
 				}
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
-				setWebsocketTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
+				setTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
 			}
 			if (shouldSyncAudioTranscriptFromDb(lastAudioMessage, transcriptLine)) {
 				void syncTranscriptFromDb(transcriptLine);
@@ -437,7 +436,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		}
 
 		viewport.scrollTop = viewport.scrollHeight;
-	}, [activeTab, ideaBlocks, transcriptLines, websocketTranscriptLines]);
+	}, [activeTab, ideaBlocks, transcriptLines]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
@@ -468,12 +467,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			prev.map(block =>
 				block.id === id
 					? {
-							...block,
-							...savedBlock,
-							expanded: block.expanded,
-							cueText: block.cueText,
-							hasCue: block.hasCue || savedBlock.hasCue
-						}
+						...block,
+						...savedBlock,
+						expanded: block.expanded,
+						cueText: block.cueText,
+						hasCue: block.hasCue || savedBlock.hasCue
+					}
 					: block
 			)
 		);
@@ -509,9 +508,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex rounded-lg bg-muted p-1">
-						<Button variant={activeTab === "websocket-transcript" ? "secondary" : "ghost"} onClick={() => setActiveTab("websocket-transcript")}>
-							逐字稿 WebSocket
-						</Button>
 						<Button variant={activeTab === "transcript" ? "secondary" : "ghost"} onClick={() => setActiveTab("transcript")}>
 							逐字稿
 						</Button>
@@ -528,9 +524,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				</header>
 
 				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
-					{activeTab === "websocket-transcript" ? (
-						renderTranscriptLines(websocketTranscriptLines, "尚無 WebSocket 逐字稿", jumpToBlock)
-					) : activeTab === "ideablock" ? (
+					{activeTab === "ideablock" ? (
 						<div className="grid gap-2">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
