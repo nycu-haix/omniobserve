@@ -117,6 +117,10 @@ function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
 	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/idea-blocks`);
 }
 
+function buildIdeaBlockDetailUrl(sessionId: string, participantId: string, ideaBlockId: string): string {
+	return `${buildIdeaBlocksUrl(sessionId, participantId)}/${encodeURIComponent(ideaBlockId)}`;
+}
+
 function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType {
 	return {
 		id: String(item.id),
@@ -439,6 +443,43 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
 	};
 
+	const saveIdeaBlock = async (id: string, values: { summary: string; aiSummary: string; transcript: string }) => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, summary: values.summary, aiSummary: values.aiSummary, transcript: values.transcript } : block)));
+			return;
+		}
+
+		const response = await fetch(buildIdeaBlockDetailUrl(sessionId, participantId, id), {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				title: values.summary,
+				summary: values.aiSummary,
+				transcript: values.transcript
+			})
+		});
+
+		if (!response.ok) {
+			throw new Error("Failed to save idea block");
+		}
+
+		const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
+		setIdeaBlocks(prev =>
+			prev.map(block =>
+				block.id === id
+					? {
+							...block,
+							...savedBlock,
+							expanded: block.expanded,
+							cueText: block.cueText,
+							hasCue: block.hasCue || savedBlock.hasCue
+						}
+					: block
+			)
+		);
+		setTranscriptRefreshKey(current => current + 1);
+	};
+
 	const addBlock = async () => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 			const newBlock = fallbackBlock();
@@ -499,7 +540,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										blockRefs.current[block.id] = node;
 									}}
 								>
-									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} />
+									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} />
 								</div>
 							))}
 						</div>

@@ -46,6 +46,7 @@ class IdeaBlockCreateRequest(BaseModel):
 class IdeaBlockUpdate(BaseModel):
     title: str | None = None
     summary: str | None = None
+    transcript: str | None = None
     embedding_vector: list[float] | None = None
     similarity_id: UUID | None = None
 

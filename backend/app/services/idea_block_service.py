@@ -86,6 +86,22 @@ async def update_idea_block(
         if await db.get(Similarity, update_data["similarity_id"]) is None:
             raise HTTPException(status_code=404, detail="Similarity not found")
 
+    if "transcript" in update_data:
+        transcript_text = update_data.pop("transcript")
+        transcript_value = "" if transcript_text is None else str(transcript_text).strip()
+        if idea_block.main_transcript is None:
+            transcript = Transcript(
+                user_id=idea_block.user_id,
+                session_name=idea_block.session_name,
+                transcript=transcript_value,
+            )
+            db.add(transcript)
+            await db.flush()
+            idea_block.transcript_id = transcript.id
+            idea_block.main_transcript = transcript
+        else:
+            idea_block.main_transcript.transcript = transcript_value
+
     for field, value in update_data.items():
         setattr(idea_block, field, value)
 
@@ -111,6 +127,22 @@ async def update_scoped_idea_block(
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
         if await db.get(Similarity, update_data["similarity_id"]) is None:
             raise HTTPException(status_code=404, detail="Similarity not found")
+
+    if "transcript" in update_data:
+        transcript_text = update_data.pop("transcript")
+        transcript_value = "" if transcript_text is None else str(transcript_text).strip()
+        if idea_block.main_transcript is None:
+            transcript = Transcript(
+                user_id=idea_block.user_id,
+                session_name=idea_block.session_name,
+                transcript=transcript_value,
+            )
+            db.add(transcript)
+            await db.flush()
+            idea_block.transcript_id = transcript.id
+            idea_block.main_transcript = transcript
+        else:
+            idea_block.main_transcript.transcript = transcript_value
 
     for field, value in update_data.items():
         setattr(idea_block, field, value)

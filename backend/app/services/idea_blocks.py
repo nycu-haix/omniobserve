@@ -5,10 +5,11 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
 from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
-from ..models import IdeaBlock, Visibility
+from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
 from .embedding_service import create_text_embedding
 
@@ -221,7 +222,11 @@ async def update_idea_block_fields(
     block_id: str,
     fields: dict[str, Any],
 ) -> IdeaBlock:
-    result = await db.execute(select(IdeaBlock).where(IdeaBlock.id == int(block_id)))
+    result = await db.execute(
+        select(IdeaBlock)
+        .options(selectinload(IdeaBlock.main_transcript))
+        .where(IdeaBlock.id == int(block_id))
+    )
     block = result.scalar_one_or_none()
     if block is None:
         raise ApiError(
@@ -249,6 +254,21 @@ async def update_idea_block_fields(
             summary = str(raw_summary).strip()
             if summary:
                 block.summary = summary
+
+    if "transcript" in fields:
+        transcript_value = "" if fields["transcript"] is None else str(fields["transcript"]).strip()
+        if block.main_transcript is None:
+            transcript = Transcript(
+                user_id=block.user_id,
+                session_name=block.session_name,
+                transcript=transcript_value,
+            )
+            db.add(transcript)
+            await db.flush()
+            block.transcript_id = transcript.id
+            block.main_transcript = transcript
+        else:
+            block.main_transcript.transcript = transcript_value
 
     await db.flush()
     return block
