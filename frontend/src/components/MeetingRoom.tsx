@@ -562,7 +562,8 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 						/>
 					</TabsContent>
-					<TabsContent value="description" className="mt-0 h-full min-h-0 overflow-y-auto rounded-lg border bg-background p-4 data-[state=inactive]:hidden">
+					<TabsContent value="description" className="mt-0 h-full min-h-0 overflow-y-auto rounded-lg border bg-background p-4 data-[state=inactive]:hidden [&>*:not(:first-child)]:hidden">
+						<p className="text-sm leading-7 text-foreground">{LOST_AT_SEA_TASK_DETAIL}</p>
 						{isTopicDescriptionLoading ? (
 							<p className="text-sm leading-7 text-muted-foreground">載入題目敘述中...</p>
 						) : topicDescriptionError ? (
