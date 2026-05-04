@@ -13,6 +13,8 @@ from .errors import ApiError, ErrorResponse
 from .idea_block import (
     IdeaBlockCreate,
     IdeaBlockCreateRequest,
+    IdeaBlockGenerationRequest,
+    IdeaBlockGenerationResponse,
     IdeaBlockListResponse,
     IdeaBlockOverviewResponse,
     IdeaBlockResponse,
@@ -39,6 +41,8 @@ __all__ = [
     "GeneratedIdeaBlockResponse",
     "IdeaBlockCreate",
     "IdeaBlockCreateRequest",
+    "IdeaBlockGenerationRequest",
+    "IdeaBlockGenerationResponse",
     "IdeaBlockGenerateRequest",
     "IdeaBlockGenerateResponse",
     "IdeaBlockListResponse",

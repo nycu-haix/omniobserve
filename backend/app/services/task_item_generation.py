@@ -1,0 +1,174 @@
+import json
+import os
+import re
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..clients import openai_client
+from ..config import OPENAI_MODEL, logger
+from ..models import TaskItem
+from ..schemas import ApiError
+
+RANKING_ITEMS = [
+    "mosquito_net",
+    "petrol",
+    "water_container",
+    "shaving_mirror",
+    "sextant",
+    "emergency_rations",
+    "sea_chart",
+    "floating_cushion",
+    "rope",
+    "chocolate_bars",
+    "waterproof_sheet",
+    "fishing_rod",
+    "shark_repellent",
+    "rum",
+    "vhf_radio",
+]
+
+
+async def build_task_item_ids_with_llm(text: str) -> list[int]:
+    mock_ids = _build_mock_task_item_ids()
+    if mock_ids is not None:
+        return mock_ids
+
+    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not openai_api_key:
+        raise ApiError(
+            422,
+            "TASK_ITEM_GENERATION_FAILED",
+            "Task items could not be generated",
+            details={"hint": "Set OPENAI_API_KEY or TASK_ITEM_MOCK_IDS for local Swagger testing"},
+        )
+
+    item_lines = "\n".join(f"{index}. {item}" for index, item in enumerate(RANKING_ITEMS, start=1))
+    system_prompt = (
+        "You are a survival-task assistant. The predefined item list uses 1-based ids:\n"
+        f"{item_lines}\n\n"
+        "Given the user input, decide which list items are being discussed. "
+        'Return only JSON in this exact shape: {"task_item_ids":[...]} . '
+        'If unrelated, return {"task_item_ids":[]}.'
+    )
+    user_prompt = f"User input:\n{text.strip()}"
+
+    try:
+        completion = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        raw_content = completion.choices[0].message.content or "{}"
+        parsed = _parse_llm_json_payload(raw_content)
+    except ApiError:
+        raise
+    except Exception as exc:
+        logger.exception("LLM task item generation failed: %s", exc)
+        raise ApiError(
+            422,
+            "TASK_ITEM_GENERATION_FAILED",
+            "Task items could not be generated",
+            details={"provider": "openai", "reason": exc.__class__.__name__},
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
+
+    ids = parsed.get("task_item_ids")
+    if not isinstance(ids, list):
+        raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
+
+    return _normalize_task_item_ids(ids)
+
+
+async def generate_and_save_task_items_for_idea_block(
+    db: AsyncSession,
+    *,
+    idea_block_id: int,
+    text: str,
+) -> list[TaskItem]:
+    task_item_ids = await build_task_item_ids_with_llm(text)
+    logger.info(
+        "Generated task item ids idea_block_id=%s task_item_ids=%s",
+        idea_block_id,
+        task_item_ids,
+    )
+    task_items = [
+        TaskItem(idea_block_id=idea_block_id, task_item_id=task_item_id)
+        for task_item_id in task_item_ids
+    ]
+    if not task_items:
+        return []
+
+    db.add_all(task_items)
+    await db.flush()
+    return task_items
+
+
+def _normalize_task_item_ids(values: list[Any]) -> list[int]:
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        if not isinstance(value, int):
+            continue
+        if value < 1 or value > len(RANKING_ITEMS):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _build_mock_task_item_ids() -> list[int] | None:
+    raw_value = os.getenv("TASK_ITEM_MOCK_IDS", "").strip()
+    if not raw_value:
+        return None
+
+    values: list[Any] = []
+    for item in raw_value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return _normalize_task_item_ids(values)
+
+
+def _parse_llm_json_payload(raw_content: str) -> Any:
+    text = raw_content.strip()
+    if not text:
+        return {}
+
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    if start == -1:
+        raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
+    sliced = text[start:]
+
+    for end in range(len(sliced), 0, -1):
+        candidate = sliced[:end].strip()
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")

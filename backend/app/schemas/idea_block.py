@@ -1,7 +1,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..models import Visibility
+from .task_item import TaskItemResponse
 
 
 class IdeaBlockCreate(BaseModel):
@@ -95,3 +98,14 @@ class IdeaBlockOverviewResponse(BaseModel):
     similarity_id: UUID | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class IdeaBlockGenerationRequest(BaseModel):
+    transcript_text: str | None = None
+    transcript_ids: list[int] | None = Field(default=None, min_length=1)
+    visibility: Visibility = Visibility.PRIVATE
+
+
+class IdeaBlockGenerationResponse(BaseModel):
+    idea_blocks: list[IdeaBlockListResponse]
+    task_items: list[TaskItemResponse]

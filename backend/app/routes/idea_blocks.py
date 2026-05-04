@@ -5,8 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas import (
+    ApiError,
     IdeaBlockCreate,
     IdeaBlockCreateRequest,
+    IdeaBlockGenerationRequest,
+    IdeaBlockGenerationResponse,
     IdeaBlockListResponse,
     IdeaBlockOverviewResponse,
     IdeaBlockResponse,
@@ -18,6 +21,11 @@ from ..services.idea_block_service import (
     get_scoped_idea_block,
     list_idea_blocks,
     update_scoped_idea_block,
+)
+from ..services.transcript_pipeline import (
+    generate_idea_blocks_with_task_items_from_text,
+    generate_idea_blocks_with_task_items_from_transcript_ids,
+    serialize_pipeline_result,
 )
 
 router = APIRouter(tags=["Idea Blocks"])
@@ -46,6 +54,44 @@ async def read_all_session_idea_blocks(
     db: AsyncSession = Depends(get_db),
 ) -> list[IdeaBlockOverviewResponse]:
     return await list_idea_blocks(db, session_name=session_name, similarity_id=similarity_id)
+
+
+@router.post(
+    "/sessions/{session_name}/users/{user_id}/idea-block-generations",
+    status_code=status.HTTP_201_CREATED,
+    response_model=IdeaBlockGenerationResponse,
+    summary="Generate Idea Blocks And Task Items",
+)
+async def post_idea_block_generation(
+    session_name: str,
+    user_id: int,
+    payload: IdeaBlockGenerationRequest,
+    db: AsyncSession = Depends(get_db),
+) -> IdeaBlockGenerationResponse:
+    if payload.transcript_ids is not None:
+        result = await generate_idea_blocks_with_task_items_from_transcript_ids(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            visibility=payload.visibility,
+            transcript_ids=payload.transcript_ids,
+        )
+    elif payload.transcript_text and payload.transcript_text.strip():
+        result = await generate_idea_blocks_with_task_items_from_text(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            visibility=payload.visibility,
+            transcript_text=payload.transcript_text,
+        )
+    else:
+        raise ApiError(
+            400,
+            "INVALID_PAYLOAD",
+            "transcript_ids or transcript_text is required",
+        )
+
+    return serialize_pipeline_result(result)
 
 
 @router.post(

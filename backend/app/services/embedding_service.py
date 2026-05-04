@@ -9,17 +9,17 @@ from fastapi import HTTPException
 from ..config import OLLAMA_BASE_URL, OLLAMA_EMBED_MODEL, OLLAMA_TIMEOUT_SECONDS, logger
 
 
-async def create_title_embedding(title: str) -> list[float]:
-    title = title.strip()
-    if not title:
-        raise HTTPException(status_code=422, detail="title is required for embedding")
+async def create_text_embedding(text: str) -> list[float]:
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required for embedding")
 
-    return await asyncio.to_thread(_create_embedding_sync, title)
+    return await asyncio.to_thread(_create_embedding_sync, text)
 
 
-def _create_embedding_sync(title: str) -> list[float]:
+def _create_embedding_sync(text: str) -> list[float]:
     url = f"{OLLAMA_BASE_URL.rstrip('/')}/api/embed"
-    body = json.dumps({"model": OLLAMA_EMBED_MODEL, "input": title}).encode("utf-8")
+    body = json.dumps({"model": OLLAMA_EMBED_MODEL, "input": text}).encode("utf-8")
     request = Request(
         url,
         data=body,

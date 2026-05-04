@@ -10,6 +10,7 @@ from ..clients import openai_client
 from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Visibility
 from ..schemas import ApiError
+from .embedding_service import create_text_embedding
 
 
 def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
@@ -154,7 +155,7 @@ async def generate_and_save_idea_blocks(
             title=title,
             summary=summary,
             transcript_id=None,
-            embedding_vector=None,
+            embedding_vector=await create_text_embedding(summary),
             similarity_id=None,
         )
         db.add(idea_block)

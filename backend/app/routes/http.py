@@ -24,6 +24,7 @@ from ..services.board_payloads import (
 )
 from ..services.idea_blocks import generate_and_save_idea_blocks, update_idea_block_fields
 from ..services.realtime import board_manager, presence_manager
+from ..services.transcript_pipeline import generate_idea_blocks_with_task_items_from_text
 from ..utils import to_iso_z
 
 router = APIRouter()
@@ -95,15 +96,14 @@ async def generate_idea_blocks(
         )
 
     try:
-        idea_blocks = await generate_and_save_idea_blocks(
+        pipeline_result = await generate_idea_blocks_with_task_items_from_text(
             db,
             session_name=session_name,
-            participant_id=str(user_id),
+            user_id=user_id,
             visibility=payload.visibility,
-            source_transcript_ids=[],
             transcript_text=transcript_text,
         )
-        await db.commit()
+        idea_blocks = pipeline_result.idea_blocks
     except ApiError:
         await db.rollback()
         raise
