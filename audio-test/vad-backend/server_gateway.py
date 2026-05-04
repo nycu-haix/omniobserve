@@ -570,6 +570,7 @@ def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
 async def transcribe_and_send(
     websocket: WebSocket,
     send_lock: asyncio.Lock,
+    relay_lock: asyncio.Lock,
     filename: Path,
     segment_audio: np.ndarray,
     start_time: float,
@@ -655,20 +656,21 @@ async def transcribe_and_send(
         except Exception:
             print("Cannot send transcript because websocket is closed")
 
-        await relay_transcript_to_pipeline(
-            text=transcript,
-            reason=reason,
-            source=source,
-            scope=scope,
-            agent_type=agent_type,
-            room_name=room_name,
-            participant_id=participant_id,
-            user_id=user_id,
-            display_name=display_name,
-            start=start_time,
-            end=end_time,
-            duration=duration,
-        )
+        async with relay_lock:
+            await relay_transcript_to_pipeline(
+                text=transcript,
+                reason=reason,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                start=start_time,
+                end=end_time,
+                duration=duration,
+            )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")
@@ -708,6 +710,7 @@ async def audio_ws(
         print("WebSocket connected")
 
     send_lock = asyncio.Lock()
+    relay_lock = asyncio.Lock()
     asr_tasks = set()
 
     # Metadata from URL first, then start message can override it
@@ -829,6 +832,7 @@ async def audio_ws(
                 transcribe_and_send(
                     websocket=websocket,
                     send_lock=send_lock,
+                    relay_lock=relay_lock,
                     filename=filename,
                     segment_audio=segment_audio.copy(),
                     start_time=start_time,

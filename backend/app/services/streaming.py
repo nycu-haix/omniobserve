@@ -1,4 +1,6 @@
+import asyncio
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -328,6 +330,8 @@ def _timestamp_from_seconds(value: Any) -> datetime:
 
 
 FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
+_pending_transcript_batch_texts: dict[tuple[str, str], list[str]] = defaultdict(list)
+_pending_transcript_batch_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 async def handle_transcript_segments_websocket(
@@ -343,7 +347,7 @@ async def handle_transcript_segments_websocket(
         participant_id,
     )
 
-    pending_idea_segments: list[StreamTranscript] = []
+    batch_key = (session_name, participant_id)
 
     async with SessionLocal() as db:
         try:
@@ -388,19 +392,72 @@ async def handle_transcript_segments_websocket(
                     len(text),
                 )
 
+                batch_texts: list[str] | None = None
+                batch_text = ""
+                async with _pending_transcript_batch_locks[batch_key]:
+                    if reason == "max_speech_ms":
+                        _pending_transcript_batch_texts[batch_key].append(text)
+                        batch_segments = len(_pending_transcript_batch_texts[batch_key])
+                        batch_chars = sum(len(item) for item in _pending_transcript_batch_texts[batch_key])
+                        logger.info(
+                            "pipeline_ws_batch_buffered session_name=%s participant_id=%s reason=%s batch_segments=%s batch_chars=%s",
+                            session_name,
+                            participant_id,
+                            reason,
+                            batch_segments,
+                            batch_chars,
+                        )
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "transcript_update",
+                                "transcript_segment_id": None,
+                                "text": text,
+                                "is_final": False,
+                                "reason": reason,
+                                "persisted": False,
+                                "batch_segments": batch_segments,
+                            },
+                        )
+                        continue
+
+                    if reason in FINAL_TRANSCRIPT_REASONS:
+                        _pending_transcript_batch_texts[batch_key].append(text)
+                        batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                        batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
+                        logger.info(
+                            "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s batch_segments=%s batch_chars=%s",
+                            session_name,
+                            participant_id,
+                            reason,
+                            len(batch_texts),
+                            len(batch_text),
+                        )
+                    else:
+                        logger.info(
+                            "pipeline_ws_transcript_ignored_for_generation session_name=%s participant_id=%s reason=%s",
+                            session_name,
+                            participant_id,
+                            reason or "unknown",
+                        )
+                        continue
+
                 timestamp = _timestamp_from_seconds(payload.get("start"))
                 saved_segment = await save_ws_transcript_segment(
                     db,
                     session_name=session_name,
                     participant_id=participant_id,
                     visibility=visibility,
-                    transcript_text=text,
+                    transcript_text=batch_text,
                     started_at=timestamp,
                     ended_at=timestamp,
                 )
+
                 if saved_segment is None:
+                    async with _pending_transcript_batch_locks[batch_key]:
+                        _pending_transcript_batch_texts[batch_key] = batch_texts
                     logger.info(
-                        "pipeline_ws_transcript_save_failed session_name=%s participant_id=%s reason=%s",
+                        "pipeline_ws_batch_save_failed session_name=%s participant_id=%s reason=%s",
                         session_name,
                         participant_id,
                         reason or "unknown",
@@ -414,118 +471,81 @@ async def handle_transcript_segments_websocket(
                     )
                     continue
 
+                logger.info(
+                    "pipeline_ws_batch_saved session_name=%s participant_id=%s transcript_id=%s chars=%s",
+                    session_name,
+                    participant_id,
+                    saved_segment.segment_id,
+                    len(saved_segment.text),
+                )
                 await send_ws_json_safe(
                     websocket,
                     {
                         "type": "transcript_update",
                         "transcript_segment_id": saved_segment.segment_id,
                         "text": saved_segment.text,
-                        "is_final": False,
+                        "is_final": True,
                         "reason": reason,
+                        "persisted": True,
                     },
                 )
 
-                if reason == "max_speech_ms":
+                try:
                     logger.info(
-                        "pipeline_ws_transcript_buffer session_name=%s participant_id=%s segment_id=%s reason=%s",
+                        "pipeline_ws_generation_start session_name=%s participant_id=%s reason=%s",
                         session_name,
                         participant_id,
-                        saved_segment.segment_id,
                         reason,
                     )
-                    await handle_transcript_segment(
+                    pipeline_result = await handle_transcript_segment(
                         db,
                         session_name=session_name,
                         user_id=_participant_id_to_int(participant_id),
                         transcript=saved_segment,
-                        is_final=False,
+                        is_final=True,
                         visibility=visibility,
                     )
-                    pending_idea_segments.append(saved_segment)
-                    continue
-
-                if reason in FINAL_TRANSCRIPT_REASONS:
-                    logger.info(
-                        "pipeline_ws_transcript_final session_name=%s participant_id=%s segment_id=%s reason=%s",
+                except Exception:
+                    logger.exception(
+                        "pipeline_ws_generation_failed session_name=%s participant_id=%s reason=%s",
                         session_name,
                         participant_id,
-                        saved_segment.segment_id,
                         reason,
                     )
-                    await handle_transcript_segment(
-                        db,
-                        session_name=session_name,
-                        user_id=_participant_id_to_int(participant_id),
-                        transcript=saved_segment,
-                        is_final=False,
-                        visibility=visibility,
-                    )
-                    pending_idea_segments = []
-                    try:
-                        logger.info(
-                            "pipeline_ws_generation_start session_name=%s participant_id=%s reason=%s",
-                            session_name,
-                            participant_id,
-                            reason,
-                        )
-                        pipeline_result = await handle_transcript_segment(
-                            db,
-                            session_name=session_name,
-                            user_id=_participant_id_to_int(participant_id),
-                            transcript=None,
-                            is_final=True,
-                            visibility=visibility,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "pipeline_ws_generation_failed session_name=%s participant_id=%s reason=%s",
-                            session_name,
-                            participant_id,
-                            reason,
-                        )
-                        await send_ws_json_safe(
-                            websocket,
-                            {
-                                "type": "pipeline_error",
-                                "reason": "idea_block_or_task_item_generation_failed",
-                            },
-                        )
-                        continue
-
-                    serialized_result = (
-                        serialize_pipeline_result(pipeline_result)
-                        if pipeline_result is not None
-                        else {"idea_blocks": [], "task_items": []}
-                    )
-                    logger.info(
-                        "pipeline_ws_generation_done session_name=%s participant_id=%s idea_blocks=%s task_items=%s",
-                        session_name,
-                        participant_id,
-                        len(serialized_result["idea_blocks"]),
-                        len(serialized_result["task_items"]),
-                    )
                     await send_ws_json_safe(
                         websocket,
                         {
-                            "type": "idea_blocks_update",
-                            "idea_blocks": serialized_result["idea_blocks"],
-                        },
-                    )
-                    await send_ws_json_safe(
-                        websocket,
-                        {
-                            "type": "task_items_update",
-                            "task_items": serialized_result["task_items"],
+                            "type": "pipeline_error",
+                            "reason": "idea_block_or_task_item_generation_failed",
                         },
                     )
                     continue
 
+                serialized_result = (
+                    serialize_pipeline_result(pipeline_result)
+                    if pipeline_result is not None
+                    else {"idea_blocks": [], "task_items": []}
+                )
                 logger.info(
-                    "pipeline_ws_transcript_ignored_for_generation session_name=%s participant_id=%s segment_id=%s reason=%s",
+                    "pipeline_ws_generation_done session_name=%s participant_id=%s idea_blocks=%s task_items=%s",
                     session_name,
                     participant_id,
-                    saved_segment.segment_id,
-                    reason or "unknown",
+                    len(serialized_result["idea_blocks"]),
+                    len(serialized_result["task_items"]),
+                )
+                await send_ws_json_safe(
+                    websocket,
+                    {
+                        "type": "idea_blocks_update",
+                        "idea_blocks": serialized_result["idea_blocks"],
+                    },
+                )
+                await send_ws_json_safe(
+                    websocket,
+                    {
+                        "type": "task_items_update",
+                        "task_items": serialized_result["task_items"],
+                    },
                 )
 
         except WebSocketDisconnect:

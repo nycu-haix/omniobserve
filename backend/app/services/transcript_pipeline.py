@@ -87,6 +87,15 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         )
         return PipelineResult(idea_blocks=[], task_items=[])
 
+    main_transcript_id = _main_transcript_id_from_batch(transcripts)
+    logger.info(
+        "pipeline_main_transcript_selected session_name=%s user_id=%s transcript_id=%s transcript_count=%s",
+        session_name,
+        user_id,
+        main_transcript_id,
+        len(transcripts),
+    )
+
     try:
         logger.info(
             "pipeline_generation_started session_name=%s user_id=%s transcript_count=%s transcript_chars=%s",
@@ -132,7 +141,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 session_name=session_name,
                 title=_title_from_content(content),
                 summary=summary,
-                transcript_id=None,
+                transcript_id=main_transcript_id,
                 embedding_vector=embedding_vector,
                 similarity_id=None,
             )
@@ -140,10 +149,11 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             await db.flush()
             idea_blocks.append(idea_block)
             logger.info(
-                "pipeline_idea_block_saved session_name=%s user_id=%s idea_block_id=%s",
+                "pipeline_idea_block_saved session_name=%s user_id=%s idea_block_id=%s transcript_id=%s",
                 session_name,
                 user_id,
                 idea_block.id,
+                idea_block.transcript_id,
             )
 
             logger.info(
@@ -268,3 +278,12 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
 def _title_from_content(content: str) -> str:
     value = content.strip()[:10]
     return value or "Idea"
+
+
+def _main_transcript_id_from_batch(transcripts: list[StreamTranscript]) -> int | None:
+    for transcript in reversed(transcripts):
+        try:
+            return int(transcript.segment_id)
+        except (TypeError, ValueError):
+            continue
+    return None
