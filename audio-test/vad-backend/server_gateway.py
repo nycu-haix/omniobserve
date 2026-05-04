@@ -289,17 +289,17 @@ async def relay_transcript_to_pipeline(
     start: float,
     end: float,
     duration: float,
-) -> None:
+) -> list[dict]:
     if not PIPELINE_WS_BASE_URL:
         print("Pipeline relay skipped: PIPELINE_WS_BASE_URL is empty")
-        return
+        return []
 
     if not text.strip() or not room_name:
         print(
             "Pipeline relay skipped: "
             f"has_text={bool(text.strip())}, roomName={room_name}"
         )
-        return
+        return []
 
     relay_participant_id = participant_id or user_id or display_name
     if not relay_participant_id:
@@ -307,7 +307,7 @@ async def relay_transcript_to_pipeline(
             "Pipeline relay skipped: "
             f"roomName={room_name}, participantId/userId/displayName missing"
         )
-        return
+        return []
 
     url = (
         f"{PIPELINE_WS_BASE_URL}/ws/sessions/{quote(str(room_name), safe='')}"
@@ -333,6 +333,7 @@ async def relay_transcript_to_pipeline(
         if reason in PIPELINE_FINAL_REASONS
         else {"transcript_update", "pipeline_error"}
     )
+    pipeline_messages = []
 
     try:
         print(
@@ -362,6 +363,13 @@ async def relay_transcript_to_pipeline(
                     continue
 
                 message_type = message.get("type")
+                if isinstance(message, dict) and message_type in {
+                    "transcript_update",
+                    "idea_blocks_update",
+                    "task_items_update",
+                    "pipeline_error",
+                }:
+                    pipeline_messages.append(message)
                 print(
                     "Pipeline relay received: "
                     f"roomName={room_name}, participantId={relay_participant_id}, "
@@ -380,13 +388,14 @@ async def relay_transcript_to_pipeline(
                         f"roomName={room_name}, participantId={relay_participant_id}, "
                         f"reason={reason}, response={message_type}"
                     )
-                    return
+                    return pipeline_messages
     except Exception as exc:
         print(
             "Pipeline relay failed: "
             f"roomName={room_name}, participantId={relay_participant_id}, "
             f"reason={reason}, error={exc}"
         )
+        return pipeline_messages
 
 
 def get_audio_stats(audio_chunk: np.ndarray):
@@ -657,7 +666,7 @@ async def transcribe_and_send(
             print("Cannot send transcript because websocket is closed")
 
         async with relay_lock:
-            await relay_transcript_to_pipeline(
+            pipeline_messages = await relay_transcript_to_pipeline(
                 text=transcript,
                 reason=reason,
                 source=source,
@@ -671,6 +680,21 @@ async def transcribe_and_send(
                 end=end_time,
                 duration=duration,
             )
+
+        for pipeline_message in pipeline_messages:
+            try:
+                async with send_lock:
+                    await websocket.send_json(pipeline_message)
+                print(
+                    "Pipeline relay forwarded to client: "
+                    f"roomName={room_name}, participantId={participant_id or user_id}, "
+                    f"reason={reason}, type={pipeline_message.get('type')}"
+                )
+            except Exception:
+                print(
+                    "Cannot forward pipeline message because websocket is closed: "
+                    f"type={pipeline_message.get('type')}"
+                )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")
