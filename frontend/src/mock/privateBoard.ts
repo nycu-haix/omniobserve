@@ -44,26 +44,50 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t1",
 		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
+		source: "public",
+		time: "10:30",
 		linkedBlockId: "b1"
 	},
 	{
 		id: "t2",
 		text: "裝水容器一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
+		source: "public",
 		linkedBlockId: "b2"
 	},
 	{
 		id: "t3",
 		text: "如果我們知道救援船大概在哪，VHF 無線電可能比海圖重要；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
+		source: "public",
+		time: "10:32",
 		linkedBlockId: "b3"
 	},
 	{
 		id: "t4",
 		text: "我剛剛想到水的消耗量可能跟路程時間有關，這段可以請 AI 幫我整理成新的想法。",
+		source: "private",
 		linkedBlockId: "b4"
 	},
 	{
 		id: "t5",
-		text: "食物雖然重要，但短時間求生裡可能不是第一優先，應該排在淡水和求救工具後面。"
+		text: "食物雖然重要，但短時間求生裡可能不是第一優先，應該排在淡水和求救工具後面。",
+		source: "public"
+	},
+	{
+		id: "t6",
+		text: "個人想法：我認為釣魚竿在這個情境下比巧克力棒更重要，因為可以捕魚補充食物。",
+		source: "private",
+		time: "10:35"
+	},
+	{
+		id: "t7",
+		text: "大家覺得六分儀和海圖哪個更關鍵？",
+		source: "public"
+	},
+	{
+		id: "t8",
+		text: "私人筆記：驅鯊劑可能在某些海域很重要，但如果沒有鯊魚威脅就不需要。",
+		source: "private",
+		time: "10:37"
 	}
 ];
 

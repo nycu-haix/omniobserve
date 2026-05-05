@@ -6,6 +6,7 @@ export interface IdeaBlock {
 	aiSummary?: string;
 	transcript?: string;
 	transcriptLineId?: string;
+	sourceTranscriptIds?: string[];
 	hasCue?: boolean;
 	cueText?: string;
 	expanded?: boolean;

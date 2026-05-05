@@ -1,8 +1,11 @@
-import { Activity, AlertCircle, ClipboardList, Globe2, Lock, Radio, Users } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Activity, ClipboardList, FileText, Lightbulb, Radio, RefreshCw, Search, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
+import { apiUrl } from "../services/api";
+import { fetchSessionParticipants } from "../services/presence";
 import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 import { ScrollArea } from "./ui/ScrollArea";
 
 interface RealtimeMessage {
@@ -12,7 +15,7 @@ interface RealtimeMessage {
 
 interface EventRecord {
 	id: string;
-	source: "board" | "presence";
+	source: "board";
 	receivedAt: string;
 	message: RealtimeMessage;
 }
@@ -21,26 +24,29 @@ interface BoardStateMessage extends RealtimeMessage {
 	type: "board_state";
 	revision: number;
 	ranking?: { items?: string[] };
-	public_blocks?: BoardBlock[];
-	private_blocks?: BoardBlock[];
 }
 
-interface PresenceStateMessage extends RealtimeMessage {
-	type: "presence_state";
-	participants?: string[];
+interface TranscriptRecord {
+	id: number;
+	user_id: number;
+	session_name: string;
+	time_stamp: string;
+	transcript: string;
 }
 
-interface BoardBlock {
-	block_id?: string;
-	id?: string;
-	content?: string;
+interface IdeaBlockRecord {
+	id: number;
+	user_id: number;
+	session_name: string;
+	title?: string;
 	summary?: string;
-	scope?: string;
-	participant_id?: string;
-	timestamp_ms?: number;
+	transcript?: string | null;
+	similarity_id?: string | null;
+	content?: string;
 }
 
 const MAX_EVENTS = 80;
+const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
 const RANKING_LABELS: Record<string, string> = {
 	mosquito_net: "蚊帳",
@@ -89,15 +95,37 @@ function formatMessageType(message: RealtimeMessage) {
 	return message.type || "raw_message";
 }
 
+function buildSessionApiUrl(roomName: string, path: string) {
+	return apiUrl(`/api/sessions/${encodeURIComponent(roomName)}${path}`);
+}
+
+function formatApiTime(value: string | null | undefined) {
+	if (!value) {
+		return "-";
+	}
+
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return value;
+	}
+
+	return new Intl.DateTimeFormat("zh-TW", {
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+		hour12: false
+	}).format(date);
+}
+
+function matchesQuery(value: string | null | undefined, query: string) {
+	return !query || (value || "").toLowerCase().includes(query);
+}
+
 function isBoardStateMessage(message: RealtimeMessage | null): message is BoardStateMessage {
 	return message?.type === "board_state";
 }
 
-function isPresenceStateMessage(message: RealtimeMessage | null): message is PresenceStateMessage {
-	return message?.type === "presence_state";
-}
-
-function useAdminRealtimeSocket(source: "board" | "presence", sessionId: string, onEvent: (source: "board" | "presence", message: RealtimeMessage) => void) {
+function useAdminRealtimeSocket(sessionId: string, onEvent: (source: "board", message: RealtimeMessage) => void) {
 	const [isConnected, setIsConnected] = useState(false);
 	const [lastMessage, setLastMessage] = useState<RealtimeMessage | null>(null);
 	const retryCountRef = useRef(0);
@@ -117,7 +145,7 @@ function useAdminRealtimeSocket(source: "board" | "presence", sessionId: string,
 				return;
 			}
 
-			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/${source}?participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
+			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/board?participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
 			socket = new WebSocket(wsUrl);
 
 			socket.onopen = () => {
@@ -139,7 +167,7 @@ function useAdminRealtimeSocket(source: "board" | "presence", sessionId: string,
 					parsedMessage = { type: "raw_message", payload: event.data };
 				}
 				setLastMessage(parsedMessage);
-				onEventRef.current(source, parsedMessage);
+				onEventRef.current("board", parsedMessage);
 			};
 
 			socket.onclose = () => {
@@ -164,7 +192,7 @@ function useAdminRealtimeSocket(source: "board" | "presence", sessionId: string,
 			}
 			socket?.close();
 		};
-	}, [sessionId, source]);
+	}, [sessionId]);
 
 	return { isConnected, lastMessage };
 }
@@ -198,8 +226,55 @@ export function AdminPage() {
 	const [events, setEvents] = useState<EventRecord[]>([]);
 	const [boardState, setBoardState] = useState<BoardStateMessage | null>(null);
 	const [participants, setParticipants] = useState<string[]>([]);
+	const [transcripts, setTranscripts] = useState<TranscriptRecord[]>([]);
+	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlockRecord[]>([]);
+	const [isApiLoading, setIsApiLoading] = useState(false);
+	const [apiError, setApiError] = useState<string | null>(null);
+	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
+	const [query, setQuery] = useState("");
+	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
 
-	const recordEvent = (source: "board" | "presence", message: RealtimeMessage) => {
+	const loadAdminApiData = useCallback(async () => {
+		setIsApiLoading(true);
+		setApiError(null);
+
+		try {
+			const [transcriptsResponse, ideaBlocksResponse, nextParticipants] = await Promise.all([
+				fetch(buildSessionApiUrl(roomName, "/transcripts")),
+				fetch(buildSessionApiUrl(roomName, "/idea-blocks")),
+				fetchSessionParticipants(roomName)
+			]);
+
+			if (!transcriptsResponse.ok) {
+				throw new Error(`Failed to load transcripts (${transcriptsResponse.status})`);
+			}
+			if (!ideaBlocksResponse.ok) {
+				throw new Error(`Failed to load idea blocks (${ideaBlocksResponse.status})`);
+			}
+
+			const [nextTranscripts, nextIdeaBlocks] = (await Promise.all([transcriptsResponse.json(), ideaBlocksResponse.json()])) as [
+				TranscriptRecord[],
+				IdeaBlockRecord[]
+			];
+			setTranscripts(nextTranscripts);
+			setIdeaBlocks(nextIdeaBlocks);
+			setParticipants(nextParticipants.filter(participantId => participantId !== ADMIN_PARTICIPANT_ID));
+			setLastApiLoadedAt(
+				new Intl.DateTimeFormat("zh-TW", {
+					hour: "2-digit",
+					minute: "2-digit",
+					second: "2-digit",
+					hour12: false
+				}).format(new Date())
+			);
+		} catch (error) {
+			setApiError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsApiLoading(false);
+		}
+	}, [roomName]);
+
+	const recordEvent = (source: "board", message: RealtimeMessage) => {
 		const receivedAt = new Intl.DateTimeFormat("zh-TW", {
 			hour: "2-digit",
 			minute: "2-digit",
@@ -218,30 +293,48 @@ export function AdminPage() {
 				type: "board_state",
 				revision: typeof message.revision === "number" ? message.revision : current?.revision || 0,
 				ranking: { items: Array.isArray(message.items) ? (message.items as string[]) : current?.ranking?.items || [] },
-				public_blocks: current?.public_blocks || [],
-				private_blocks: current?.private_blocks || []
+				session_name: roomName
 			}));
-		}
-
-		if (isPresenceStateMessage(message) && Array.isArray(message.participants)) {
-			setParticipants(message.participants);
-		}
-
-		if ((message.type === "participant_joined" || message.type === "participant_left") && typeof message.participant_id === "string") {
-			setParticipants(current => {
-				if (message.type === "participant_joined") {
-					return current.includes(message.participant_id as string) ? current : [...current, message.participant_id as string].sort();
-				}
-				return current.filter(participantId => participantId !== message.participant_id);
-			});
 		}
 	};
 
-	const boardSocket = useAdminRealtimeSocket("board", roomName, recordEvent);
-	const presenceSocket = useAdminRealtimeSocket("presence", roomName, recordEvent);
+	useEffect(() => {
+		const initialTimer = window.setTimeout(() => {
+			void loadAdminApiData();
+		}, 0);
+		const timer = window.setInterval(() => {
+			void loadAdminApiData();
+		}, API_REFRESH_INTERVAL_MS);
+
+		return () => {
+			window.clearTimeout(initialTimer);
+			window.clearInterval(timer);
+		};
+	}, [loadAdminApiData]);
+
+	const boardSocket = useAdminRealtimeSocket(roomName, recordEvent);
 	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || []);
-	const publicBlocks = boardState?.public_blocks || [];
-	const privateBlocks = boardState?.private_blocks || [];
+	const normalizedQuery = query.trim().toLowerCase();
+	const participantFilterOptions = useMemo(() => {
+		const ids = new Set<number>();
+		participants.forEach(participantId => {
+			const userId = Number(participantId);
+			if (Number.isInteger(userId)) {
+				ids.add(userId);
+			}
+		});
+		transcripts.forEach(item => ids.add(item.user_id));
+		ideaBlocks.forEach(item => ids.add(item.user_id));
+		return [...ids].sort((a, b) => a - b);
+	}, [ideaBlocks, participants, transcripts]);
+	const filteredTranscripts = transcripts
+		.filter(item => selectedUserId === "all" || item.user_id === selectedUserId)
+		.filter(item => matchesQuery(item.transcript, normalizedQuery))
+		.sort((a, b) => new Date(b.time_stamp).getTime() - new Date(a.time_stamp).getTime());
+	const filteredIdeaBlocks = ideaBlocks
+		.filter(item => selectedUserId === "all" || item.user_id === selectedUserId)
+		.filter(item => matchesQuery(`${item.title || ""}\n${item.summary || ""}\n${item.transcript || ""}`, normalizedQuery))
+		.sort((a, b) => b.id - a.id);
 
 	return (
 		<main className="grid min-h-screen grid-cols-1 gap-4 bg-muted/40 p-4 text-foreground xl:grid-cols-[320px_minmax(0,1fr)_360px]">
@@ -260,8 +353,8 @@ export function AdminPage() {
 							<ConnectionBadge connected={boardSocket.isConnected} />
 						</div>
 						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Presence WS</span>
-							<ConnectionBadge connected={presenceSocket.isConnected} />
+							<span className="text-muted-foreground">Presence API</span>
+							<span className="font-medium">{participants.length} participants</span>
 						</div>
 						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Admin participant</span>
@@ -279,22 +372,40 @@ export function AdminPage() {
 						<div className="grid gap-2">
 							{participants.map(participantId => (
 								<div key={participantId} className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
-									<span className="truncate">{participantId}</span>
+									<span className="min-w-0 truncate font-medium">{participantId}</span>
 									<span className="h-2 w-2 rounded-full bg-emerald-500" />
 								</div>
 							))}
 						</div>
 					) : (
-						<EmptyState title="尚未收到 presence state" detail="這裡只顯示 backend presence WebSocket 回傳的 participant id。" />
+						<EmptyState title="尚未取得 presence" detail="這裡讀取 REST presence API，會列出目前連到同一個 room 的 participant id。" />
 					)}
 				</section>
 
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
 					<header className="mb-3 flex items-center gap-2">
-						<AlertCircle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">目前限制</h2>
+						<RefreshCw className={cn("h-4 w-4 text-muted-foreground", isApiLoading && "animate-spin")} aria-hidden="true" />
+						<h2 className="text-sm font-semibold">API data</h2>
 					</header>
-					<p className="text-sm leading-6 text-muted-foreground">backend 尚未提供 admin aggregate stream，所以此頁不顯示假造的 private channels、transcript search、AI 狀態、latency 或會議控制。</p>
+					<div className="grid gap-3 text-sm">
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-muted-foreground">Transcripts</span>
+							<span className="font-medium">{transcripts.length}</span>
+						</div>
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-muted-foreground">Idea blocks</span>
+							<span className="font-medium">{ideaBlocks.length}</span>
+						</div>
+						<div className="flex items-center justify-between gap-3">
+							<span className="text-muted-foreground">Last refresh</span>
+							<span className="font-medium">{lastApiLoadedAt || "-"}</span>
+						</div>
+						<Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void loadAdminApiData()} disabled={isApiLoading}>
+							<RefreshCw className={cn("h-3.5 w-3.5", isApiLoading && "animate-spin")} aria-hidden="true" />
+							Refresh API data
+						</Button>
+						{apiError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{apiError}</p>}
+					</div>
 				</section>
 			</aside>
 
@@ -302,31 +413,52 @@ export function AdminPage() {
 				<header className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
 					<div>
 						<div className="flex items-center gap-2 text-sm text-muted-foreground">
-							<Activity className="h-4 w-4" aria-hidden="true" />
-							<span>Realtime events</span>
+							<FileText className="h-4 w-4" aria-hidden="true" />
+							<span>REST API</span>
 						</div>
-						<h2 className="mt-1 text-lg font-semibold">Board / Presence stream</h2>
+						<h2 className="mt-1 text-lg font-semibold">Transcripts</h2>
 					</div>
-					<Badge variant="secondary">{events.length} events</Badge>
+					<Badge variant="secondary">{filteredTranscripts.length} rows</Badge>
 				</header>
+				<div className="grid gap-3 border-b p-4">
+					<div className="relative">
+						<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+						<input
+							value={query}
+							onChange={event => setQuery(event.target.value)}
+							placeholder="Search transcripts and idea blocks"
+							className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none transition-colors focus:border-ring"
+						/>
+					</div>
+					<div className="flex flex-wrap gap-2">
+						<Button type="button" size="sm" variant={selectedUserId === "all" ? "secondary" : "outline"} onClick={() => setSelectedUserId("all")}>
+							All users
+						</Button>
+						{participantFilterOptions.map(userId => (
+							<Button key={userId} type="button" size="sm" variant={selectedUserId === userId ? "secondary" : "outline"} onClick={() => setSelectedUserId(userId)}>
+								User {userId}
+							</Button>
+						))}
+					</div>
+				</div>
 				<ScrollArea className="min-h-0 flex-1 p-4">
-					{events.length > 0 ? (
+					{filteredTranscripts.length > 0 ? (
 						<div className="grid gap-3">
-							{events.map(event => (
-								<article key={event.id} className="rounded-lg border bg-background p-3">
+							{filteredTranscripts.map(item => (
+								<article key={item.id} className="rounded-lg border bg-background p-3">
 									<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 										<div className="flex items-center gap-2">
-											<Badge variant={event.source === "board" ? "secondary" : "outline"}>{event.source}</Badge>
-											<span className="text-sm font-medium">{formatMessageType(event.message)}</span>
+											<Badge variant="outline">user {item.user_id}</Badge>
+											<span className="text-sm font-medium">transcript #{item.id}</span>
 										</div>
-										<span className="text-xs text-muted-foreground">{event.receivedAt}</span>
+										<span className="text-xs text-muted-foreground">{formatApiTime(item.time_stamp)}</span>
 									</div>
-									<JsonPreview value={event.message} />
+									<p className="whitespace-pre-wrap text-sm leading-6">{item.transcript}</p>
 								</article>
 							))}
 						</div>
 					) : (
-						<EmptyState title="尚未收到 realtime event" detail="開啟 backend 並讓參與者進入同一個 room 後，board 與 presence 訊息會出現在這裡。" />
+						<EmptyState title="尚無 transcripts" detail="這裡只讀取 REST API，不使用 WebSocket 的 transcript 或 idea block 事件。" />
 					)}
 				</ScrollArea>
 			</section>
@@ -355,43 +487,63 @@ export function AdminPage() {
 				<section className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-card text-card-foreground">
 					<header className="flex items-center justify-between gap-3 border-b p-4">
 						<div className="flex items-center gap-2">
-							<Globe2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-							<h2 className="text-sm font-semibold">Public blocks</h2>
+							<Lightbulb className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Idea blocks</h2>
 						</div>
-						<Badge variant="outline">{publicBlocks.length}</Badge>
+						<Badge variant="outline">{filteredIdeaBlocks.length}</Badge>
 					</header>
-					<ScrollArea className="h-[260px] p-4">
-						{publicBlocks.length > 0 ? (
+					<ScrollArea className="h-[360px] p-4">
+						{filteredIdeaBlocks.length > 0 ? (
 							<div className="grid gap-3">
-								{publicBlocks.map((block, index) => (
-									<article key={block.block_id || block.id || index} className="rounded-lg border bg-background p-3 text-sm">
-										<p className="leading-6">{block.content || block.summary || "-"}</p>
-										<p className="mt-2 text-xs text-muted-foreground">{block.participant_id || "unknown participant"}</p>
+								{filteredIdeaBlocks.map(block => (
+									<article key={block.id} className="rounded-lg border bg-background p-3 text-sm">
+										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+											<div className="flex min-w-0 items-center gap-2">
+												<Badge variant="outline">user {block.user_id}</Badge>
+												<span className="truncate font-medium">#{block.id}</span>
+											</div>
+											{block.similarity_id && <Badge variant="secondary">similarity</Badge>}
+										</div>
+										<p className="font-medium leading-6">{block.title || block.summary || "-"}</p>
+										{block.summary && block.summary !== block.title && <p className="mt-1 whitespace-pre-wrap leading-6 text-muted-foreground">{block.summary}</p>}
+										{block.transcript && <p className="mt-2 line-clamp-3 whitespace-pre-wrap border-t pt-2 text-xs leading-5 text-muted-foreground">{block.transcript}</p>}
 									</article>
 								))}
 							</div>
 						) : (
-							<EmptyState title="尚無 public blocks" detail="只會顯示 board WS 實際回傳的 public_blocks 或 public block updates。" />
+							<EmptyState title="尚無 idea blocks" detail="這裡只讀取 REST API 的 session idea blocks，不使用 board WebSocket block payload。" />
 						)}
 					</ScrollArea>
 				</section>
 
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<Lock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Private channels</h2>
-					</header>
-					{privateBlocks.length > 0 ? (
-						<div className="grid gap-2">
-							{privateBlocks.map((block, index) => (
-								<div key={block.block_id || block.id || index} className="rounded-lg border bg-background p-3 text-sm leading-6">
-									{block.content || block.summary || "-"}
-								</div>
-							))}
+				<section className="min-h-0 overflow-hidden rounded-lg border bg-card text-card-foreground">
+					<header className="flex items-center justify-between gap-3 border-b p-4">
+						<div className="flex items-center gap-2">
+							<Activity className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">WS diagnostics</h2>
 						</div>
-					) : (
-						<EmptyState title="未顯示其他人的 private channel" detail="現有 board WS 只會回傳目前 participant 的 private blocks；admin aggregate API 尚未提供。" />
-					)}
+						<Badge variant="outline">{events.length}</Badge>
+					</header>
+					<ScrollArea className="h-[260px] p-4">
+						{events.length > 0 ? (
+							<div className="grid gap-3">
+								{events.map(event => (
+									<article key={event.id} className="rounded-lg border bg-background p-3">
+										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+											<div className="flex items-center gap-2">
+												<Badge variant={event.source === "board" ? "secondary" : "outline"}>{event.source}</Badge>
+												<span className="text-sm font-medium">{formatMessageType(event.message)}</span>
+											</div>
+											<span className="text-xs text-muted-foreground">{event.receivedAt}</span>
+										</div>
+										<JsonPreview value={event.message} />
+									</article>
+								))}
+							</div>
+						) : (
+							<EmptyState title="尚未收到 WS event" detail="這裡只做 board WebSocket 診斷；presence、transcript 與 idea block 顯示不使用此資料。" />
+						)}
+					</ScrollArea>
 				</section>
 
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
@@ -400,7 +552,7 @@ export function AdminPage() {
 						<h2 className="text-sm font-semibold">Last messages</h2>
 					</header>
 					<div className="grid gap-3">
-						<JsonPreview value={{ board: boardSocket.lastMessage ?? null, presence: presenceSocket.lastMessage ?? null }} />
+						<JsonPreview value={{ board: boardSocket.lastMessage ?? null }} />
 					</div>
 				</section>
 			</aside>

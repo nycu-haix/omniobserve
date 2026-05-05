@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 import type { UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
@@ -36,8 +37,14 @@ interface IdeaBlockResponse {
 	id: number;
 	title: string;
 	summary: string;
+	transcript_id?: number | null;
 	transcript: string | null;
 	similarity_id: number | null;
+}
+
+interface AudioIdeaBlocksUpdateMessage {
+	type: "idea_blocks_update";
+	idea_blocks?: IdeaBlockResponse[];
 }
 
 type AudioTranscriptMessage =
@@ -84,7 +91,7 @@ function isAudioTranscriptMessage(message: object | null): message is AudioTrans
 	);
 }
 
-function isAudioIdeaBlocksUpdateMessage(message: object | null): boolean {
+function isAudioIdeaBlocksUpdateMessage(message: object | null): message is AudioIdeaBlocksUpdateMessage {
 	return !!message && "type" in message && message.type === "idea_blocks_update";
 }
 
@@ -126,11 +133,15 @@ function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType 
 }
 
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
+	const transcriptLineId = item.transcript_id == null ? undefined : String(item.transcript_id);
+
 	return {
 		id: String(item.id),
 		summary: item.title || item.summary,
 		aiSummary: item.summary,
 		transcript: item.transcript ?? undefined,
+		transcriptLineId,
+		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
 		status: "ready"
 	};
@@ -194,10 +205,19 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 	if (!existingLine) {
 		return [...lines, { ...line, text: normalizedText }];
 	}
-	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time) {
+	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {
 		return lines;
 	}
-	return lines.map(item => (item.id === line.id ? { ...line, text: normalizedText } : item));
+	return lines.map(item =>
+		item.id === line.id
+			? {
+					...item,
+					...line,
+					text: normalizedText,
+					linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
+				}
+			: item
+	);
 }
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
@@ -223,6 +243,35 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 				: block
 		);
 	}, baseBlocks);
+}
+
+function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBlock[]): TranscriptLineType[] {
+	const transcriptBlockIds = new Map<string, string>();
+
+	blocks.forEach(block => {
+		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
+		transcriptIds.forEach(transcriptId => {
+			if (!transcriptBlockIds.has(transcriptId)) {
+				transcriptBlockIds.set(transcriptId, block.id);
+			}
+		});
+	});
+
+	let didChange = false;
+	const linkedLines = lines.map(line => {
+		const linkedBlockId = transcriptBlockIds.get(line.id);
+		if (!linkedBlockId || line.linkedBlockId === linkedBlockId) {
+			return line;
+		}
+
+		didChange = true;
+		return {
+			...line,
+			linkedBlockId
+		};
+	});
+
+	return didChange ? linkedLines : lines;
 }
 
 function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
@@ -325,6 +374,10 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	}, [ideaBlockRefreshKey, participantId, sessionId]);
 
 	useEffect(() => {
+		setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocks));
+	}, [ideaBlocks]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
@@ -380,6 +433,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
 			return;
+		}
+
+		if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
+			const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
+			setIdeaBlocks(prev => mergeIdeaBlocks(prev, updatedBlocks));
+			setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, updatedBlocks));
 		}
 
 		setIdeaBlockRefreshKey(current => current + 1);
@@ -504,10 +563,26 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex rounded-lg bg-muted p-1">
-						<Button variant={activeTab === "transcript" ? "secondary" : "ghost"} onClick={() => setActiveTab("transcript")}>
+						<Button
+							aria-pressed={activeTab === "transcript"}
+							className={cn(
+								"transition-all active:translate-y-px active:scale-[0.98]",
+								activeTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+							)}
+							variant={activeTab === "transcript" ? "default" : "ghost"}
+							onClick={() => setActiveTab("transcript")}
+						>
 							逐字稿
 						</Button>
-						<Button variant={activeTab === "ideablock" ? "secondary" : "ghost"} onClick={() => setActiveTab("ideablock")}>
+						<Button
+							aria-pressed={activeTab === "ideablock"}
+							className={cn(
+								"transition-all active:translate-y-px active:scale-[0.98]",
+								activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+							)}
+							variant={activeTab === "ideablock" ? "default" : "ghost"}
+							onClick={() => setActiveTab("ideablock")}
+						>
 							Idea Block
 						</Button>
 					</div>

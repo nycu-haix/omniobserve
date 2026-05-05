@@ -192,6 +192,7 @@ export default function MeetingRoom() {
 		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
 		return clampJitsiHeight(Number.isFinite(storedHeight) ? storedHeight : DEFAULT_JITSI_HEIGHT);
 	});
+	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const { participantId, displayName, roomName } = useParticipantIdentity();
@@ -331,6 +332,8 @@ export default function MeetingRoom() {
 
 	const handlePrivateBoardResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
 		const startX = event.clientX;
 		const startWidth = privateBoardWidth;
 
@@ -339,6 +342,10 @@ export default function MeetingRoom() {
 		};
 
 		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			setResizeCursor(null);
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
 			window.removeEventListener("pointermove", handlePointerMove);
@@ -346,6 +353,7 @@ export default function MeetingRoom() {
 			window.removeEventListener("pointercancel", handlePointerUp);
 		};
 
+		setResizeCursor("col-resize");
 		document.body.style.cursor = "col-resize";
 		document.body.style.userSelect = "none";
 		window.addEventListener("pointermove", handlePointerMove);
@@ -365,6 +373,8 @@ export default function MeetingRoom() {
 
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
 		const startY = event.clientY;
 		const startHeight = jitsiHeight;
 
@@ -373,6 +383,10 @@ export default function MeetingRoom() {
 		};
 
 		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			setResizeCursor(null);
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
 			window.removeEventListener("pointermove", handlePointerMove);
@@ -380,6 +394,7 @@ export default function MeetingRoom() {
 			window.removeEventListener("pointercancel", handlePointerUp);
 		};
 
+		setResizeCursor("row-resize");
 		document.body.style.cursor = "row-resize";
 		document.body.style.userSelect = "none";
 		window.addEventListener("pointermove", handlePointerMove);
@@ -457,6 +472,7 @@ export default function MeetingRoom() {
 			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
 			style={meetingLayoutStyle}
 		>
+			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
 			<section className="grid min-w-0 grid-rows-[var(--jitsi-height)_10px_minmax(0,1fr)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
 					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
@@ -533,7 +549,7 @@ export default function MeetingRoom() {
 							<Radio className="h-4 w-4" />
 							私人錄音
 						</Button>
-						<Button variant="secondary" onClick={() => void handleMic("off")}>
+						<Button variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
 							<MicOff className="h-4 w-4" />
 							靜音
 						</Button>

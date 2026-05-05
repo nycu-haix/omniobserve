@@ -259,6 +259,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
                 "id": block.id,
                 "title": block.title,
                 "summary": block.summary,
+                "transcript_id": block.transcript_id,
                 "transcript": block.transcript,
                 "similarity_id": block.similarity_id,
             }
