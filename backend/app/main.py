@@ -96,6 +96,73 @@ async def startup() -> None:
                 """
             )
         )
+        logger.info("startup_similarity_schema_compat_check_start")
+        await conn.execute(
+            sql_text(
+                """
+                DO $$
+                DECLARE
+                    similarity_id_type text;
+                    fk_name text;
+                BEGIN
+                    IF to_regclass('public.idea_blocks') IS NOT NULL THEN
+                        SELECT data_type
+                        INTO similarity_id_type
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'idea_blocks'
+                          AND column_name = 'similarity_id';
+
+                        IF similarity_id_type = 'uuid' THEN
+                            SELECT tc.constraint_name
+                            INTO fk_name
+                            FROM information_schema.table_constraints tc
+                            JOIN information_schema.key_column_usage kcu
+                              ON tc.constraint_name = kcu.constraint_name
+                             AND tc.table_schema = kcu.table_schema
+                            WHERE tc.table_schema = 'public'
+                              AND tc.table_name = 'idea_blocks'
+                              AND tc.constraint_type = 'FOREIGN KEY'
+                              AND kcu.column_name = 'similarity_id'
+                            LIMIT 1;
+
+                            IF fk_name IS NOT NULL THEN
+                                EXECUTE format('ALTER TABLE idea_blocks DROP CONSTRAINT %I', fk_name);
+                            END IF;
+
+                            DROP INDEX IF EXISTS idx_idea_blocks_similarity_id;
+                            ALTER TABLE idea_blocks DROP COLUMN similarity_id;
+                            ALTER TABLE idea_blocks ADD COLUMN similarity_id bigint;
+                            CREATE INDEX IF NOT EXISTS idx_idea_blocks_similarity_id ON idea_blocks(similarity_id);
+
+                            DROP TABLE IF EXISTS similarities CASCADE;
+                        END IF;
+                    END IF;
+
+                    IF to_regclass('public.similarities') IS NOT NULL THEN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'similarities'
+                              AND column_name = 'similarity_reason'
+                        ) THEN
+                            DROP TABLE similarities CASCADE;
+                        END IF;
+                    END IF;
+                END $$;
+                """
+            )
+        )
+        logger.info("startup_similarity_schema_compat_check_done")
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(sql_text("DROP INDEX IF EXISTS idx_transcript_session_id"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_session_name ON transcript(session_name)"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_1 ON similarities(idea_block_id_1)"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_2 ON similarities(idea_block_id_2)"))
+        await conn.execute(
+            sql_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_similarities_pair "
+                "ON similarities (LEAST(idea_block_id_1, idea_block_id_2), GREATEST(idea_block_id_1, idea_block_id_2))"
+            )
+        )
