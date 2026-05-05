@@ -23,8 +23,6 @@ from .idea_block import (
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
 from .similarity import (
-    SimilarityAssignRequest,
-    SimilarityAssignResponse,
     SimilarityCreate,
     SimilarityResponse,
 )
@@ -54,8 +52,6 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
-    "SimilarityAssignRequest",
-    "SimilarityAssignResponse",
     "SimilarityCreate",
     "SimilarityResponse",
     "StreamContext",

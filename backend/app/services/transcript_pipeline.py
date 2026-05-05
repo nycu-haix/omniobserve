@@ -11,6 +11,7 @@ from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
+from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import generate_and_save_task_items_for_idea_block
 
 
@@ -185,6 +186,9 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             len(idea_blocks),
             len(task_items),
         )
+        for idea_block in idea_blocks:
+            await trigger_similarity_detection(idea_block.id, db)
+            await db.refresh(idea_block)
         return PipelineResult(idea_blocks=idea_blocks, task_items=task_items)
     except Exception as exc:
         logger.exception(

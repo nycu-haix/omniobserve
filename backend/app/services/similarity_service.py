@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from ..models import IdeaBlock, Similarity
-from ..schemas import SimilarityAssignResponse, SimilarityCreate
+from ..schemas import SimilarityCreate
 
 
 async def create_similarity(
@@ -129,53 +129,6 @@ async def create_or_update_similarity_pair(
     await db.refresh(idea_a)
     await db.refresh(idea_b)
     return similarity, action
-
-
-async def assign_similarity_to_idea_blocks(
-    idea_block_a_id: int,
-    idea_block_b_id: int,
-    reason: str,
-    *,
-    session_name: str,
-    user_id: int,
-    db: AsyncSession,
-) -> SimilarityAssignResponse:
-    similarity, action = await create_or_update_similarity_pair(
-        idea_block_a_id,
-        idea_block_b_id,
-        reason,
-        session_name=session_name,
-        user_id=user_id,
-        db=db,
-    )
-    return SimilarityAssignResponse(
-        id=similarity.id,
-        idea_block_id_1=similarity.idea_block_id_1,
-        idea_block_id_2=similarity.idea_block_id_2,
-        idea_block_a_id=idea_block_a_id,
-        idea_block_b_id=idea_block_b_id,
-        reason=similarity.reason,
-        action=action,
-    )
-
-
-async def assign_scoped_similarity_to_idea_blocks(
-    idea_block_a_id: int,
-    idea_block_b_id: int,
-    reason: str,
-    *,
-    session_name: str,
-    user_id: int,
-    db: AsyncSession,
-) -> SimilarityAssignResponse:
-    return await assign_similarity_to_idea_blocks(
-        idea_block_a_id,
-        idea_block_b_id,
-        reason,
-        session_name=session_name,
-        user_id=user_id,
-        db=db,
-    )
 
 
 async def _find_similarity_pair(

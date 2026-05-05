@@ -3,10 +3,12 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import logger
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
-from .embedding_service import create_text_embedding
 from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
 from .embedding_service import create_text_embedding
+from .similarity_detection import trigger_similarity_detection
+from .task_item_generation import replace_task_items_for_idea_block
 
 
 async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaBlock:
@@ -18,6 +20,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
+    await _refresh_task_items_and_detect_similarity(idea_block.id, payload.summary, db)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -81,6 +84,7 @@ async def update_idea_block(
 ) -> IdeaBlock:
     idea_block = await get_idea_block(idea_block_id, db)
     update_data = payload.model_dump(exclude_unset=True)
+    summary_changed = "summary" in update_data and update_data["summary"] is not None
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
         if await db.get(IdeaBlock, update_data["similarity_id"]) is None:
             raise HTTPException(status_code=404, detail="Similar idea block not found")
@@ -101,10 +105,15 @@ async def update_idea_block(
         else:
             idea_block.main_transcript.transcript = transcript_value
 
+    if summary_changed:
+        update_data["embedding_vector"] = await create_text_embedding(update_data["summary"])
+
     for field, value in update_data.items():
         setattr(idea_block, field, value)
 
     await db.commit()
+    if summary_changed:
+        await _refresh_task_items_and_detect_similarity(idea_block_id, update_data["summary"], db)
     return await get_idea_block(idea_block_id, db)
 
 
@@ -123,6 +132,7 @@ async def update_scoped_idea_block(
         db=db,
     )
     update_data = payload.model_dump(exclude_unset=True)
+    summary_changed = "summary" in update_data and update_data["summary"] is not None
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
         if await db.get(IdeaBlock, update_data["similarity_id"]) is None:
             raise HTTPException(status_code=404, detail="Similar idea block not found")
@@ -143,8 +153,7 @@ async def update_scoped_idea_block(
         else:
             idea_block.main_transcript.transcript = transcript_value
 
-    # Update embedding vector if summary (which is used for embedding) is being updated
-    if "summary" in update_data and update_data["summary"] is not None:
+    if summary_changed:
         update_data["embedding_vector"] = await create_text_embedding(update_data["summary"])
 
     for field, value in update_data.items():
@@ -152,22 +161,15 @@ async def update_scoped_idea_block(
 
     await db.commit()
 
-    updated_idea_block = await get_scoped_idea_block(
+    if summary_changed:
+        await _refresh_task_items_and_detect_similarity(idea_block_id, update_data["summary"], db)
+
+    return await get_scoped_idea_block(
         idea_block_id,
         session_name=session_name,
         user_id=user_id,
         db=db,
     )
-
-    # Trigger similarity check with the updated idea block
-    await trigger_similarity_check(
-        updated_idea_block,
-        session_name=session_name,
-        user_id=user_id,
-        db=db,
-    )
-
-    return updated_idea_block
 
 
 async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
@@ -213,3 +215,37 @@ async def _delete_similarity_references(idea_block_id: int, db: AsyncSession) ->
         .where(IdeaBlock.similarity_id == idea_block_id)
         .values(similarity_id=None)
     )
+
+
+async def _refresh_task_items_and_detect_similarity(
+    idea_block_id: int,
+    summary: str,
+    db: AsyncSession,
+) -> None:
+    try:
+        logger.info(
+            "similarity_detection_task_item_refresh_start idea_block_id=%s summary_chars=%s",
+            idea_block_id,
+            len(summary),
+        )
+        await replace_task_items_for_idea_block(
+            db,
+            idea_block_id=idea_block_id,
+            text=summary,
+        )
+        await db.commit()
+        logger.info(
+            "similarity_detection_task_item_refresh_done idea_block_id=%s",
+            idea_block_id,
+        )
+    except Exception as exc:
+        logger.exception(
+            "similarity_detection_task_item_refresh_failed idea_block_id=%s error_type=%s error=%s",
+            idea_block_id,
+            exc.__class__.__name__,
+            exc,
+        )
+        await db.rollback()
+        return
+
+    await trigger_similarity_detection(idea_block_id, db)

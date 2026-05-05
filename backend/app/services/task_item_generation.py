@@ -3,6 +3,7 @@ import os
 import re
 from typing import Any
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import openai_client
@@ -157,6 +158,34 @@ async def generate_and_save_task_items_for_idea_block(
     await db.flush()
     logger.info(
         "task_item_rows_saved idea_block_id=%s count=%s",
+        idea_block_id,
+        len(task_items),
+    )
+    return task_items
+
+
+async def replace_task_items_for_idea_block(
+    db: AsyncSession,
+    *,
+    idea_block_id: int,
+    text: str,
+) -> list[TaskItem]:
+    task_item_ids = await build_task_item_ids_with_llm(text)
+    logger.info(
+        "task_item_ids_rebuilt idea_block_id=%s task_item_ids=%s",
+        idea_block_id,
+        task_item_ids,
+    )
+    await db.execute(delete(TaskItem).where(TaskItem.idea_block_id == idea_block_id))
+    task_items = [
+        TaskItem(idea_block_id=idea_block_id, task_item_id=task_item_id)
+        for task_item_id in task_item_ids
+    ]
+    if task_items:
+        db.add_all(task_items)
+        await db.flush()
+    logger.info(
+        "task_item_rows_replaced idea_block_id=%s count=%s",
         idea_block_id,
         len(task_items),
     )

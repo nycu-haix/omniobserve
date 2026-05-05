@@ -3,13 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas import (
-    SimilarityAssignRequest,
-    SimilarityAssignResponse,
     SimilarityCreate,
     SimilarityResponse,
 )
 from ..services.similarity_service import (
-    assign_scoped_similarity_to_idea_blocks,
     create_similarity,
     get_scoped_similarity,
     list_scoped_similarities,
@@ -31,27 +28,6 @@ async def post_similarity(
     db: AsyncSession = Depends(get_db),
 ) -> SimilarityResponse:
     return await create_similarity(payload, session_name=session_name, user_id=user_id, db=db)
-
-
-@router.post(
-    "/sessions/{session_name}/users/{user_id}/similarities/assign",
-    response_model=SimilarityAssignResponse,
-    summary="Assign Similarity To Two Idea Blocks",
-)
-async def assign_similarity(
-    session_name: str,
-    user_id: int,
-    payload: SimilarityAssignRequest,
-    db: AsyncSession = Depends(get_db),
-) -> SimilarityAssignResponse:
-    return await assign_scoped_similarity_to_idea_blocks(
-        payload.idea_block_a_id,
-        payload.idea_block_b_id,
-        payload.reason,
-        session_name=session_name,
-        user_id=user_id,
-        db=db,
-    )
 
 
 @router.get(
