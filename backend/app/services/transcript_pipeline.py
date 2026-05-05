@@ -1,18 +1,22 @@
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..config import logger
+from ..db import SessionLocal
 from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import generate_and_save_task_items_for_idea_block
+
+IdeaBlockUpdateCallback = Callable[[list[IdeaBlock]], Awaitable[None]]
 
 
 @dataclass
@@ -33,8 +37,17 @@ async def handle_transcript_segment(
     transcript: StreamTranscript | None,
     is_final: bool,
     visibility: Visibility,
+    on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult | None:
     key = (session_name, user_id)
+    logger.info(
+        "pipeline_handle_segment_enter session_name=%s user_id=%s has_transcript=%s is_final=%s visibility=%s",
+        session_name,
+        user_id,
+        transcript is not None,
+        is_final,
+        visibility.value,
+    )
 
     async with _pipeline_locks[key]:
         if transcript is not None:
@@ -49,6 +62,12 @@ async def handle_transcript_segment(
             )
 
         if not is_final:
+            logger.info(
+                "pipeline_waiting_for_final session_name=%s user_id=%s pending=%s",
+                session_name,
+                user_id,
+                len(_pending_transcripts[key]),
+            )
             return None
 
         transcripts = list(_pending_transcripts.pop(key, []))
@@ -60,6 +79,11 @@ async def handle_transcript_segment(
         )
 
     if not transcripts:
+        logger.info(
+            "pipeline_skip_no_pending_transcripts session_name=%s user_id=%s",
+            session_name,
+            user_id,
+        )
         return None
 
     return await generate_idea_blocks_with_task_items_from_transcripts(
@@ -68,6 +92,7 @@ async def handle_transcript_segment(
         user_id=user_id,
         visibility=visibility,
         transcripts=transcripts,
+        on_similarity_update=on_similarity_update,
     )
 
 
@@ -78,6 +103,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     user_id: int,
     visibility: Visibility,
     transcripts: list[StreamTranscript],
+    on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
     if not transcript_text:
@@ -121,20 +147,30 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         idea_blocks: list[IdeaBlock] = []
         task_items: list[TaskItem] = []
 
-        for block_data in generated_blocks:
+        for block_index, block_data in enumerate(generated_blocks, start=1):
             summary = str(block_data["summary"]).strip()
             content = str(block_data["content"]).strip()
             logger.info(
-                "pipeline_embedding_start session_name=%s user_id=%s summary_chars=%s",
+                "pipeline_block_start session_name=%s user_id=%s block_index=%s summary_chars=%s content_chars=%s",
                 session_name,
                 user_id,
+                block_index,
+                len(summary),
+                len(content),
+            )
+            logger.info(
+                "pipeline_embedding_start session_name=%s user_id=%s block_index=%s summary_chars=%s",
+                session_name,
+                user_id,
+                block_index,
                 len(summary),
             )
             embedding_vector = await create_text_embedding(summary)
             logger.info(
-                "pipeline_embedding_done session_name=%s user_id=%s dimensions=%s",
+                "pipeline_embedding_done session_name=%s user_id=%s block_index=%s dimensions=%s",
                 session_name,
                 user_id,
+                block_index,
                 len(embedding_vector),
             )
             idea_block = IdeaBlock(
@@ -150,19 +186,22 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             await db.flush()
             idea_blocks.append(idea_block)
             logger.info(
-                "pipeline_idea_block_saved session_name=%s user_id=%s idea_block_id=%s transcript_id=%s",
+                "pipeline_idea_block_saved session_name=%s user_id=%s block_index=%s idea_block_id=%s transcript_id=%s",
                 session_name,
                 user_id,
+                block_index,
                 idea_block.id,
                 idea_block.transcript_id,
             )
 
             logger.info(
-                "pipeline_task_items_start session_name=%s user_id=%s idea_block_id=%s",
+                "pipeline_task_items_start session_name=%s user_id=%s block_index=%s idea_block_id=%s",
                 session_name,
                 user_id,
+                block_index,
                 idea_block.id,
             )
+            task_item_count_before = len(task_items)
             task_items.extend(
                 await generate_and_save_task_items_for_idea_block(
                     db,
@@ -171,13 +210,29 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 )
             )
             logger.info(
-                "pipeline_task_items_done session_name=%s user_id=%s idea_block_id=%s total_task_items=%s",
+                "pipeline_task_items_done session_name=%s user_id=%s block_index=%s idea_block_id=%s block_task_items=%s total_task_items=%s",
                 session_name,
                 user_id,
+                block_index,
                 idea_block.id,
+                len(task_items) - task_item_count_before,
                 len(task_items),
             )
+            logger.info(
+                "pipeline_block_done session_name=%s user_id=%s block_index=%s idea_block_id=%s",
+                session_name,
+                user_id,
+                block_index,
+                idea_block.id,
+            )
 
+        logger.info(
+            "pipeline_commit_start session_name=%s user_id=%s idea_blocks=%s task_items=%s",
+            session_name,
+            user_id,
+            len(idea_blocks),
+            len(task_items),
+        )
         await db.commit()
         logger.info(
             "pipeline_commit_done session_name=%s user_id=%s idea_blocks=%s task_items=%s",
@@ -186,9 +241,10 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             len(idea_blocks),
             len(task_items),
         )
-        for idea_block in idea_blocks:
-            await trigger_similarity_detection(idea_block.id, db)
-            await db.refresh(idea_block)
+        _schedule_similarity_detection(
+            idea_block_ids=[idea_block.id for idea_block in idea_blocks],
+            on_similarity_update=on_similarity_update,
+        )
         return PipelineResult(idea_blocks=idea_blocks, task_items=task_items)
     except Exception as exc:
         logger.exception(
@@ -208,6 +264,7 @@ async def generate_idea_blocks_with_task_items_from_text(
     user_id: int,
     visibility: Visibility,
     transcript_text: str,
+    on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     transcript = StreamTranscript(segment_id="manual", text=transcript_text)
     return await generate_idea_blocks_with_task_items_from_transcripts(
@@ -216,6 +273,7 @@ async def generate_idea_blocks_with_task_items_from_text(
         user_id=user_id,
         visibility=visibility,
         transcripts=[transcript],
+        on_similarity_update=on_similarity_update,
     )
 
 
@@ -226,6 +284,7 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
     user_id: int,
     visibility: Visibility,
     transcript_ids: list[int],
+    on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     if not transcript_ids:
         raise ApiError(400, "INVALID_PAYLOAD", "transcript_ids cannot be empty")
@@ -253,22 +312,13 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
         user_id=user_id,
         visibility=visibility,
         transcripts=stream_transcripts,
+        on_similarity_update=on_similarity_update,
     )
 
 
 def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str, Any]]]:
     return {
-        "idea_blocks": [
-            {
-                "id": block.id,
-                "title": block.title,
-                "summary": block.summary,
-                "transcript_id": block.transcript_id,
-                "transcript": block.transcript,
-                "similarity_id": block.similarity_id,
-            }
-            for block in result.idea_blocks
-        ],
+        "idea_blocks": serialize_idea_blocks(result.idea_blocks),
         "task_items": [
             {
                 "id": task_item.id,
@@ -278,6 +328,29 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
             for task_item in result.task_items
         ],
     }
+
+
+def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": block.id,
+            "title": block.title,
+            "summary": block.summary,
+            "transcript_id": block.transcript_id,
+            "transcript": block.transcript,
+            "similarity_id": block.similarity_id,
+        }
+        for block in idea_blocks
+    ]
+
+
+async def get_idea_block_for_payload(idea_block_id: int, db: AsyncSession) -> IdeaBlock | None:
+    result = await db.execute(
+        select(IdeaBlock)
+        .options(selectinload(IdeaBlock.main_transcript))
+        .where(IdeaBlock.id == idea_block_id)
+    )
+    return result.scalar_one_or_none()
 
 
 def _title_from_content(content: str) -> str:
@@ -292,3 +365,36 @@ def _main_transcript_id_from_batch(transcripts: list[StreamTranscript]) -> int |
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _schedule_similarity_detection(
+    *,
+    idea_block_ids: list[int],
+    on_similarity_update: IdeaBlockUpdateCallback | None,
+) -> None:
+    if not idea_block_ids:
+        logger.info("similarity_detection_background_skipped reason=%s", "no_idea_blocks")
+        return
+
+    async def run_detection() -> None:
+        try:
+            updated_blocks: list[IdeaBlock] = []
+            async with SessionLocal() as detection_db:
+                for idea_block_id in idea_block_ids:
+                    await trigger_similarity_detection(idea_block_id, detection_db)
+                    idea_block = await get_idea_block_for_payload(idea_block_id, detection_db)
+                    if idea_block is not None:
+                        updated_blocks.append(idea_block)
+
+            if updated_blocks and on_similarity_update is not None:
+                await on_similarity_update(updated_blocks)
+        except Exception as exc:
+            logger.exception(
+                "similarity_detection_background_failed idea_block_ids=%s error_type=%s error=%s",
+                idea_block_ids,
+                exc.__class__.__name__,
+                exc,
+            )
+
+    logger.info("similarity_detection_background_scheduled idea_block_ids=%s", idea_block_ids)
+    asyncio.create_task(run_detection())

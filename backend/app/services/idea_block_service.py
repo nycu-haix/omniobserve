@@ -1,9 +1,12 @@
+import asyncio
+
 from fastapi import HTTPException
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..config import logger
+from ..db import SessionLocal
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
 from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
 from .embedding_service import create_text_embedding
@@ -20,7 +23,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
-    await _refresh_task_items_and_detect_similarity(idea_block.id, payload.summary, db)
+    _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -113,7 +116,7 @@ async def update_idea_block(
 
     await db.commit()
     if summary_changed:
-        await _refresh_task_items_and_detect_similarity(idea_block_id, update_data["summary"], db)
+        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"])
     return await get_idea_block(idea_block_id, db)
 
 
@@ -162,7 +165,7 @@ async def update_scoped_idea_block(
     await db.commit()
 
     if summary_changed:
-        await _refresh_task_items_and_detect_similarity(idea_block_id, update_data["summary"], db)
+        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"])
 
     return await get_scoped_idea_block(
         idea_block_id,
@@ -249,3 +252,20 @@ async def _refresh_task_items_and_detect_similarity(
         return
 
     await trigger_similarity_detection(idea_block_id, db)
+
+
+def _schedule_task_item_refresh_and_similarity_detection(idea_block_id: int, summary: str) -> None:
+    async def run_refresh_and_detection() -> None:
+        try:
+            async with SessionLocal() as detection_db:
+                await _refresh_task_items_and_detect_similarity(idea_block_id, summary, detection_db)
+        except Exception as exc:
+            logger.exception(
+                "similarity_detection_background_failed idea_block_id=%s error_type=%s error=%s",
+                idea_block_id,
+                exc.__class__.__name__,
+                exc,
+            )
+
+    logger.info("similarity_detection_background_scheduled idea_block_ids=%s", [idea_block_id])
+    asyncio.create_task(run_refresh_and_detection())

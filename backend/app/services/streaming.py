@@ -14,7 +14,7 @@ from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
-from .transcript_pipeline import handle_transcript_segment, serialize_pipeline_result
+from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
 
@@ -88,6 +88,20 @@ async def send_ws_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> No
         await websocket.send_json(payload)
     except Exception as exc:
         logger.warning("Failed to send WebSocket message: %s", exc)
+
+
+async def send_similarity_idea_blocks_update(websocket: WebSocket, idea_blocks: list[Any]) -> None:
+    logger.info(
+        "similarity_detection_ws_patch_send idea_blocks=%s",
+        len(idea_blocks),
+    )
+    await send_ws_json_safe(
+        websocket,
+        {
+            "type": "idea_blocks_update",
+            "idea_blocks": serialize_idea_blocks(idea_blocks),
+        },
+    )
 
 
 async def handle_audio_stream_websocket(
@@ -267,6 +281,7 @@ async def handle_audio_stream_websocket(
                                 transcript=None,
                                 is_final=True,
                                 visibility=stream_context.scope,
+                                on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(websocket, idea_blocks),
                             )
                         except Exception:
                             logger.exception(
@@ -389,6 +404,12 @@ async def handle_transcript_segments_websocket(
                     await websocket.close()
                     return
                 if message_type != "transcript_segment":
+                    logger.info(
+                        "pipeline_ws_skip_message_type session_name=%s participant_id=%s message_type=%s",
+                        session_name,
+                        participant_id,
+                        message_type,
+                    )
                     continue
 
                 text = str(payload.get("text") or "").strip()
@@ -544,6 +565,7 @@ async def handle_transcript_segments_websocket(
                         transcript=saved_segment,
                         is_final=True,
                         visibility=visibility,
+                        on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(websocket, idea_blocks),
                     )
                 except Exception:
                     logger.exception(
@@ -573,12 +595,24 @@ async def handle_transcript_segments_websocket(
                     len(serialized_result["idea_blocks"]),
                     len(serialized_result["task_items"]),
                 )
+                logger.info(
+                    "pipeline_ws_send_idea_blocks_update session_name=%s participant_id=%s idea_blocks=%s",
+                    session_name,
+                    participant_id,
+                    len(serialized_result["idea_blocks"]),
+                )
                 await send_ws_json_safe(
                     websocket,
                     {
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
                     },
+                )
+                logger.info(
+                    "pipeline_ws_send_task_items_update session_name=%s participant_id=%s task_items=%s",
+                    session_name,
+                    participant_id,
+                    len(serialized_result["task_items"]),
                 )
                 await send_ws_json_safe(
                     websocket,
