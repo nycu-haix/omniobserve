@@ -549,7 +549,7 @@ export default function MeetingRoom() {
 							<Radio className="h-4 w-4" />
 							私人錄音
 						</Button>
-						<Button variant="secondary" onClick={() => void handleMic("off")}>
+						<Button variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
 							<MicOff className="h-4 w-4" />
 							靜音
 						</Button>
