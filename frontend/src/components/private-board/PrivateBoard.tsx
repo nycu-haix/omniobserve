@@ -374,7 +374,11 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	}, [ideaBlockRefreshKey, participantId, sessionId]);
 
 	useEffect(() => {
-		setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocks));
+		const timer = window.setTimeout(() => {
+			setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocks));
+		}, 0);
+
+		return () => window.clearTimeout(timer);
 	}, [ideaBlocks]);
 
 	useEffect(() => {
@@ -435,13 +439,17 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			return;
 		}
 
-		if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
-			const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
-			setIdeaBlocks(prev => mergeIdeaBlocks(prev, updatedBlocks));
-			setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, updatedBlocks));
-		}
+		const timer = window.setTimeout(() => {
+			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
+				const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
+				setIdeaBlocks(prev => mergeIdeaBlocks(prev, updatedBlocks));
+				setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, updatedBlocks));
+			}
 
-		setIdeaBlockRefreshKey(current => current + 1);
+			setIdeaBlockRefreshKey(current => current + 1);
+		}, 0);
+
+		return () => window.clearTimeout(timer);
 	}, [lastAudioMessage]);
 
 	useEffect(() => {

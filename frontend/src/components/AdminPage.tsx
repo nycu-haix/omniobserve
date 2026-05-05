@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
 import { apiUrl } from "../services/api";
-import { fetchSessionParticipants } from "../services/presence";
+import { fetchSessionPresence, type ParticipantPresence } from "../services/presence";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { ScrollArea } from "./ui/ScrollArea";
@@ -15,7 +15,7 @@ interface RealtimeMessage {
 
 interface EventRecord {
 	id: string;
-	source: "board";
+	source: "admin" | "board";
 	receivedAt: string;
 	message: RealtimeMessage;
 }
@@ -43,6 +43,24 @@ interface IdeaBlockRecord {
 	transcript?: string | null;
 	similarity_id?: string | null;
 	content?: string;
+}
+
+interface ParticipantTranscriptMessage extends RealtimeMessage {
+	type: "participant_transcript";
+	participant_id: string;
+	scope?: string;
+	text?: string;
+	is_final?: boolean;
+	persisted?: boolean;
+	timestamp_ms?: number;
+}
+
+interface LatestParticipantTranscript {
+	scope: string;
+	text: string;
+	isFinal: boolean;
+	persisted: boolean;
+	receivedAt: string;
 }
 
 const MAX_EVENTS = 80;
@@ -125,7 +143,11 @@ function isBoardStateMessage(message: RealtimeMessage | null): message is BoardS
 	return message?.type === "board_state";
 }
 
-function useAdminRealtimeSocket(sessionId: string, onEvent: (source: "board", message: RealtimeMessage) => void) {
+function isParticipantTranscriptMessage(message: RealtimeMessage | null): message is ParticipantTranscriptMessage {
+	return message?.type === "participant_transcript" && typeof message.participant_id === "string" && typeof message.text === "string";
+}
+
+function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, onEvent: (source: "admin" | "board", message: RealtimeMessage) => void) {
 	const [isConnected, setIsConnected] = useState(false);
 	const [lastMessage, setLastMessage] = useState<RealtimeMessage | null>(null);
 	const retryCountRef = useRef(0);
@@ -145,7 +167,8 @@ function useAdminRealtimeSocket(sessionId: string, onEvent: (source: "board", me
 				return;
 			}
 
-			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/board?participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
+			const queryParam = source === "admin" ? `admin_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}` : `participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
+			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/${source}?${queryParam}`;
 			socket = new WebSocket(wsUrl);
 
 			socket.onopen = () => {
@@ -167,7 +190,7 @@ function useAdminRealtimeSocket(sessionId: string, onEvent: (source: "board", me
 					parsedMessage = { type: "raw_message", payload: event.data };
 				}
 				setLastMessage(parsedMessage);
-				onEventRef.current("board", parsedMessage);
+				onEventRef.current(source, parsedMessage);
 			};
 
 			socket.onclose = () => {
@@ -192,7 +215,7 @@ function useAdminRealtimeSocket(sessionId: string, onEvent: (source: "board", me
 			}
 			socket?.close();
 		};
-	}, [sessionId]);
+	}, [sessionId, source]);
 
 	return { isConnected, lastMessage };
 }
@@ -225,12 +248,13 @@ export function AdminPage() {
 	const roomName = useMemo(() => getRoomName(), []);
 	const [events, setEvents] = useState<EventRecord[]>([]);
 	const [boardState, setBoardState] = useState<BoardStateMessage | null>(null);
-	const [participants, setParticipants] = useState<string[]>([]);
+	const [participants, setParticipants] = useState<ParticipantPresence[]>([]);
 	const [transcripts, setTranscripts] = useState<TranscriptRecord[]>([]);
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlockRecord[]>([]);
 	const [isApiLoading, setIsApiLoading] = useState(false);
 	const [apiError, setApiError] = useState<string | null>(null);
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
+	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
 
@@ -242,7 +266,7 @@ export function AdminPage() {
 			const [transcriptsResponse, ideaBlocksResponse, nextParticipants] = await Promise.all([
 				fetch(buildSessionApiUrl(roomName, "/transcripts")),
 				fetch(buildSessionApiUrl(roomName, "/idea-blocks")),
-				fetchSessionParticipants(roomName)
+				fetchSessionPresence(roomName)
 			]);
 
 			if (!transcriptsResponse.ok) {
@@ -252,13 +276,10 @@ export function AdminPage() {
 				throw new Error(`Failed to load idea blocks (${ideaBlocksResponse.status})`);
 			}
 
-			const [nextTranscripts, nextIdeaBlocks] = (await Promise.all([transcriptsResponse.json(), ideaBlocksResponse.json()])) as [
-				TranscriptRecord[],
-				IdeaBlockRecord[]
-			];
+			const [nextTranscripts, nextIdeaBlocks] = (await Promise.all([transcriptsResponse.json(), ideaBlocksResponse.json()])) as [TranscriptRecord[], IdeaBlockRecord[]];
 			setTranscripts(nextTranscripts);
 			setIdeaBlocks(nextIdeaBlocks);
-			setParticipants(nextParticipants.filter(participantId => participantId !== ADMIN_PARTICIPANT_ID));
+			setParticipants(nextParticipants.filter(participant => participant.id !== ADMIN_PARTICIPANT_ID));
 			setLastApiLoadedAt(
 				new Intl.DateTimeFormat("zh-TW", {
 					hour: "2-digit",
@@ -274,7 +295,7 @@ export function AdminPage() {
 		}
 	}, [roomName]);
 
-	const recordEvent = (source: "board", message: RealtimeMessage) => {
+	const recordEvent = (source: "admin" | "board", message: RealtimeMessage) => {
 		const receivedAt = new Intl.DateTimeFormat("zh-TW", {
 			hour: "2-digit",
 			minute: "2-digit",
@@ -296,6 +317,19 @@ export function AdminPage() {
 				session_name: roomName
 			}));
 		}
+
+		if (isParticipantTranscriptMessage(message)) {
+			setLatestTranscripts(current => ({
+				...current,
+				[message.participant_id]: {
+					scope: typeof message.scope === "string" ? message.scope : "unknown",
+					text: message.text?.trim() || "",
+					isFinal: message.is_final === true,
+					persisted: message.persisted === true,
+					receivedAt
+				}
+			}));
+		}
 	};
 
 	useEffect(() => {
@@ -312,13 +346,14 @@ export function AdminPage() {
 		};
 	}, [loadAdminApiData]);
 
-	const boardSocket = useAdminRealtimeSocket(roomName, recordEvent);
+	const adminSocket = useAdminRealtimeSocket("admin", roomName, recordEvent);
+	const boardSocket = useAdminRealtimeSocket("board", roomName, recordEvent);
 	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || []);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
 		const ids = new Set<number>();
-		participants.forEach(participantId => {
-			const userId = Number(participantId);
+		participants.forEach(participant => {
+			const userId = Number(participant.id);
 			if (Number.isInteger(userId)) {
 				ids.add(userId);
 			}
@@ -353,6 +388,10 @@ export function AdminPage() {
 							<ConnectionBadge connected={boardSocket.isConnected} />
 						</div>
 						<div className="flex items-center justify-between gap-3">
+							<span className="text-muted-foreground">Admin WS</span>
+							<ConnectionBadge connected={adminSocket.isConnected} />
+						</div>
+						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Presence API</span>
 							<span className="font-medium">{participants.length} participants</span>
 						</div>
@@ -370,15 +409,37 @@ export function AdminPage() {
 					</header>
 					{participants.length > 0 ? (
 						<div className="grid gap-2">
-							{participants.map(participantId => (
-								<div key={participantId} className="flex items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
-									<span className="min-w-0 truncate font-medium">{participantId}</span>
-									<span className="h-2 w-2 rounded-full bg-emerald-500" />
+							{participants.map(participant => (
+								<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm">
+									{(() => {
+										const latestTranscript = latestTranscripts[participant.id];
+										return (
+											<>
+												<div className="flex items-center justify-between gap-3">
+													<span className="min-w-0 truncate font-medium">{participant.display_name || participant.id}</span>
+													<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
+												</div>
+												<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+													<span className="truncate">ID {participant.id}</span>
+													<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "off"}</span>
+												</div>
+												{latestTranscript && (
+													<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
+														<div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
+															<span>{latestTranscript.scope}</span>
+															<span>{latestTranscript.receivedAt}</span>
+														</div>
+														<p className="line-clamp-3 whitespace-pre-wrap text-foreground">{latestTranscript.text}</p>
+													</div>
+												)}
+											</>
+										);
+									})()}
 								</div>
 							))}
 						</div>
 					) : (
-						<EmptyState title="尚未取得 presence" detail="這裡讀取 REST presence API，會列出目前連到同一個 room 的 participant id。" />
+						<EmptyState title="尚未取得 presence" detail="這裡讀取 REST presence API，會列出目前連到同一個 room 的 participant id 與 mic 狀態。" />
 					)}
 				</section>
 
@@ -541,7 +602,7 @@ export function AdminPage() {
 								))}
 							</div>
 						) : (
-							<EmptyState title="尚未收到 WS event" detail="這裡只做 board WebSocket 診斷；presence、transcript 與 idea block 顯示不使用此資料。" />
+							<EmptyState title="尚未收到 WS event" detail="這裡顯示 board/admin WebSocket 診斷；admin WS 會收到 participant transcript。" />
 						)}
 					</ScrollArea>
 				</section>
@@ -552,7 +613,7 @@ export function AdminPage() {
 						<h2 className="text-sm font-semibold">Last messages</h2>
 					</header>
 					<div className="grid gap-3">
-						<JsonPreview value={{ board: boardSocket.lastMessage ?? null }} />
+						<JsonPreview value={{ admin: adminSocket.lastMessage ?? null, board: boardSocket.lastMessage ?? null }} />
 					</div>
 				</section>
 			</aside>

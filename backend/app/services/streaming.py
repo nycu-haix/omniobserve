@@ -14,6 +14,8 @@ from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
+from .participant_status import mark_audio_disconnected, update_audio_status
+from .realtime import broadcast_admin_transcript
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
@@ -160,6 +162,14 @@ async def handle_audio_stream_websocket(
                                 "persisted": False,
                             },
                         )
+                        await broadcast_admin_transcript(
+                            session_name,
+                            participant_id=participant_id,
+                            scope=stream_context.scope.value,
+                            text=transcript_text,
+                            is_final=False,
+                            persisted=False,
+                        )
                         continue
 
                     saved_segment = await save_ws_transcript_segment(
@@ -190,6 +200,15 @@ async def handle_audio_stream_websocket(
                                 "is_final": False,
                             },
                         )
+                        await broadcast_admin_transcript(
+                            session_name,
+                            participant_id=participant_id,
+                            scope=stream_context.scope.value,
+                            text=saved_segment.text,
+                            is_final=False,
+                            persisted=True,
+                            transcript_segment_id=saved_segment.segment_id,
+                        )
 
                 buffered_chunk_start_at = chunk_ended_at if int16_buffer.size > 0 else None
 
@@ -203,6 +222,14 @@ async def handle_audio_stream_websocket(
                 stream_context.encoding,
                 stream_context.sample_rate,
                 stream_context.channels,
+            )
+            update_audio_status(
+                session_name,
+                participant_id,
+                mic_mode=stream_context.scope.value,
+                audio_connected=True,
+                display_name=str(stream_context.start_message.get("displayName") or "") or None,
+                client_id=stream_context.client_id,
             )
         except WebSocketDisconnect:
             return
@@ -314,6 +341,16 @@ async def handle_audio_stream_websocket(
                             "is_final": True,
                         },
                     )
+                    if last_text:
+                        await broadcast_admin_transcript(
+                            session_name,
+                            participant_id=participant_id,
+                            scope=stream_context.scope.value,
+                            text=last_text,
+                            is_final=True,
+                            persisted=stream_context.scope == Visibility.PRIVATE,
+                            transcript_segment_id=last_segment_id,
+                        )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -345,6 +382,7 @@ async def handle_audio_stream_websocket(
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1011)
         finally:
+            mark_audio_disconnected(session_name, participant_id)
             if not stop_received and websocket.client_state == WebSocketState.CONNECTED:
                 # Keep connection open unless stop arrives; close only in error paths above.
                 await websocket.close()

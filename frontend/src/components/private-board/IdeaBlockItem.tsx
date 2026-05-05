@@ -34,9 +34,13 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			return;
 		}
 
-		setDraftSummary(block.summary);
-		setDraftAiSummary(block.aiSummary || "");
-		setDraftTranscript(block.transcript || "");
+		const timer = window.setTimeout(() => {
+			setDraftSummary(block.summary);
+			setDraftAiSummary(block.aiSummary || "");
+			setDraftTranscript(block.transcript || "");
+		}, 0);
+
+		return () => window.clearTimeout(timer);
 	}, [block.aiSummary, block.summary, block.transcript, isEditing]);
 
 	const startEditing = () => {
@@ -149,13 +153,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					>
 						<Pencil className="h-4 w-4" />
 					</Button>
-					<Button
-						aria-label="Delete idea block"
-						size="icon"
-						variant="ghost"
-						onClick={deleteBlock}
-						disabled={isDeleting}
-					>
+					<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
 						<Trash2 className="h-4 w-4" />
 					</Button>
 					{showDeleteConfirm && (
@@ -222,9 +220,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 										placeholder="輸入標題（最多10個字）"
 									/>
 									<div className="flex items-center justify-between text-xs">
-										<span className={titleTooLong ? "text-destructive font-semibold" : "text-muted-foreground"}>
-											字數：{titleLength}/10
-										</span>
+										<span className={titleTooLong ? "text-destructive font-semibold" : "text-muted-foreground"}>字數：{titleLength}/10</span>
 										{titleTooLong && <span className="text-destructive font-semibold">⚠️ 超過10個字，請刪減至10字以下</span>}
 									</div>
 								</div>

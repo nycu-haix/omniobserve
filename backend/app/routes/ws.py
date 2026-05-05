@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, WebSocket
 
 from ..services.realtime import (
+    handle_admin_websocket,
     handle_audio_websocket,
     handle_board_websocket,
     handle_cue_websocket,
@@ -9,6 +10,19 @@ from ..services.realtime import (
 from ..services.streaming import handle_audio_stream_websocket, handle_transcript_segments_websocket
 
 router = APIRouter()
+
+
+@router.websocket("/ws/sessions/{session_name}/admin")
+async def admin_websocket(
+    websocket: WebSocket,
+    session_name: str,
+    admin_id: str = Query("admin"),
+) -> None:
+    await handle_admin_websocket(
+        websocket,
+        session_id=session_name,
+        admin_id=admin_id,
+    )
 
 
 @router.websocket("/ws/sessions/{session_name}/audio")

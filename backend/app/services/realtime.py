@@ -15,6 +15,7 @@ from ..models import Visibility
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
+from .participant_status import mark_audio_disconnected, update_audio_status
 from .transcripts import save_ws_transcript_segment
 
 
@@ -117,6 +118,7 @@ class AudioConnectionState:
 
 
 audio_manager = ConnectionManager()
+admin_manager = ConnectionManager()
 board_manager = ConnectionManager()
 cue_manager = ConnectionManager()
 presence_manager = ConnectionManager()
@@ -133,6 +135,34 @@ cue_responses: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+async def broadcast_admin_transcript(
+    session_id: str,
+    *,
+    participant_id: str,
+    scope: str,
+    text: str,
+    is_final: bool,
+    persisted: bool,
+    transcript_segment_id: str | int | None = None,
+    reason: str | None = None,
+) -> None:
+    await admin_manager.broadcast(
+        session_id,
+        {
+            "type": "participant_transcript",
+            "session_name": session_id,
+            "participant_id": participant_id,
+            "scope": scope,
+            "text": text,
+            "is_final": is_final,
+            "persisted": persisted,
+            "transcript_segment_id": transcript_segment_id,
+            "reason": reason,
+            "timestamp_ms": _now_ms(),
+        },
+    )
 
 
 def _normalize_int(value: Any, default: int) -> int:
@@ -346,6 +376,51 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
         )
 
 
+async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin_id: str) -> None:
+    await admin_manager.connect(session_id, admin_id, websocket)
+    logger.info(
+        "admin ws connected session_id=%s admin_id=%s admins=%s",
+        session_id,
+        admin_id,
+        admin_manager.get_participants(session_id),
+    )
+    await admin_manager.send_to(
+        session_id,
+        admin_id,
+        {"type": "joined", "session_name": session_id, "admin_id": admin_id},
+    )
+
+    try:
+        while True:
+            raw_text = await websocket.receive_text()
+            try:
+                payload = json.loads(raw_text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            message_type = payload.get("type")
+            if message_type == "ping":
+                await admin_manager.send_to(session_id, admin_id, {"type": "pong"})
+            elif message_type == "join":
+                await admin_manager.send_to(
+                    session_id,
+                    admin_id,
+                    {"type": "joined", "session_name": session_id, "admin_id": admin_id},
+                )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await admin_manager.disconnect(session_id, admin_id)
+        logger.info(
+            "admin ws disconnected session_id=%s admin_id=%s admins=%s",
+            session_id,
+            admin_id,
+            admin_manager.get_participants(session_id),
+        )
+
+
 async def _handle_board_block_message(
     session_id: str,
     participant_id: str,
@@ -540,6 +615,14 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         "persisted": False,
                     },
                 )
+                await broadcast_admin_transcript(
+                    session_id,
+                    participant_id=participant_id,
+                    scope=state.mic_mode,
+                    text=transcript_text,
+                    is_final=False,
+                    persisted=False,
+                )
                 return
             now = utc_now()
             saved_segment = await save_ws_transcript_segment(
@@ -572,6 +655,15 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         "timestamp_ms": _now_ms(),
                     },
                 )
+                await broadcast_admin_transcript(
+                    session_id,
+                    participant_id=participant_id,
+                    scope=state.mic_mode,
+                    text=saved_segment.text,
+                    is_final=False,
+                    persisted=True,
+                    transcript_segment_id=saved_segment.segment_id,
+                )
 
         try:
             while True:
@@ -601,6 +693,13 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                 if message_type == "join":
                     state.sample_rate = _normalize_int(payload.get("sample_rate"), 16000) or 16000
                     state.mic_mode = str(payload.get("mic_mode") or "private")
+                    update_audio_status(
+                        session_id,
+                        participant_id,
+                        mic_mode=state.mic_mode,
+                        audio_connected=True,
+                        is_speaking=state.is_speaking,
+                    )
                     logger.info(
                         "audio ws join session_id=%s participant_id=%s sample_rate=%s mic_mode=%s",
                         session_id,
@@ -615,9 +714,23 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     )
                 elif message_type == "speaking_start":
                     state.is_speaking = True
+                    update_audio_status(
+                        session_id,
+                        participant_id,
+                        mic_mode=state.mic_mode,
+                        audio_connected=True,
+                        is_speaking=True,
+                    )
                     logger.info("audio ws speaking_start session_id=%s participant_id=%s", session_id, participant_id)
                 elif message_type == "speaking_end":
                     state.is_speaking = False
+                    update_audio_status(
+                        session_id,
+                        participant_id,
+                        mic_mode=state.mic_mode,
+                        audio_connected=True,
+                        is_speaking=False,
+                    )
                     logger.info("audio ws speaking_end session_id=%s participant_id=%s", session_id, participant_id)
                     await flush_buffer()
                 elif message_type == "ping":
@@ -642,5 +755,6 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     transcripts=transcript_segments,
                 )
             audio_connections.get(session_id, {}).pop(participant_id, None)
+            mark_audio_disconnected(session_id, participant_id)
             await audio_manager.disconnect(session_id, participant_id)
             logger.info("audio ws disconnected session_id=%s participant_id=%s", session_id, participant_id)
