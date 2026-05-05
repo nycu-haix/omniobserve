@@ -12,14 +12,14 @@ export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 	const isPrivate = line.source === "private";
 
 	return (
-		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", isPrivate ? "justify-end text-right" : "justify-start text-left")}>
-			<div className="flex flex-col gap-1">
-				<span className={cn("min-w-0 max-w-[75%] whitespace-pre-wrap break-words", isPrivate && "ml-auto rounded-md bg-muted px-3 py-1")}>
-					<div className="flex flex-col gap-1">
-						<span className="break-words">{line.text}</span>
+		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", isPrivate ? "justify-end" : "justify-start")}>
+			<div className={cn("flex w-full min-w-0 flex-col gap-1", isPrivate ? "items-end" : "items-start")}>
+				<div className={cn("max-w-[75%] whitespace-normal text-left [overflow-wrap:normal] [word-break:normal]", isPrivate && "rounded-md bg-muted px-3 py-1")}>
+					<div className="flex min-w-0 flex-col items-start gap-1">
+						<span>{line.text}</span>
 						{line.time && <span className="whitespace-nowrap text-xs text-muted-foreground">{line.time}</span>}
 					</div>
-				</span>
+				</div>
 				{line.linkedBlockId && (
 					<Button className={cn("shrink-0", isPrivate ? "self-end" : "self-start")} variant="ghost" size="sm" onClick={() => onJumpToBlock?.(line.linkedBlockId as string)}>
 						<CornerDownRight className="h-4 w-4" />
