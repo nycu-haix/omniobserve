@@ -45,6 +45,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 		id: "t1",
 		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
 		source: "public",
+		time: "10:30",
 		linkedBlockId: "b1"
 	},
 	{
@@ -57,6 +58,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 		id: "t3",
 		text: "如果我們知道救援船大概在哪，VHF 無線電可能比海圖重要；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
 		source: "public",
+		time: "10:32",
 		linkedBlockId: "b3"
 	},
 	{
@@ -73,7 +75,8 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t6",
 		text: "個人想法：我認為釣魚竿在這個情境下比巧克力棒更重要，因為可以捕魚補充食物。",
-		source: "private"
+		source: "private",
+		time: "10:35"
 	},
 	{
 		id: "t7",
@@ -83,7 +86,8 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t8",
 		text: "私人筆記：驅鯊劑可能在某些海域很重要，但如果沒有鯊魚威脅就不需要。",
-		source: "private"
+		source: "private",
+		time: "10:37"
 	}
 ];
 

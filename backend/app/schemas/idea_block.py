@@ -72,6 +72,7 @@ class IdeaBlockResponse(BaseModel):
     time_stamp: datetime
     title: str
     summary: str
+    transcript_id: int | None
     transcript: str | None
     embedding_vector: list[float] | None
     similarity_id: UUID | None
@@ -83,6 +84,7 @@ class IdeaBlockListResponse(BaseModel):
     id: int
     summary: str
     title: str
+    transcript_id: int | None
     transcript: str | None
     similarity_id: UUID | None
 
@@ -95,6 +97,7 @@ class IdeaBlockOverviewResponse(BaseModel):
     session_name: str
     summary: str
     title: str
+    transcript_id: int | None
     transcript: str | None
     similarity_id: UUID | None
 

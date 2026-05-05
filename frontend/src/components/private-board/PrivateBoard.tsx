@@ -37,8 +37,14 @@ interface IdeaBlockResponse {
 	id: number;
 	title: string;
 	summary: string;
+	transcript_id?: number | null;
 	transcript: string | null;
 	similarity_id: string | null;
+}
+
+interface AudioIdeaBlocksUpdateMessage {
+	type: "idea_blocks_update";
+	idea_blocks?: IdeaBlockResponse[];
 }
 
 type AudioTranscriptMessage =
@@ -85,7 +91,7 @@ function isAudioTranscriptMessage(message: object | null): message is AudioTrans
 	);
 }
 
-function isAudioIdeaBlocksUpdateMessage(message: object | null): boolean {
+function isAudioIdeaBlocksUpdateMessage(message: object | null): message is AudioIdeaBlocksUpdateMessage {
 	return !!message && "type" in message && message.type === "idea_blocks_update";
 }
 
@@ -127,11 +133,15 @@ function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType 
 }
 
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
+	const transcriptLineId = item.transcript_id == null ? undefined : String(item.transcript_id);
+
 	return {
 		id: String(item.id),
 		summary: item.title || item.summary,
 		aiSummary: item.summary,
 		transcript: item.transcript ?? undefined,
+		transcriptLineId,
+		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
 		status: "ready"
 	};
@@ -195,10 +205,19 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 	if (!existingLine) {
 		return [...lines, { ...line, text: normalizedText }];
 	}
-	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time) {
+	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {
 		return lines;
 	}
-	return lines.map(item => (item.id === line.id ? { ...line, text: normalizedText } : item));
+	return lines.map(item =>
+		item.id === line.id
+			? {
+					...item,
+					...line,
+					text: normalizedText,
+					linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
+				}
+			: item
+	);
 }
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
@@ -224,6 +243,35 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 				: block
 		);
 	}, baseBlocks);
+}
+
+function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBlock[]): TranscriptLineType[] {
+	const transcriptBlockIds = new Map<string, string>();
+
+	blocks.forEach(block => {
+		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
+		transcriptIds.forEach(transcriptId => {
+			if (!transcriptBlockIds.has(transcriptId)) {
+				transcriptBlockIds.set(transcriptId, block.id);
+			}
+		});
+	});
+
+	let didChange = false;
+	const linkedLines = lines.map(line => {
+		const linkedBlockId = transcriptBlockIds.get(line.id);
+		if (!linkedBlockId || line.linkedBlockId === linkedBlockId) {
+			return line;
+		}
+
+		didChange = true;
+		return {
+			...line,
+			linkedBlockId
+		};
+	});
+
+	return didChange ? linkedLines : lines;
 }
 
 function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
@@ -326,6 +374,10 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	}, [ideaBlockRefreshKey, participantId, sessionId]);
 
 	useEffect(() => {
+		setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocks));
+	}, [ideaBlocks]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
@@ -381,6 +433,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
 			return;
+		}
+
+		if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
+			const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
+			setIdeaBlocks(prev => mergeIdeaBlocks(prev, updatedBlocks));
+			setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, updatedBlocks));
 		}
 
 		setIdeaBlockRefreshKey(current => current + 1);
