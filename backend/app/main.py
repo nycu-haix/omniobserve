@@ -106,6 +106,16 @@ async def startup() -> None:
                     fk_name text;
                 BEGIN
                     IF to_regclass('public.idea_blocks') IS NOT NULL THEN
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'idea_blocks'
+                              AND column_name = 'is_deleted'
+                        ) THEN
+                            ALTER TABLE idea_blocks ADD COLUMN is_deleted boolean NOT NULL DEFAULT false;
+                        END IF;
+
                         SELECT data_type
                         INTO similarity_id_type
                         FROM information_schema.columns
