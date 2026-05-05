@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, Similarity, TaskItem
+from .realtime import board_manager
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
@@ -268,6 +269,15 @@ async def _replace_similarity_pair(
     reason: str,
     db: AsyncSession,
 ) -> None:
+    similar_idea_block = await db.get(IdeaBlock, similar_idea_block_id)
+    if similar_idea_block is None:
+        await _clear_similarity_for_idea_block(
+            idea_block,
+            f"Selected similar idea block not found: {similar_idea_block_id}",
+            db,
+        )
+        return
+
     deleted_count = await _delete_pairs_for_idea_block(idea_block.id, db)
     similarity = Similarity(
         idea_block_id_1=idea_block.id,
@@ -289,6 +299,7 @@ async def _replace_similarity_pair(
         similarity.id,
     )
     await db.commit()
+    await _notify_similarity_refetch(idea_block, similar_idea_block)
 
 
 async def _clear_similarity_for_idea_block(idea_block: IdeaBlock, reason: str, db: AsyncSession) -> None:
@@ -322,6 +333,47 @@ async def _delete_pairs_for_idea_block(idea_block_id: int, db: AsyncSession) -> 
         .values(similarity_id=None)
     )
     return int(result.rowcount or 0)
+
+
+async def _notify_similarity_refetch(idea_block: IdeaBlock, similar_idea_block: IdeaBlock) -> None:
+    targets: dict[str, str] = {
+        str(idea_block.user_id): str(idea_block.id),
+        str(similar_idea_block.user_id): str(similar_idea_block.id),
+    }
+    logger.info(
+        "similarity_detection_refetch_notify session_name=%s idea_block_id=%s similar_idea_block_id=%s targets=%s online_participants=%s",
+        idea_block.session_name,
+        idea_block.id,
+        similar_idea_block.id,
+        sorted(targets.keys()),
+        board_manager.get_participants(idea_block.session_name),
+    )
+    for participant_id, block_id in targets.items():
+        try:
+            target_connected = participant_id in board_manager.get_participants(idea_block.session_name)
+            await board_manager.send_to(
+                idea_block.session_name,
+                participant_id,
+                {
+                    "type": "update_idea_block",
+                    "payload": {"id": block_id},
+                },
+            )
+            logger.info(
+                "similarity_detection_refetch_notify_attempted session_name=%s participant_id=%s idea_block_id=%s target_connected=%s",
+                idea_block.session_name,
+                participant_id,
+                block_id,
+                target_connected,
+            )
+        except Exception as exc:
+            logger.warning(
+                "similarity_detection_refetch_notify_failed session_name=%s participant_id=%s error_type=%s error=%s",
+                idea_block.session_name,
+                participant_id,
+                exc.__class__.__name__,
+                exc,
+            )
 
 
 def _parse_llm_json_payload(raw_content: str) -> Any:
