@@ -37,7 +37,7 @@ interface IdeaBlockResponse {
 	title: string;
 	summary: string;
 	transcript: string | null;
-	similarity_id: string | null;
+	similarity_id: number | null;
 }
 
 type AudioTranscriptMessage =

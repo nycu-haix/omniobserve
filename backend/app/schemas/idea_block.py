@@ -1,5 +1,4 @@
 from datetime import datetime
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,7 +47,7 @@ class IdeaBlockUpdate(BaseModel):
     summary: str | None = None
     transcript: str | None = None
     embedding_vector: list[float] | None = None
-    similarity_id: UUID | None = None
+    similarity_id: int | None = None
 
     @field_validator("title")
     @classmethod
@@ -74,7 +73,7 @@ class IdeaBlockResponse(BaseModel):
     summary: str
     transcript: str | None
     embedding_vector: list[float] | None
-    similarity_id: UUID | None
+    similarity_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -84,7 +83,7 @@ class IdeaBlockListResponse(BaseModel):
     summary: str
     title: str
     transcript: str | None
-    similarity_id: UUID | None
+    similarity_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -96,7 +95,7 @@ class IdeaBlockOverviewResponse(BaseModel):
     summary: str
     title: str
     transcript: str | None
-    similarity_id: UUID | None
+    similarity_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
 

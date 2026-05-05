@@ -13,7 +13,7 @@ from .routes.ws import router as ws_router
 OPENAPI_TAGS = [
     {"name": "Transcripts", "description": "Create and read transcript records."},
     {"name": "Idea Blocks", "description": "CRUD operations for generated idea blocks."},
-    {"name": "Similarities", "description": "Manage similarity clusters and assign idea blocks to clusters."},
+    {"name": "Similarities", "description": "Manage similarity pairs between idea blocks."},
     {"name": "Task Items", "description": "Map idea blocks to external task item ids."},
     {"name": "Idea Block To Transcript", "description": "Map idea blocks to one or more transcripts."},
 ]

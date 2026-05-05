@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +35,7 @@ router = APIRouter(tags=["Idea Blocks"])
     summary="List All Idea Blocks",
 )
 async def read_all_idea_blocks(
-    similarity_id: UUID | None = None,
+    similarity_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[IdeaBlockOverviewResponse]:
     return await list_idea_blocks(db, similarity_id=similarity_id)
@@ -50,7 +48,7 @@ async def read_all_idea_blocks(
 )
 async def read_all_session_idea_blocks(
     session_name: str,
-    similarity_id: UUID | None = None,
+    similarity_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[IdeaBlockOverviewResponse]:
     return await list_idea_blocks(db, session_name=session_name, similarity_id=similarity_id)
@@ -124,7 +122,7 @@ async def post_idea_block(
 async def read_idea_blocks(
     session_name: str,
     user_id: int,
-    similarity_id: UUID | None = None,
+    similarity_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[IdeaBlockListResponse]:
     return await list_idea_blocks(

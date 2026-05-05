@@ -1,24 +1,26 @@
-import uuid
-from typing import TYPE_CHECKING
-
-from sqlalchemy import Text
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
-
-if TYPE_CHECKING:
-    from .idea_block import IdeaBlock
 
 
 class Similarity(Base):
     __tablename__ = "similarities"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+    __table_args__ = (
+        CheckConstraint("idea_block_id_1 <> idea_block_id_2", name="ck_similarities_distinct_idea_blocks"),
     )
-    similarity_reason: Mapped[str] = mapped_column(Text, nullable=False)
 
-    idea_blocks: Mapped[list["IdeaBlock"]] = relationship(back_populates="similarity")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    idea_block_id_1: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("idea_blocks.id"),
+        nullable=False,
+        index=True,
+    )
+    idea_block_id_2: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("idea_blocks.id"),
+        nullable=False,
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)

@@ -1,9 +1,7 @@
-import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -12,7 +10,6 @@ from .visibility import Visibility
 
 if TYPE_CHECKING:
     from .idea_block_to_transcript import IdeaBlockToTranscript
-    from .similarity import Similarity
     from .task_item import TaskItem
     from .transcript import Transcript
 
@@ -36,15 +33,9 @@ class IdeaBlock(Base):
         nullable=True,
     )
     embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
-    similarity_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("similarities.id"),
-        nullable=True,
-        index=True,
-    )
+    similarity_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
 
     main_transcript: Mapped["Transcript | None"] = relationship(back_populates="idea_blocks")
-    similarity: Mapped["Similarity | None"] = relationship(back_populates="idea_blocks")
     task_items: Mapped[list["TaskItem"]] = relationship(
         back_populates="idea_block",
         cascade="all, delete-orphan",

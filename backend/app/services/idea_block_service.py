@@ -1,7 +1,5 @@
-from uuid import UUID
-
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -61,7 +59,7 @@ async def list_idea_blocks(
     *,
     user_id: int | None = None,
     session_name: str | None = None,
-    similarity_id: UUID | None = None,
+    similarity_id: int | None = None,
 ) -> list[IdeaBlock]:
     stmt = select(IdeaBlock).options(selectinload(IdeaBlock.main_transcript))
     if user_id is not None:
@@ -83,8 +81,8 @@ async def update_idea_block(
     idea_block = await get_idea_block(idea_block_id, db)
     update_data = payload.model_dump(exclude_unset=True)
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
-        if await db.get(Similarity, update_data["similarity_id"]) is None:
-            raise HTTPException(status_code=404, detail="Similarity not found")
+        if await db.get(IdeaBlock, update_data["similarity_id"]) is None:
+            raise HTTPException(status_code=404, detail="Similar idea block not found")
 
     if "transcript" in update_data:
         transcript_text = update_data.pop("transcript")
@@ -125,8 +123,8 @@ async def update_scoped_idea_block(
     )
     update_data = payload.model_dump(exclude_unset=True)
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
-        if await db.get(Similarity, update_data["similarity_id"]) is None:
-            raise HTTPException(status_code=404, detail="Similarity not found")
+        if await db.get(IdeaBlock, update_data["similarity_id"]) is None:
+            raise HTTPException(status_code=404, detail="Similar idea block not found")
 
     if "transcript" in update_data:
         transcript_text = update_data.pop("transcript")
@@ -158,6 +156,7 @@ async def update_scoped_idea_block(
 
 async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
     idea_block = await get_idea_block(idea_block_id, db)
+    await _delete_similarity_references(idea_block_id, db)
     await db.execute(delete(TaskItem).where(TaskItem.idea_block_id == idea_block_id))
     await db.execute(delete(IdeaBlockToTranscript).where(IdeaBlockToTranscript.idea_blocks_id == idea_block_id))
     await db.delete(idea_block)
@@ -177,7 +176,24 @@ async def delete_scoped_idea_block(
         user_id=user_id,
         db=db,
     )
+    await _delete_similarity_references(idea_block_id, db)
     await db.execute(delete(TaskItem).where(TaskItem.idea_block_id == idea_block_id))
     await db.execute(delete(IdeaBlockToTranscript).where(IdeaBlockToTranscript.idea_blocks_id == idea_block_id))
     await db.delete(idea_block)
     await db.commit()
+
+
+async def _delete_similarity_references(idea_block_id: int, db: AsyncSession) -> None:
+    await db.execute(
+        delete(Similarity).where(
+            or_(
+                Similarity.idea_block_id_1 == idea_block_id,
+                Similarity.idea_block_id_2 == idea_block_id,
+            )
+        )
+    )
+    await db.execute(
+        update(IdeaBlock)
+        .where(IdeaBlock.similarity_id == idea_block_id)
+        .values(similarity_id=None)
+    )

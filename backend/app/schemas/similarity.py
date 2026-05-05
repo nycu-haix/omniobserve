@@ -1,15 +1,17 @@
-from uuid import UUID
-
 from pydantic import BaseModel, ConfigDict
 
 
 class SimilarityCreate(BaseModel):
-    similarity_reason: str
+    idea_block_id_1: int
+    idea_block_id_2: int
+    reason: str
 
 
 class SimilarityResponse(BaseModel):
-    id: UUID
-    similarity_reason: str
+    id: int
+    idea_block_id_1: int
+    idea_block_id_2: int
+    reason: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -17,12 +19,14 @@ class SimilarityResponse(BaseModel):
 class SimilarityAssignRequest(BaseModel):
     idea_block_a_id: int
     idea_block_b_id: int
-    similarity_reason: str
+    reason: str
 
 
 class SimilarityAssignResponse(BaseModel):
-    similarity_id: UUID
+    id: int
+    idea_block_id_1: int
+    idea_block_id_2: int
     idea_block_a_id: int
     idea_block_b_id: int
-    similarity_reason: str
+    reason: str
     action: str

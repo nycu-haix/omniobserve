@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +22,7 @@ router = APIRouter(tags=["Similarities"])
     "/sessions/{session_name}/users/{user_id}/similarities",
     status_code=status.HTTP_201_CREATED,
     response_model=SimilarityResponse,
-    summary="Create Similarity Cluster",
+    summary="Create Similarity Pair",
 )
 async def post_similarity(
     session_name: str,
@@ -32,7 +30,7 @@ async def post_similarity(
     payload: SimilarityCreate,
     db: AsyncSession = Depends(get_db),
 ) -> SimilarityResponse:
-    return await create_similarity(payload, db)
+    return await create_similarity(payload, session_name=session_name, user_id=user_id, db=db)
 
 
 @router.post(
@@ -49,7 +47,7 @@ async def assign_similarity(
     return await assign_scoped_similarity_to_idea_blocks(
         payload.idea_block_a_id,
         payload.idea_block_b_id,
-        payload.similarity_reason,
+        payload.reason,
         session_name=session_name,
         user_id=user_id,
         db=db,
@@ -59,7 +57,7 @@ async def assign_similarity(
 @router.get(
     "/sessions/{session_name}/users/{user_id}/similarities",
     response_model=list[SimilarityResponse],
-    summary="List Similarity Clusters",
+    summary="List Similarity Pairs",
 )
 async def read_similarities(
     session_name: str,
@@ -72,12 +70,12 @@ async def read_similarities(
 @router.get(
     "/sessions/{session_name}/users/{user_id}/similarities/{similarity_id}",
     response_model=SimilarityResponse,
-    summary="Get Similarity Cluster By ID",
+    summary="Get Similarity Pair By ID",
 )
 async def read_similarity(
     session_name: str,
     user_id: int,
-    similarity_id: UUID,
+    similarity_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> SimilarityResponse:
     return await get_scoped_similarity(similarity_id, session_name=session_name, user_id=user_id, db=db)
