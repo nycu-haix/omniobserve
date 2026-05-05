@@ -38,6 +38,7 @@ class GeneratedIdeaBlockResponse(BaseModel):
     summary: str | None
     transcript: str | None
     source_transcript_ids: list[str]
+    is_deleted: bool
     created_at: str
     updated_at: str
 

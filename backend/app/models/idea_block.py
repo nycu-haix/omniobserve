@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -34,6 +34,7 @@ class IdeaBlock(Base):
     )
     embedding_vector: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     similarity_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false(), default=False, index=True)
 
     main_transcript: Mapped["Transcript | None"] = relationship(back_populates="idea_blocks")
     task_items: Mapped[list["TaskItem"]] = relationship(

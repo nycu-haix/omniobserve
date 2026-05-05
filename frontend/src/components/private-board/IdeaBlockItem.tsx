@@ -4,70 +4,66 @@ import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/Tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/Tooltip";
 
 interface IdeaBlockItemProps {
 	block: IdeaBlock;
 	isHighlighted?: boolean;
 	onToggle: (id: string) => void;
-	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string }) => Promise<void> | void;
+	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
 }
 
 export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete }: IdeaBlockItemProps) {
-	const [detailTab, setDetailTab] = useState("ai");
-	const [isEditing, setIsEditing] = useState(false);
-	const [draftSummary, setDraftSummary] = useState(block.summary);
+	const [draftTitle, setDraftTitle] = useState(block.summary);
+	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
 	const [draftTranscript, setDraftTranscript] = useState(block.transcript || "");
+	const [savedAiSummary, setSavedAiSummary] = useState(block.aiSummary || "");
 	const [isSaving, setIsSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
-	const isGenerating = block.status === "generating";
-	const Chevron = block.expanded ? ChevronDown : ChevronRight;
-	const titleLength = draftSummary.trim().length;
-	const titleTooLong = titleLength > 10;
-	const canSave = titleLength > 0 && !titleTooLong && !isSaving;
-
-	useEffect(() => {
-		if (isEditing) {
-			return;
-		}
-
-		const timer = window.setTimeout(() => {
-			setDraftSummary(block.summary);
-			setDraftAiSummary(block.aiSummary || "");
-			setDraftTranscript(block.transcript || "");
-		}, 0);
-
-		return () => window.clearTimeout(timer);
-	}, [block.aiSummary, block.summary, block.transcript, isEditing]);
-
-	const startEditing = () => {
-		setDraftSummary(block.summary);
-		setDraftAiSummary(block.aiSummary || "");
-		setDraftTranscript(block.transcript || "");
-		setSaveError(null);
-		setIsEditing(true);
-		setDetailTab("content");
-		if (!block.expanded) {
-			onToggle(block.id);
-		}
-	};
-
-	const cancelEditing = () => {
-		setDraftSummary(block.summary);
-		setDraftAiSummary(block.aiSummary || "");
-		setDraftTranscript(block.transcript || "");
-		setSaveError(null);
-		setIsEditing(false);
-		setDetailTab("ai");
-	};
-
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-	const deleteBlock = async (event: MouseEvent<HTMLButtonElement>) => {
+	const isGenerating = block.status === "generating";
+	const Chevron = block.expanded ? ChevronDown : ChevronRight;
+	const aiSummaryChanged = draftAiSummary.trim() !== savedAiSummary.trim();
+	const canSaveAiSummary = draftAiSummary.trim().length > 0 && aiSummaryChanged && !isSaving;
+	const titleChanged = draftTitle.trim() !== savedTitle.trim();
+	const titleTooLong = draftTitle.trim().length > 10;
+	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving;
+	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
+
+	useEffect(() => {
+		setDraftTitle(block.summary);
+		setSavedTitle(block.summary);
+		setDraftAiSummary(block.aiSummary || "");
+		setSavedAiSummary(block.aiSummary || "");
+		setDraftTranscript(block.transcript || "");
+		setSaveError(null);
+		setIsEditingTitle(false);
+	}, [block.aiSummary, block.summary, block.transcript, block.id]);
+
+	const cancelAiSummaryEditing = () => {
+		setDraftAiSummary(savedAiSummary);
+		setSaveError(null);
+	};
+
+	const startTitleEditing = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		setDraftTitle(savedTitle);
+		setSaveError(null);
+		setIsEditingTitle(true);
+	};
+
+	const cancelTitleEditing = () => {
+		setDraftTitle(savedTitle);
+		setSaveError(null);
+		setIsEditingTitle(false);
+	};
+
+	const deleteBlock = (event: MouseEvent<HTMLButtonElement>) => {
 		event.stopPropagation();
 		setShowDeleteConfirm(true);
 	};
@@ -89,12 +85,10 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		}
 	};
 
-	const cancelDelete = () => {
-		setShowDeleteConfirm(false);
-	};
-
 	const saveDraft = async () => {
-		if (!canSave) {
+		const nextAiSummary = draftAiSummary.trim();
+		const nextSummary = nextAiSummary.slice(0, 10) || "Idea";
+		if (!nextAiSummary || isSaving) {
 			return;
 		}
 
@@ -102,14 +96,39 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		setSaveError(null);
 		try {
 			await onSave(block.id, {
-				summary: draftSummary.trim(),
-				aiSummary: draftAiSummary.trim(),
+				summary: block.isDraft ? nextSummary : savedTitle,
+				aiSummary: nextAiSummary,
 				transcript: draftTranscript.trim()
 			});
-			setIsEditing(false);
-			setDetailTab("ai");
+			setDraftAiSummary(nextAiSummary);
+			setSavedAiSummary(nextAiSummary);
 		} catch (error) {
 			setSaveError(error instanceof Error ? error.message : "Failed to save idea block");
+		} finally {
+			setIsSaving(false);
+		}
+	};
+
+	const saveTitle = async () => {
+		const nextTitle = draftTitle.trim();
+		if (!nextTitle || nextTitle.length > 10 || isSaving) {
+			return;
+		}
+
+		setIsSaving(true);
+		setSaveError(null);
+		try {
+			await onSave(block.id, {
+				summary: nextTitle,
+				aiSummary: draftAiSummary.trim() || savedAiSummary,
+				transcript: draftTranscript.trim(),
+				updateTitle: true
+			});
+			setDraftTitle(nextTitle);
+			setSavedTitle(nextTitle);
+			setIsEditingTitle(false);
+		} catch (error) {
+			setSaveError(error instanceof Error ? error.message : "Failed to save idea block title");
 		} finally {
 			setIsSaving(false);
 		}
@@ -118,53 +137,103 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const row = (
 		<div
 			role="button"
-			tabIndex={isGenerating ? -1 : 0}
+			tabIndex={isGenerating || isEditingTitle ? -1 : 0}
 			className={cn(
 				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				block.hasCue && "border-primary bg-accent",
+				block.isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
 			)}
 			onClick={() => {
-				if (!isGenerating) {
+				if (!isGenerating && !isEditingTitle) {
 					onToggle(block.id);
 				}
 			}}
 			onKeyDown={event => {
-				if (isGenerating || (event.key !== "Enter" && event.key !== " ")) {
+				if (isGenerating || isEditingTitle || (event.key !== "Enter" && event.key !== " ")) {
 					return;
 				}
 				event.preventDefault();
 				onToggle(block.id);
 			}}
 		>
-			{isGenerating ? <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-			<span className="min-w-0 max-w-full overflow-hidden break-words text-sm leading-6">{isGenerating ? "正在生成..." : block.summary}</span>
+			{isGenerating ? <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <Chevron className={cn("h-4 w-4 shrink-0 text-muted-foreground", block.isDeleted && "opacity-45")} aria-hidden="true" />}
+			{isEditingTitle ? (
+				<input
+					className={cn(
+						"min-w-0 rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
+						titleTooLong && "border-destructive focus:border-destructive"
+					)}
+					value={draftTitle}
+					onClick={event => event.stopPropagation()}
+					onChange={event => setDraftTitle(event.target.value)}
+					onKeyDown={event => {
+						event.stopPropagation();
+						if (event.key === "Enter") {
+							event.preventDefault();
+							void saveTitle();
+						}
+						if (event.key === "Escape") {
+							event.preventDefault();
+							cancelTitleEditing();
+						}
+					}}
+					autoFocus
+				/>
+			) : (
+				<span className="min-w-0 max-w-full overflow-hidden break-words text-sm leading-6">{isGenerating ? "正在生成..." : rowLabel}</span>
+			)}
 			{!isGenerating && (
 				<div className="relative flex flex-shrink-0 items-center gap-2">
-					<Button
-						aria-label="Edit idea block"
-						size="icon"
-						variant="ghost"
-						onClick={event => {
-							event.stopPropagation();
-							startEditing();
-						}}
-					>
-						<Pencil className="h-4 w-4" />
-					</Button>
-					<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
-						<Trash2 className="h-4 w-4" />
-					</Button>
-					{showDeleteConfirm && (
-						<div className="absolute top-full right-0 mt-1 z-5 bg-white border border-gray-200 rounded-md shadow-lg p-2">
-							<div className="flex items-center gap-2">
-								<span className="text-xs text-muted-foreground">刪除</span>
-								<Button size="sm" variant="destructive" onClick={confirmDelete} disabled={isDeleting}>
-									確定
+					{isEditingTitle ? (
+						<>
+							<Button
+								aria-label="Cancel title edit"
+								className="h-7 w-7"
+								size="icon"
+								variant="ghost"
+								onClick={event => {
+									event.stopPropagation();
+									cancelTitleEditing();
+								}}
+								disabled={isSaving}
+							>
+								<X className="h-3.5 w-3.5" />
+							</Button>
+							<Button
+								aria-label="Save title edit"
+								className="h-7 w-7"
+								size="icon"
+								onClick={event => {
+									event.stopPropagation();
+									void saveTitle();
+								}}
+								disabled={!canSaveTitle}
+							>
+								<Check className="h-3.5 w-3.5" />
+							</Button>
+						</>
+					) : (
+						<>
+							{!block.isDraft && (
+								<Button aria-label="Edit idea block title" className={cn(block.isDeleted && "opacity-45")} size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving || block.isDeleted}>
+									<Pencil className="h-4 w-4" />
 								</Button>
-								<Button size="sm" variant="ghost" onClick={cancelDelete}>
-									取消
+							)}
+							<Button aria-label="Delete idea block" className={cn(block.isDeleted && "opacity-45")} size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting || block.isDeleted}>
+								<Trash2 className="h-4 w-4" />
+							</Button>
+						</>
+					)}
+					{showDeleteConfirm && (
+						<div className="absolute right-0 top-full z-50 mt-1 rounded-md border bg-popover p-1 shadow-lg ring-1 ring-black/5" onClick={event => event.stopPropagation()}>
+							<div className="flex items-center gap-1">
+								<Button aria-label="Confirm delete idea block" className="h-7 w-7" size="icon" variant="destructive" onClick={() => void confirmDelete()} disabled={isDeleting}>
+									<Check className="h-3.5 w-3.5" />
+								</Button>
+								<Button aria-label="Cancel delete idea block" className="h-7 w-7" size="icon" variant="ghost" onClick={() => setShowDeleteConfirm(false)}>
+									<X className="h-3.5 w-3.5" />
 								</Button>
 							</div>
 						</div>
@@ -187,70 +256,33 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				row
 			)}
 
+			{isEditingTitle && (saveError || titleTooLong) && (
+				<p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>
+			)}
+
 			{block.expanded && !isGenerating && (
-				<div className="ml-7 rounded-lg border bg-background p-3 overflow-hidden">
-					<Tabs value={detailTab} onValueChange={setDetailTab}>
-						<TabsList>
-							{isEditing && <TabsTrigger value="content">標題</TabsTrigger>}
-							<TabsTrigger value="ai">AI 統整</TabsTrigger>
-							<TabsTrigger value="transcript">逐字稿</TabsTrigger>
-							{block.hasCue && <Badge variant="secondary">Similarity</Badge>}
-						</TabsList>
-						<TabsContent className="text-sm leading-6" value="ai">
-							{isEditing ? (
-								<textarea
-									className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
-									value={draftAiSummary}
-									onChange={event => setDraftAiSummary(event.target.value)}
-								/>
-							) : (
-								block.aiSummary || "-"
-							)}
-						</TabsContent>
-						<TabsContent className="grid gap-2 text-sm leading-6" value="content">
-							{isEditing ? (
-								<div className="grid gap-2">
-									<textarea
-										className={cn(
-											"min-h-20 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
-											titleTooLong && "border-destructive focus:border-destructive"
-										)}
-										value={draftSummary}
-										onChange={event => setDraftSummary(event.target.value)}
-										placeholder="輸入標題（最多10個字）"
-									/>
-									<div className="flex items-center justify-between text-xs">
-										<span className={titleTooLong ? "text-destructive font-semibold" : "text-muted-foreground"}>字數：{titleLength}/10</span>
-										{titleTooLong && <span className="text-destructive font-semibold">⚠️ 超過10個字，請刪減至10字以下</span>}
-									</div>
-								</div>
-							) : (
-								block.summary || "-"
-							)}
-						</TabsContent>
-						<TabsContent className="text-sm leading-6" value="transcript">
-							{isEditing ? (
-								<textarea
-									className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
-									value={draftTranscript}
-									onChange={event => setDraftTranscript(event.target.value)}
-								/>
-							) : (
-								block.transcript || "-"
-							)}
-						</TabsContent>
-					</Tabs>
-					{isEditing && (
-						<div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-							{saveError ? <p className="text-xs text-destructive">{saveError}</p> : <p className="text-xs text-muted-foreground">AI 統整、內容、逐字稿都會一起儲存。</p>}
+				<div className={cn("ml-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
+					{block.hasCue && (
+						<Badge className="w-fit" variant="secondary">
+							Similarity
+						</Badge>
+					)}
+
+					<textarea
+						className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						value={draftAiSummary}
+						onChange={event => setDraftAiSummary(event.target.value)}
+					/>
+
+					{(aiSummaryChanged || (saveError && !isEditingTitle)) && (
+						<div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+							{saveError && !isEditingTitle ? <p className="text-xs text-destructive">{saveError}</p> : <p className="text-xs text-muted-foreground">內容已修改</p>}
 							<div className="flex items-center gap-2">
-								<Button size="sm" variant="ghost" onClick={cancelEditing} disabled={isSaving}>
-									<X className="mr-1 h-4 w-4" />
-									取消
+								<Button aria-label="Cancel AI summary edit" className="h-7 w-7" size="icon" variant="ghost" onClick={cancelAiSummaryEditing} disabled={isSaving}>
+									<X className="h-3.5 w-3.5" />
 								</Button>
-								<Button size="sm" onClick={saveDraft} disabled={!canSave}>
-									<Check className="mr-1 h-4 w-4" />
-									{isSaving ? "儲存中" : "儲存"}
+								<Button aria-label="Save AI summary" className="h-7 w-7" size="icon" onClick={() => void saveDraft()} disabled={!canSaveAiSummary}>
+									<Check className="h-3.5 w-3.5" />
 								</Button>
 							</div>
 						</div>

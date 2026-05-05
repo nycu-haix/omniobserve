@@ -23,7 +23,6 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
-    _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -75,7 +74,7 @@ async def list_idea_blocks(
         stmt = stmt.where(IdeaBlock.session_name == session_name)
     if similarity_id is not None:
         stmt = stmt.where(IdeaBlock.similarity_id == similarity_id)
-    stmt = stmt.order_by(IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
+    stmt = stmt.order_by(IdeaBlock.is_deleted.desc(), IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
@@ -177,10 +176,7 @@ async def update_scoped_idea_block(
 
 async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
     idea_block = await get_idea_block(idea_block_id, db)
-    await _delete_similarity_references(idea_block_id, db)
-    await db.execute(delete(TaskItem).where(TaskItem.idea_block_id == idea_block_id))
-    await db.execute(delete(IdeaBlockToTranscript).where(IdeaBlockToTranscript.idea_blocks_id == idea_block_id))
-    await db.delete(idea_block)
+    idea_block.is_deleted = True
     await db.commit()
 
 
@@ -197,10 +193,7 @@ async def delete_scoped_idea_block(
         user_id=user_id,
         db=db,
     )
-    await _delete_similarity_references(idea_block_id, db)
-    await db.execute(delete(TaskItem).where(TaskItem.idea_block_id == idea_block_id))
-    await db.execute(delete(IdeaBlockToTranscript).where(IdeaBlockToTranscript.idea_blocks_id == idea_block_id))
-    await db.delete(idea_block)
+    idea_block.is_deleted = True
     await db.commit()
 
 
@@ -218,6 +211,19 @@ async def _delete_similarity_references(idea_block_id: int, db: AsyncSession) ->
         .where(IdeaBlock.similarity_id == idea_block_id)
         .values(similarity_id=None)
     )
+
+
+async def trigger_similarity_check(
+    updated_idea_block: IdeaBlock,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> None:
+    """
+    Placeholder hook for similarity re-detection after create/update.
+    """
+    _ = (updated_idea_block, session_name, user_id, db)
 
 
 async def _refresh_task_items_and_detect_similarity(

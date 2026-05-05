@@ -75,6 +75,7 @@ class IdeaBlockResponse(BaseModel):
     transcript: str | None
     embedding_vector: list[float] | None
     similarity_id: int | None
+    is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -86,6 +87,7 @@ class IdeaBlockListResponse(BaseModel):
     transcript_id: int | None
     transcript: str | None
     similarity_id: int | None
+    is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -99,6 +101,7 @@ class IdeaBlockOverviewResponse(BaseModel):
     transcript_id: int | None
     transcript: str | None
     similarity_id: int | None
+    is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)
 

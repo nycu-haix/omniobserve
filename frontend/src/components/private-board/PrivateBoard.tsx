@@ -40,6 +40,7 @@ interface IdeaBlockResponse {
 	transcript_id?: number | null;
 	transcript: string | null;
 	similarity_id: number | null;
+	is_deleted?: boolean;
 }
 
 interface AudioIdeaBlocksUpdateMessage {
@@ -95,10 +96,14 @@ function isAudioIdeaBlocksUpdateMessage(message: object | null): message is Audi
 	return !!message && "type" in message && message.type === "idea_blocks_update";
 }
 
-const fallbackBlock = (): IdeaBlock => ({
-	id: `local-${Date.now()}`,
-	summary: "正在生成...",
-	status: "generating"
+const createDraftIdeaBlock = (): IdeaBlock => ({
+	id: `draft-${Date.now()}`,
+	summary: "新增 idea block",
+	aiSummary: "",
+	transcript: "",
+	expanded: true,
+	isDraft: true,
+	status: "ready"
 });
 
 function getTranscriptUserId(participantId: string): number {
@@ -143,6 +148,7 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		transcriptLineId,
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
+		isDeleted: item.is_deleted ?? false,
 		status: "ready"
 	};
 }
@@ -225,7 +231,7 @@ function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: Transc
 }
 
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): IdeaBlock[] {
-	return nextBlocks.reduce((blocks, nextBlock) => {
+	return sortIdeaBlocks(nextBlocks.reduce((blocks, nextBlock) => {
 		const existingBlock = blocks.find(block => block.id === nextBlock.id);
 		if (!existingBlock) {
 			return [...blocks, nextBlock];
@@ -242,7 +248,19 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 					}
 				: block
 		);
-	}, baseBlocks);
+	}, baseBlocks));
+}
+
+function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
+	return [...blocks].sort((left, right) => {
+		if (!!left.isDeleted !== !!right.isDeleted) {
+			return left.isDeleted ? -1 : 1;
+		}
+		if (!!left.isDraft !== !!right.isDraft) {
+			return left.isDraft ? 1 : -1;
+		}
+		return 0;
+	});
 }
 
 function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBlock[]): TranscriptLineType[] {
@@ -488,20 +506,49 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
 	};
 
-	const saveIdeaBlock = async (id: string, values: { summary: string; aiSummary: string; transcript: string }) => {
+	const saveIdeaBlock = async (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => {
+		const normalizedContent = values.aiSummary.trim();
+		const currentBlock = ideaBlocks.find(block => block.id === id);
+		const isDraft = currentBlock ? !!currentBlock.isDraft : id.startsWith("draft-");
+		const derivedTitle = isDraft ? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea" : values.updateTitle ? values.summary.trim() || currentBlock?.summary || "Idea" : currentBlock?.summary || values.summary.trim() || "Idea";
+
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
-			setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, summary: values.summary, aiSummary: values.aiSummary, transcript: values.transcript } : block)));
+			setIdeaBlocks(prev =>
+				sortIdeaBlocks(
+					prev.map(block =>
+						block.id === id
+							? {
+									...block,
+									summary: block.isDraft || values.updateTitle ? derivedTitle : block.summary,
+									aiSummary: normalizedContent,
+									transcript: values.transcript,
+									isDraft: false
+								}
+							: block
+					)
+				)
+			);
 			return;
 		}
 
-		const response = await fetch(buildIdeaBlockDetailUrl(sessionId, participantId, id), {
-			method: "PATCH",
+		const response = await fetch(isDraft ? buildIdeaBlocksUrl(sessionId, participantId) : buildIdeaBlockDetailUrl(sessionId, participantId, id), {
+			method: isDraft ? "POST" : "PATCH",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				title: values.summary,
-				summary: values.aiSummary,
-				transcript: values.transcript
-			})
+			body: JSON.stringify(
+				isDraft
+					? {
+							title: derivedTitle,
+							summary: normalizedContent
+						}
+					: values.updateTitle
+						? {
+								title: derivedTitle
+							}
+					: {
+							summary: normalizedContent,
+							transcript: values.transcript
+						}
+			)
 		});
 
 		if (!response.ok) {
@@ -509,25 +556,35 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		}
 
 		const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
-		setIdeaBlocks(prev =>
-			prev.map(block =>
+		setIdeaBlocks(prev => {
+			const nextBlocks = prev.map(block =>
 				block.id === id
 					? {
 							...block,
 							...savedBlock,
 							expanded: block.expanded,
 							cueText: block.cueText,
-							hasCue: block.hasCue || savedBlock.hasCue
+							hasCue: block.hasCue || savedBlock.hasCue,
+							isDraft: false
 						}
 					: block
-			)
-		);
+			);
+			return sortIdeaBlocks(nextBlocks);
+		});
 		setTranscriptRefreshKey(current => current + 1);
+		setIdeaBlockRefreshKey(current => current + 1);
 	};
 
 	const deleteIdeaBlock = async (id: string) => {
-		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+		const currentBlock = ideaBlocks.find(block => block.id === id);
+
+		if (currentBlock?.isDraft) {
 			setIdeaBlocks(prev => prev.filter(block => block.id !== id));
+			return;
+		}
+
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			setIdeaBlocks(prev => sortIdeaBlocks(prev.map(block => (block.id === id ? { ...block, expanded: false, isDeleted: true } : block))));
 			return;
 		}
 
@@ -539,32 +596,17 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			throw new Error("Failed to delete idea block");
 		}
 
-		setIdeaBlocks(prev => prev.filter(block => block.id !== id));
+		setIdeaBlocks(prev => sortIdeaBlocks(prev.map(block => (block.id === id ? { ...block, expanded: false, isDeleted: true } : block))));
 	};
 
 	const addBlock = async () => {
-		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
-			const newBlock = fallbackBlock();
-			setIdeaBlocks(prev => [...prev, newBlock]);
-			setActiveTab("ideablock");
-			setHighlightedBlockId(newBlock.id);
-			return;
-		}
-
-		try {
-			const response = await fetch(apiUrl("/api/board/block"), {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ sessionName: sessionId })
-			});
-
-			if (!response.ok) {
-				throw new Error("Failed to create block");
-			}
-		} catch {
-			setIdeaBlocks(prev => [...prev, fallbackBlock()]);
-		}
+		const newBlock = createDraftIdeaBlock();
+		setIdeaBlocks(prev => sortIdeaBlocks([newBlock, ...prev]));
+		setActiveTab("ideablock");
+		setHighlightedBlockId(newBlock.id);
 	};
+
+	const hasDraftIdeaBlock = ideaBlocks.some(block => block.isDraft);
 
 	return (
 		<>
@@ -596,15 +638,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					</div>
 					<div className="flex items-center gap-2">
 						<span className={`hidden h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
-						<Button aria-label="Add idea block" className="hidden" size="icon" onClick={addBlock}>
-							<Plus className="h-4 w-4" />
-						</Button>
 					</div>
 				</header>
 
 				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
 					{activeTab === "ideablock" ? (
-						<div className="grid gap-2">
+						<div className="grid gap-2 pb-20">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
 								<div
@@ -622,6 +661,17 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					)}
 				</ScrollArea>
 			</section>
+
+			{!hasDraftIdeaBlock && (
+				<Button
+					aria-label="Add idea block"
+					className="fixed right-4 bottom-4 z-20 h-11 w-11 rounded-full shadow-lg xl:right-5 xl:bottom-5"
+					size="icon"
+					onClick={addBlock}
+				>
+					<Plus className="h-5 w-5" />
+				</Button>
+			)}
 
 			<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />
 		</>

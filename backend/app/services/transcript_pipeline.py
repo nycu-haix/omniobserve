@@ -318,6 +318,18 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
 
 def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str, Any]]]:
     return {
+        "idea_blocks": [
+            {
+                "id": block.id,
+                "title": block.title,
+                "summary": block.summary,
+                "transcript_id": block.transcript_id,
+                "transcript": block.transcript,
+                "similarity_id": block.similarity_id,
+                "is_deleted": block.is_deleted,
+            }
+            for block in result.idea_blocks
+        ],
         "idea_blocks": serialize_idea_blocks(result.idea_blocks),
         "task_items": [
             {

@@ -1,6 +1,6 @@
 import type { IdeaBlock, SimilarityCueData, TranscriptLine } from "../types";
 
-export const ENABLE_PRIVATE_BOARD_MOCK_DATA = false;
+export const ENABLE_PRIVATE_BOARD_MOCK_DATA = true;
 
 export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
 	{

@@ -10,6 +10,8 @@ export interface IdeaBlock {
 	hasCue?: boolean;
 	cueText?: string;
 	expanded?: boolean;
+	isDeleted?: boolean;
+	isDraft?: boolean;
 	status: IdeaBlockStatus;
 }
 

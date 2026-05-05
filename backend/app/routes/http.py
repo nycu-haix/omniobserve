@@ -58,6 +58,7 @@ def serialize_idea_block(block: Any) -> dict[str, Any]:
         "summary": block.summary,
         "transcript": block.transcript,
         "source_transcript_ids": block.source_transcript_ids,
+        "is_deleted": block.is_deleted,
         "created_at": to_iso_z(block.created_at),
         "updated_at": to_iso_z(block.updated_at),
     }
