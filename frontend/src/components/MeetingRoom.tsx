@@ -50,12 +50,44 @@ const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
 const MIN_PRIVATE_BOARD_WIDTH = 360;
 const MIN_MEETING_COLUMN_WIDTH = 520;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
-const DEFAULT_JITSI_HEIGHT = 390;
-const MIN_JITSI_HEIGHT = 240;
+const DEFAULT_JITSI_HEIGHT = 120;
+const MIN_JITSI_HEIGHT = 96;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const LOST_AT_SEA_TASK_DETAIL =
 	"你和你的團隊被困在南太平洋的一艘橡皮救生筏上，具體位置不詳，周圍看不到陸地。團隊無法確定方向，也沒有足夠能力自行划回岸邊，因此主要策略是留在救生筏上、保存體力並等待救援。請根據物品對生存的重要程度進行排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。在公開討論以及私人想法輸出的時候，明確提及物品名稱並且附上簡短理由。";
+
+const TASK_ITEM_IMAGE_META: Record<string, { title: string; bg: string; fg: string; mark: string }> = {
+	mosquito_net: { title: "Mosquito Net", bg: "#e0f2fe", fg: "#0369a1", mark: "NET" },
+	petrol: { title: "Petrol", bg: "#fee2e2", fg: "#b91c1c", mark: "FUEL" },
+	water_container: { title: "Water Container", bg: "#dbeafe", fg: "#1d4ed8", mark: "H2O" },
+	shaving_mirror: { title: "Shaving Mirror", bg: "#f1f5f9", fg: "#475569", mark: "MIR" },
+	sextant: { title: "Sextant", bg: "#fef3c7", fg: "#b45309", mark: "SEXT" },
+	emergency_rations: { title: "Emergency Rations", bg: "#ffedd5", fg: "#c2410c", mark: "FOOD" },
+	sea_chart: { title: "Sea Chart", bg: "#ccfbf1", fg: "#0f766e", mark: "MAP" },
+	floating_cushion: { title: "Floating Cushion", bg: "#fce7f3", fg: "#be185d", mark: "FLOAT" },
+	rope: { title: "Rope", bg: "#f5f5f4", fg: "#78716c", mark: "ROPE" },
+	chocolate_bars: { title: "Chocolate Bars", bg: "#ede9fe", fg: "#6d28d9", mark: "CHOC" },
+	waterproof_sheet: { title: "Waterproof Sheet", bg: "#dcfce7", fg: "#15803d", mark: "SHEET" },
+	fishing_rod: { title: "Fishing Rod", bg: "#e0f2fe", fg: "#075985", mark: "ROD" },
+	shark_repellent: { title: "Shark Repellent", bg: "#e5e7eb", fg: "#374151", mark: "SPRAY" },
+	rum: { title: "Rum", bg: "#fef9c3", fg: "#a16207", mark: "RUM" },
+	vhf_radio: { title: "VHF Radio", bg: "#d1fae5", fg: "#047857", mark: "VHF" }
+};
+
+function taskItemImageSrc(itemId: string): string {
+	return `/task-item-images/${itemId}.jpg`;
+}
+
+function taskItemFallbackImageSrc(itemId: string): string {
+	const meta = TASK_ITEM_IMAGE_META[itemId] ?? { title: itemId, bg: "#f8fafc", fg: "#334155", mark: "ITEM" };
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220"><rect width="320" height="220" rx="24" fill="${meta.bg}"/><circle cx="72" cy="76" r="36" fill="#fff" opacity=".72"/><rect x="112" y="48" width="136" height="96" rx="18" fill="#fff" opacity=".72"/><path d="M68 156 C112 126 156 188 204 146 C226 126 250 128 276 150" fill="none" stroke="${meta.fg}" stroke-width="10" stroke-linecap="round"/><text x="160" y="113" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="${meta.fg}">${meta.mark}</text><text x="160" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="600" fill="${meta.fg}">${meta.title}</text></svg>`;
+	return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function useTaskItemFallbackImage(event: React.SyntheticEvent<HTMLImageElement>, itemId: string) {
+	event.currentTarget.src = taskItemFallbackImageSrc(itemId);
+}
 
 function clampPrivateBoardWidth(width: number) {
 	const availableWidth = window.innerWidth - 32 - 16;
@@ -116,7 +148,7 @@ function isBoardStateMessage(message: object | null): message is {
 	);
 }
 
-function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
+function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPreview: (item: LostAtSeaItem) => void }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
@@ -132,7 +164,15 @@ function SortableLostAtSeaItem({ item }: { item: LostAtSeaItem }) {
 			}}
 			{...attributes}
 			{...listeners}
+			onDoubleClick={() => onPreview(item)}
 		>
+			<img
+				className="h-9 w-12 shrink-0 rounded-md border object-cover"
+				src={taskItemImageSrc(item.id)}
+				alt={TASK_ITEM_IMAGE_META[item.id]?.title ?? item.label}
+				draggable={false}
+				onError={event => useTaskItemFallbackImage(event, item.id)}
+			/>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -147,7 +187,8 @@ function LostAtSeaRankingPanel({
 	sensors,
 	onDragStart,
 	onDragCancel,
-	onDragEnd
+	onDragEnd,
+	onPreviewItem
 }: {
 	title: string;
 	status: string;
@@ -156,6 +197,7 @@ function LostAtSeaRankingPanel({
 	onDragStart: () => void;
 	onDragCancel: () => void;
 	onDragEnd: (event: DragEndEvent) => void;
+	onPreviewItem: (item: LostAtSeaItem) => void;
 }) {
 	return (
 		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
@@ -167,7 +209,7 @@ function LostAtSeaRankingPanel({
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} />
+							<SortableLostAtSeaItem key={item.id} item={item} onPreview={onPreviewItem} />
 						))}
 					</div>
 				</SortableContext>
@@ -184,13 +226,14 @@ export default function MeetingRoom() {
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
+	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
 	});
 	const [jitsiHeight, setJitsiHeight] = useState(() => {
 		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
-		return clampJitsiHeight(Number.isFinite(storedHeight) ? storedHeight : DEFAULT_JITSI_HEIGHT);
+		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
 	});
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
@@ -379,7 +422,7 @@ export default function MeetingRoom() {
 		const startHeight = jitsiHeight;
 
 		const handlePointerMove = (moveEvent: PointerEvent) => {
-			setJitsiHeight(clampJitsiHeight(startHeight + moveEvent.clientY - startY));
+			setJitsiHeight(clampJitsiHeight(startHeight - (moveEvent.clientY - startY)));
 		};
 
 		const handlePointerUp = () => {
@@ -408,7 +451,7 @@ export default function MeetingRoom() {
 		}
 
 		event.preventDefault();
-		const direction = event.key === "ArrowDown" ? 1 : -1;
+		const direction = event.key === "ArrowUp" ? 1 : -1;
 		setJitsiHeight(current => clampJitsiHeight(current + direction * 24));
 	};
 
@@ -473,24 +516,7 @@ export default function MeetingRoom() {
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[var(--jitsi-height)_10px_minmax(0,1fr)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
-				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
-				</div>
-				<div className="grid place-items-center">
-					<button
-						type="button"
-						className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						aria-label="調整 Jitsi 視訊高度"
-						aria-orientation="horizontal"
-						aria-valuemin={MIN_JITSI_HEIGHT}
-						aria-valuenow={jitsiHeight}
-						role="separator"
-						onPointerDown={handleJitsiResizeStart}
-						onKeyDown={handleJitsiResizeKeyDown}
-					/>
-				</div>
-
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_10px_var(--jitsi-height)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
 						<div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -516,6 +542,7 @@ export default function MeetingRoom() {
 							}}
 							onDragCancel={() => handleRankingDragCancel("public")}
 							onDragEnd={event => handleRankingDragEnd("public", event)}
+							onPreviewItem={setPreviewItem}
 						/>
 						<LostAtSeaRankingPanel
 							title="Private 排序"
@@ -527,9 +554,61 @@ export default function MeetingRoom() {
 							}}
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
+							onPreviewItem={setPreviewItem}
 						/>
 					</div>
 				</section>
+
+				<div className="grid place-items-center">
+					<button
+						type="button"
+						className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						aria-label="調整 Jitsi 區塊高度"
+						aria-orientation="horizontal"
+						aria-valuemin={MIN_JITSI_HEIGHT}
+						aria-valuenow={jitsiHeight}
+						role="separator"
+						onPointerDown={handleJitsiResizeStart}
+						onKeyDown={handleJitsiResizeKeyDown}
+					/>
+				</div>
+
+				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
+					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
+					<div className="hidden">
+						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						{micPermission !== "granted" && micPermission !== "unknown" && (
+							<button onClick={() => void requestMicPermission()} className="text-left text-primary transition-colors hover:text-primary/80 hover:underline">
+								{micPermission === "denied" ? "麥克風已拒絕" : "允許麥克風權限"}
+							</button>
+						)}
+					</div>
+					<div className="hidden">
+						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
+							<Button
+								variant={micMode === "public" ? "destructive" : "outline"}
+								className={cn(micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
+								onClick={() => void handleMic("public")}
+							>
+								<Mic className="h-4 w-4" />
+								公開麥克風
+							</Button>
+							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+								<Radio className="h-4 w-4" />
+								<span className="text-sm">悄悄話</span>
+							</Button>
+							<Button className="bg-background/90" variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
+								<MicOff className="h-4 w-4" />
+								關閉
+							</Button>
+						</div>
+					</div>
+					{hasAudioConnectionError && (
+						<AlertCircle className="hidden" aria-label="音訊後端連線失敗" role="img">
+							<title>{audioError}</title>
+						</AlertCircle>
+					)}
+				</div>
 
 				<div className="relative flex items-center justify-center pt-2">
 					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
@@ -541,13 +620,17 @@ export default function MeetingRoom() {
 						)}
 					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2">
-						<Button variant={micMode === "public" ? "default" : "outline"} onClick={() => void handleMic("public")}>
+						<Button
+							variant={micMode === "public" ? "destructive" : "outline"}
+							className={cn(micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
+							onClick={() => void handleMic("public")}
+						>
 							<Mic className="h-4 w-4" />
-							公開麥克風
+							公開發言
 						</Button>
 						<Button variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 							<Radio className="h-4 w-4" />
-							私人錄音
+							<span className="text-sm">悄悄話</span>
 						</Button>
 						<Button variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
 							<MicOff className="h-4 w-4" />
@@ -561,6 +644,28 @@ export default function MeetingRoom() {
 					)}
 				</div>
 			</section>
+
+			{previewItem && (
+				<div className="fixed inset-0 z-40 grid place-items-center bg-background/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={() => setPreviewItem(null)}>
+					<div className="grid w-full max-w-md gap-3 rounded-lg border bg-card p-3 shadow-lg" onClick={event => event.stopPropagation()}>
+						<img
+							className="aspect-[16/11] w-full rounded-md border object-cover"
+							src={taskItemImageSrc(previewItem.id)}
+							alt={TASK_ITEM_IMAGE_META[previewItem.id]?.title ?? previewItem.label}
+							onError={event => useTaskItemFallbackImage(event, previewItem.id)}
+						/>
+						<div className="flex items-center justify-between gap-3">
+							<div className="min-w-0">
+								<div className="truncate text-sm font-semibold">{previewItem.label}</div>
+								<div className="text-xs text-muted-foreground">{TASK_ITEM_IMAGE_META[previewItem.id]?.title ?? previewItem.id}</div>
+							</div>
+							<Button type="button" variant="outline" onClick={() => setPreviewItem(null)}>
+								關閉
+							</Button>
+						</div>
+					</div>
+				</div>
+			)}
 
 			<aside className="relative min-h-0">
 				<button

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
+from ..models import Visibility
 from ..schemas import TranscriptCreate, TranscriptCreateRequest, TranscriptResponse
 from ..services.transcript_service import (
     create_transcript,
@@ -31,9 +32,10 @@ async def read_all_transcripts(
 )
 async def read_all_session_transcripts(
     session_name: str,
+    visibility: Visibility | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[TranscriptResponse]:
-    return await list_transcripts(db, session_name=session_name)
+    return await list_transcripts_by_session(session_name, None, db, visibility=visibility)
 
 
 @router.post(
@@ -78,6 +80,7 @@ async def read_transcript(
 async def read_session_transcripts(
     session_name: str,
     user_id: int,
+    visibility: Visibility | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[TranscriptResponse]:
-    return await list_transcripts_by_session(session_name, user_id, db)
+    return await list_transcripts_by_session(session_name, user_id, db, visibility=visibility)

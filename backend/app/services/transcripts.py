@@ -21,6 +21,7 @@ async def save_ws_transcript_segment(
     transcript = Transcript(
         user_id=_numeric_id(participant_id),
         session_name=session_name,
+        visibility=visibility.value,
         transcript=transcript_text,
     )
 

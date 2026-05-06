@@ -1,4 +1,3 @@
-import { Plus } from "lucide-react";
 import type { UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
@@ -29,6 +28,7 @@ interface TranscriptResponse {
 	id: number;
 	user_id: number;
 	session_name: string;
+	visibility?: string;
 	time_stamp: string;
 	transcript: string;
 }
@@ -52,6 +52,9 @@ type AudioTranscriptMessage =
 	| {
 			type: "transcript_update";
 			transcript_segment_id?: string | number | null;
+			participant_id?: string | number | null;
+			userId?: string | number | null;
+			user_id?: string | number | null;
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
@@ -63,6 +66,9 @@ type AudioTranscriptMessage =
 	| {
 			type: "transcript";
 			segment_id?: string | number | null;
+			participant_id?: string | number | null;
+			userId?: string | number | null;
+			user_id?: string | number | null;
 			mic_mode?: string | null;
 			scope?: string | null;
 			text?: string;
@@ -111,10 +117,9 @@ function getTranscriptUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildTranscriptUrl(sessionId: string, participantId: string): string {
+function buildTranscriptUrl(sessionId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
-	const userId = getTranscriptUserId(participantId);
-	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
+	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts?visibility=public`);
 }
 
 function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
@@ -127,11 +132,22 @@ function buildIdeaBlockDetailUrl(sessionId: string, participantId: string, ideaB
 	return `${buildIdeaBlocksUrl(sessionId, participantId)}/${encodeURIComponent(ideaBlockId)}`;
 }
 
-function transcriptResponseToLine(item: TranscriptResponse): TranscriptLineType {
+function isOwnTranscriptUser(userId: string | number | null | undefined, participantId: string): boolean {
+	if (userId == null) {
+		return false;
+	}
+
+	const userIdText = String(userId);
+	return userIdText === participantId || Number(userIdText) === getTranscriptUserId(participantId);
+}
+
+function transcriptResponseToLine(item: TranscriptResponse, participantId: string): TranscriptLineType {
 	return {
 		id: String(item.id),
-		source: "private",
+		source: "public",
 		origin: "history",
+		userId: String(item.user_id),
+		isOwn: isOwnTranscriptUser(item.user_id, participantId),
 		time: formatTranscriptTime(item.time_stamp),
 		text: item.transcript
 	};
@@ -180,21 +196,20 @@ function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): Tran
 
 function audioTranscriptMessageToLine(message: AudioTranscriptMessage): TranscriptLineType {
 	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
+	const userId = message.participant_id ?? message.userId ?? message.user_id;
+	const source = transcriptSourceFromAudioMessage(message);
 	return {
 		id: segmentId == null ? `audio-${Date.now()}` : String(segmentId),
-		source: transcriptSourceFromAudioMessage(message),
+		source,
 		origin: "live",
+		userId: userId == null ? undefined : String(userId),
 		time: formatTranscriptTime(message.timestamp_ms),
 		text: message.text?.trim() ?? ""
 	};
 }
 
-function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage): boolean {
-	if (message.type === "transcript_update") {
-		return true;
-	}
-
-	return transcriptSourceFromAudioMessage(message) === "public" || message.persisted === true;
+function shouldAppendAudioTranscriptToTranscriptTab(_message: AudioTranscriptMessage): boolean {
+	return false;
 }
 
 function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
@@ -322,6 +337,9 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+	const [manualIdeaText, setManualIdeaText] = useState("");
+	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
+	const [isSavingManualIdea, setIsSavingManualIdea] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -341,13 +359,13 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		async function loadTranscripts() {
 			try {
-				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
+				const transcriptUrl = buildTranscriptUrl(sessionId);
 				const response = await fetch(transcriptUrl, { signal: controller.signal });
 				if (!response.ok) {
 					throw new Error("Failed to load transcripts");
 				}
 
-				const transcriptLinesFromDb = ((await response.json()) as TranscriptResponse[]).map(transcriptResponseToLine);
+				const transcriptLinesFromDb = ((await response.json()) as TranscriptResponse[]).map(item => transcriptResponseToLine(item, participantId));
 				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -414,7 +432,13 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
-				setTranscriptLines(prev => appendTranscriptLine(prev, { ...lastMessage.payload, origin: "live" }));
+				setTranscriptLines(prev =>
+					appendTranscriptLine(prev, {
+						...lastMessage.payload,
+						origin: "live",
+						isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId)
+					})
+				);
 			}
 
 			if (lastMessage.type === "similarity_cue") {
@@ -599,14 +623,59 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		setIdeaBlocks(prev => sortIdeaBlocks(prev.map(block => (block.id === id ? { ...block, expanded: false, isDeleted: true } : block))));
 	};
 
-	const addBlock = async () => {
-		const newBlock = createDraftIdeaBlock();
-		setIdeaBlocks(prev => sortIdeaBlocks([newBlock, ...prev]));
-		setActiveTab("ideablock");
-		setHighlightedBlockId(newBlock.id);
-	};
+	const addManualIdeaBlock = async () => {
+		const normalizedContent = manualIdeaText.trim();
+		if (!normalizedContent || isSavingManualIdea) {
+			return;
+		}
 
-	const hasDraftIdeaBlock = ideaBlocks.some(block => block.isDraft);
+		const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
+		const localBlockId = `manual-${Date.now()}`;
+
+		setIsSavingManualIdea(true);
+		setManualIdeaError(null);
+		try {
+			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+				const newBlock: IdeaBlock = {
+					...createDraftIdeaBlock(),
+					id: localBlockId,
+					summary: derivedTitle,
+					aiSummary: normalizedContent,
+					transcript: "",
+					expanded: false,
+					isDraft: false
+				};
+				setIdeaBlocks(prev => sortIdeaBlocks([newBlock, ...prev]));
+				setHighlightedBlockId(newBlock.id);
+				setManualIdeaText("");
+				return;
+			}
+
+			const response = await fetch(buildIdeaBlocksUrl(sessionId, participantId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					title: derivedTitle,
+					summary: normalizedContent
+				})
+			});
+
+			if (!response.ok) {
+				throw new Error("Failed to save idea block");
+			}
+
+			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
+			setIdeaBlocks(prev => sortIdeaBlocks([savedBlock, ...prev.filter(block => block.id !== savedBlock.id)]));
+			setHighlightedBlockId(savedBlock.id);
+			setTranscriptRefreshKey(current => current + 1);
+			setIdeaBlockRefreshKey(current => current + 1);
+			setManualIdeaText("");
+		} catch (error) {
+			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");
+		} finally {
+			setIsSavingManualIdea(false);
+		}
+	};
 
 	return (
 		<>
@@ -643,7 +712,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
 					{activeTab === "ideablock" ? (
-						<div className="grid gap-2 pb-20">
+						<div className="grid gap-2 pb-3">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
 								<div
@@ -660,18 +729,37 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 						renderTranscriptLines(transcriptLines, "尚無逐字稿", jumpToBlock)
 					)}
 				</ScrollArea>
-			</section>
 
-			{!hasDraftIdeaBlock && (
-				<Button
-					aria-label="Add idea block"
-					className="fixed right-4 bottom-4 z-20 h-11 w-11 rounded-full shadow-lg xl:right-5 xl:bottom-5"
-					size="icon"
-					onClick={addBlock}
-				>
-					<Plus className="h-5 w-5" />
-				</Button>
-			)}
+				{activeTab === "ideablock" && (
+					<footer className="border-t bg-card p-3">
+						<div className="grid gap-2">
+							<div className="flex items-end gap-2">
+								<textarea
+									aria-label="Manual idea block input"
+									className="max-h-28 min-h-11 flex-1 resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+									placeholder="手動輸入 idea block"
+									value={manualIdeaText}
+									onChange={event => {
+										setManualIdeaText(event.target.value);
+										setManualIdeaError(null);
+									}}
+									onKeyDown={event => {
+										if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+											event.preventDefault();
+											void addManualIdeaBlock();
+										}
+									}}
+									disabled={isSavingManualIdea}
+								/>
+								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim() || isSavingManualIdea}>
+									{isSavingManualIdea ? "儲存中" : "新增"}
+								</Button>
+							</div>
+							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
+						</div>
+					</footer>
+				)}
+			</section>
 
 			<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />
 		</>

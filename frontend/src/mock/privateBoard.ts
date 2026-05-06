@@ -45,6 +45,9 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 		id: "t1",
 		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
 		source: "public",
+		userId: "1",
+		displayName: "Otter",
+		isOwn: true,
 		time: "10:30",
 		linkedBlockId: "b1"
 	},
@@ -52,12 +55,16 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 		id: "t2",
 		text: "裝水容器一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
 		source: "public",
+		userId: "2",
+		displayName: "Fox",
 		linkedBlockId: "b2"
 	},
 	{
 		id: "t3",
 		text: "如果我們知道救援船大概在哪，VHF 無線電可能比海圖重要；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
 		source: "public",
+		userId: "3",
+		displayName: "Rabbit",
 		time: "10:32",
 		linkedBlockId: "b3"
 	},
@@ -65,29 +72,73 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 		id: "t4",
 		text: "我剛剛想到水的消耗量可能跟路程時間有關，這段可以請 AI 幫我整理成新的想法。",
 		source: "private",
+		userId: "1",
+		displayName: "Otter",
 		linkedBlockId: "b4"
 	},
 	{
 		id: "t5",
 		text: "食物雖然重要，但短時間求生裡可能不是第一優先，應該排在淡水和求救工具後面。",
-		source: "public"
+		source: "public",
+		userId: "4",
+		displayName: "Penguin",
+		time: "10:34"
 	},
 	{
 		id: "t6",
 		text: "個人想法：我認為釣魚竿在這個情境下比巧克力棒更重要，因為可以捕魚補充食物。",
 		source: "private",
+		userId: "1",
+		displayName: "Otter",
 		time: "10:35"
 	},
 	{
 		id: "t7",
 		text: "大家覺得六分儀和海圖哪個更關鍵？",
-		source: "public"
+		source: "public",
+		userId: "2",
+		displayName: "Fox",
+		time: "10:36"
 	},
 	{
 		id: "t8",
 		text: "私人筆記：驅鯊劑可能在某些海域很重要，但如果沒有鯊魚威脅就不需要。",
 		source: "private",
+		userId: "1",
+		displayName: "Otter",
 		time: "10:37"
+	},
+	{
+		id: "t9",
+		text: "我同意先把求救工具放前面，鏡子白天可用、VHF 則看距離和電力，兩個可能都要保留在高順位。",
+		source: "public",
+		userId: "3",
+		displayName: "Rabbit",
+		time: "10:38"
+	},
+	{
+		id: "t10",
+		text: "私人筆記：如果之後要回應，我想補充鏡子不需要電力這點。",
+		source: "private",
+		userId: "3",
+		displayName: "Rabbit",
+		time: "10:39"
+	},
+	{
+		id: "t11",
+		text: "我的想法是先排淡水，再排可被救援隊看到或聽到的工具，最後才是導航和長期食物。",
+		source: "public",
+		userId: "2",
+		displayName: "Fox",
+		time: "10:40"
+	},
+	{
+		id: "t12",
+		text: "私人筆記：等等可以問大家是否把任務假設成原地等待救援。",
+		source: "private",
+		userId: "2",
+		displayName: "Fox",
+		time: "10:41"
 	}
 ];
 

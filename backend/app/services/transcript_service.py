@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Transcript
+from ..models import Transcript, Visibility
 from ..schemas import TranscriptCreate
 
 
@@ -45,10 +45,13 @@ async def list_transcripts_by_session(
     session_name: str,
     user_id: int | None,
     db: AsyncSession,
+    visibility: Visibility | None = None,
 ) -> list[Transcript]:
     stmt = select(Transcript).where(Transcript.session_name == session_name)
     if user_id is not None:
         stmt = stmt.where(Transcript.user_id == user_id)
+    if visibility is not None:
+        stmt = stmt.where(Transcript.visibility == visibility.value)
     stmt = stmt.order_by(Transcript.time_stamp.asc(), Transcript.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -59,12 +62,15 @@ async def list_transcripts(
     *,
     session_name: str | None = None,
     user_id: int | None = None,
+    visibility: Visibility | None = None,
 ) -> list[Transcript]:
     stmt = select(Transcript)
     if session_name is not None:
         stmt = stmt.where(Transcript.session_name == session_name)
     if user_id is not None:
         stmt = stmt.where(Transcript.user_id == user_id)
+    if visibility is not None:
+        stmt = stmt.where(Transcript.visibility == visibility.value)
     stmt = stmt.order_by(Transcript.session_name.asc(), Transcript.user_id.asc(), Transcript.time_stamp.asc(), Transcript.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())

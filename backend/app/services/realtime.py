@@ -165,6 +165,28 @@ async def broadcast_admin_transcript(
     )
 
 
+async def broadcast_public_transcript_line(
+    session_id: str,
+    *,
+    participant_id: str,
+    text: str,
+    transcript_segment_id: str | int | None = None,
+) -> None:
+    await board_manager.broadcast(
+        session_id,
+        {
+            "type": "new_transcript_line",
+            "payload": {
+                "id": str(transcript_segment_id) if transcript_segment_id is not None else f"public-{participant_id}-{_now_ms()}",
+                "source": "public",
+                "origin": "live",
+                "userId": participant_id,
+                "text": text,
+            },
+        },
+    )
+
+
 def _normalize_int(value: Any, default: int) -> int:
     try:
         parsed = int(value)
@@ -602,6 +624,17 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     state.mic_mode,
                     len(transcript_text),
                 )
+                now = utc_now()
+                saved_segment = await save_ws_transcript_segment(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    visibility=Visibility.PUBLIC,
+                    transcript_text=transcript_text,
+                    started_at=now,
+                    ended_at=now,
+                )
+                segment_id = saved_segment.segment_id if saved_segment else None
                 await audio_manager.send_to(
                     session_id,
                     participant_id,
@@ -610,9 +643,9 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         "participant_id": participant_id,
                         "mic_mode": state.mic_mode,
                         "text": transcript_text,
-                        "segment_id": None,
+                        "segment_id": segment_id,
                         "timestamp_ms": _now_ms(),
-                        "persisted": False,
+                        "persisted": saved_segment is not None,
                     },
                 )
                 await broadcast_admin_transcript(
@@ -621,7 +654,14 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     scope=state.mic_mode,
                     text=transcript_text,
                     is_final=False,
-                    persisted=False,
+                    persisted=saved_segment is not None,
+                    transcript_segment_id=segment_id,
+                )
+                await broadcast_public_transcript_line(
+                    session_id,
+                    participant_id=participant_id,
+                    text=transcript_text,
+                    transcript_segment_id=segment_id,
                 )
                 return
             now = utc_now()

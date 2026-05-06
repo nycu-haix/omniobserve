@@ -33,7 +33,7 @@ function parseJitsiDomain(meetingDomain?: string): string | null {
 
 function renderJitsiError(title: string, message: string) {
 	return (
-		<div className="grid h-full min-h-[320px] place-items-center text-muted-foreground">
+		<div className="grid h-full min-h-24 place-items-center text-muted-foreground">
 			<div className="text-center">
 				<div className="text-lg font-semibold text-foreground">{title}</div>
 				<div className="text-sm">{message}</div>
@@ -72,7 +72,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 	}
 
 	return (
-		<div className="relative h-full min-h-[320px]">
+		<div className="relative h-full min-h-24">
 			{!isReady && (
 				<div className="absolute inset-0 z-10 grid place-items-center bg-muted text-muted-foreground">
 					<Loader2 className="h-6 w-6 animate-spin" />

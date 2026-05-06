@@ -17,6 +17,7 @@ class TranscriptResponse(BaseModel):
     id: int
     user_id: int
     session_name: str
+    visibility: str = "private"
     time_stamp: datetime
     transcript: str
 

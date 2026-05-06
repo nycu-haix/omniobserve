@@ -21,6 +21,9 @@ export interface TranscriptLine {
 	time?: string;
 	source?: "public" | "private";
 	origin?: "history" | "live";
+	userId?: string;
+	displayName?: string;
+	isOwn?: boolean;
 	linkedBlockId?: string;
 }
 
