@@ -29,8 +29,8 @@ export function useWebSocket(
 			}
 
 			const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-			const baseUrl = import.meta.env.VITE_WS_BASE_URL as string | undefined;
-			const wsBaseUrl = baseUrl || `${protocol}://${window.location.host}`;
+			const baseUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_AUDIO_WS_BASE_URL) as string | undefined;
+			const wsBaseUrl = (baseUrl || `${protocol}://${window.location.host}`).replace(/\/+$/, "");
 			const wsUrl = `${wsBaseUrl}/ws/sessions/${encodeURIComponent(sessionId)}/board?participant_id=${encodeURIComponent(participantId)}`;
 			console.info("[board-ws] connecting", { sessionId, participantId, wsUrl });
 			const socket = new WebSocket(wsUrl);
