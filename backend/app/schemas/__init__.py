@@ -25,6 +25,7 @@ from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTr
 from .similarity import (
     SimilarityCreate,
     SimilarityResponse,
+    SimilarityUpdate,
 )
 from .stream import StreamContext, StreamTranscript
 from .task_item import TaskItemCreate, TaskItemResponse
@@ -54,6 +55,7 @@ __all__ = [
     "IdeaBlockUpdateResponse",
     "SimilarityCreate",
     "SimilarityResponse",
+    "SimilarityUpdate",
     "StreamContext",
     "StreamTranscript",
     "TaskItemCreate",

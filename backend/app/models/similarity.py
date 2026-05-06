@@ -1,7 +1,11 @@
 from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
 
 from .base import Base
+
+if TYPE_CHECKING:
+    from .idea_block import IdeaBlock
 
 
 class Similarity(Base):
@@ -24,3 +28,10 @@ class Similarity(Base):
         index=True,
     )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    idea_block_1: Mapped["IdeaBlock"] = relationship(
+        "IdeaBlock", foreign_keys=[idea_block_id_1]
+    )
+    idea_block_2: Mapped["IdeaBlock"] = relationship(
+        "IdeaBlock", foreign_keys=[idea_block_id_2]
+    )
