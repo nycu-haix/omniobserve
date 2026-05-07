@@ -120,10 +120,15 @@ function getTranscriptUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildTranscriptUrl(sessionId: string, participantId: string): string {
+function buildPrivateTranscriptUrl(sessionId: string, participantId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
 	const userId = getTranscriptUserId(participantId);
 	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts?visibility=private`);
+}
+
+function buildPublicTranscriptUrl(sessionId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts?visibility=public`);
 }
 
 function buildUserTranscriptUrl(sessionId: string, participantId: string): string {
@@ -376,13 +381,16 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		async function loadTranscripts() {
 			try {
-				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
-				const response = await fetch(transcriptUrl, { signal: controller.signal });
-				if (!response.ok) {
+				const [publicResponse, privateResponse] = await Promise.all([
+					fetch(buildPublicTranscriptUrl(sessionId), { signal: controller.signal }),
+					fetch(buildPrivateTranscriptUrl(sessionId, participantId), { signal: controller.signal })
+				]);
+				if (!publicResponse.ok || !privateResponse.ok) {
 					throw new Error("Failed to load transcripts");
 				}
 
-				const transcriptLinesFromDb = ((await response.json()) as TranscriptResponse[]).map(item => transcriptResponseToLine(item, participantId));
+				const [publicTranscripts, privateTranscripts] = (await Promise.all([publicResponse.json(), privateResponse.json()])) as [TranscriptResponse[], TranscriptResponse[]];
+				const transcriptLinesFromDb = [...publicTranscripts, ...privateTranscripts].map(item => transcriptResponseToLine(item, participantId));
 				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -726,6 +734,15 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		}
 	};
 
+	const privateMicButton = (
+		<div className="flex justify-center">
+			<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
+				<Radio className="h-4 w-4" />
+				<span className="text-sm">悄悄話</span>
+			</Button>
+		</div>
+	);
+
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
@@ -751,7 +768,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 							variant={activeTab === "ideablock" ? "default" : "ghost"}
 							onClick={() => setActiveTab("ideablock")}
 						>
-							Idea Block
+							Idea Blocks
 						</Button>
 					</div>
 					<div className="flex items-center gap-2">
@@ -814,6 +831,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 						</div>
 					</footer>
 				)}
+				{activeTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
 			</section>
 
 			<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />
