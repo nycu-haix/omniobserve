@@ -1,9 +1,10 @@
 import type { UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Radio } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, MicMode, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
@@ -16,6 +17,8 @@ interface PrivateBoardProps {
 	lastMessage: object | null;
 	lastAudioMessage: object | null;
 	isConnected: boolean;
+	micMode: MicMode;
+	onMicModeChange: (mode: MicMode) => void | Promise<void>;
 }
 
 type BoardMessage =
@@ -117,9 +120,16 @@ function getTranscriptUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildTranscriptUrl(sessionId: string): string {
+function buildTranscriptUrl(sessionId: string, participantId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
-	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts?visibility=public`);
+	const userId = getTranscriptUserId(participantId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts?visibility=private`);
+}
+
+function buildUserTranscriptUrl(sessionId: string, participantId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	const userId = getTranscriptUserId(participantId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
 }
 
 function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
@@ -142,9 +152,10 @@ function isOwnTranscriptUser(userId: string | number | null | undefined, partici
 }
 
 function transcriptResponseToLine(item: TranscriptResponse, participantId: string): TranscriptLineType {
+	const source = item.visibility === "public" || item.visibility === "private" ? item.visibility : "private";
 	return {
 		id: String(item.id),
-		source: "public",
+		source,
 		origin: "history",
 		userId: String(item.user_id),
 		isOwn: isOwnTranscriptUser(item.user_id, participantId),
@@ -208,8 +219,14 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 	};
 }
 
-function shouldAppendAudioTranscriptToTranscriptTab(_message: AudioTranscriptMessage): boolean {
-	return false;
+function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): boolean {
+	if (message.persisted === false) {
+		return false;
+	}
+	if (line.source !== "private") {
+		return false;
+	}
+	return line.userId == null || isOwnTranscriptUser(line.userId, participantId);
 }
 
 function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
@@ -330,7 +347,7 @@ function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, o
 	);
 }
 
-export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioMessage, isConnected }: PrivateBoardProps) {
+export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioMessage, isConnected, micMode, onMicModeChange }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
@@ -359,7 +376,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		async function loadTranscripts() {
 			try {
-				const transcriptUrl = buildTranscriptUrl(sessionId);
+				const transcriptUrl = buildTranscriptUrl(sessionId, participantId);
 				const response = await fetch(transcriptUrl, { signal: controller.signal });
 				if (!response.ok) {
 					throw new Error("Failed to load transcripts");
@@ -448,7 +465,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastMessage]);
+	}, [lastMessage, participantId]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -461,7 +478,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
-			if (shouldAppendAudioTranscriptToTranscriptTab(lastAudioMessage)) {
+			if (shouldAppendAudioTranscriptToTranscriptTab(lastAudioMessage, transcriptLine, participantId)) {
 				const signature = audioTranscriptDisplaySignature(lastAudioMessage, transcriptLine);
 				const displayed = lastDisplayedAudioTranscriptRef.current;
 				const now = Date.now();
@@ -469,12 +486,17 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					return;
 				}
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
-				setTranscriptLines(prev => appendTranscriptLine(prev, transcriptLine));
+				setTranscriptLines(prev =>
+					appendTranscriptLine(prev, {
+						...transcriptLine,
+						isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId)
+					})
+				);
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage]);
+	}, [lastAudioMessage, participantId]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
@@ -646,17 +668,44 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					isDraft: false
 				};
 				setIdeaBlocks(prev => sortIdeaBlocks([newBlock, ...prev]));
+				setTranscriptLines(prev =>
+					appendTranscriptLine(prev, {
+						id: `manual-transcript-${Date.now()}`,
+						source: "private",
+						origin: "live",
+						userId: participantId,
+						isOwn: true,
+						time: formatTranscriptTime(Date.now()),
+						text: normalizedContent,
+						linkedBlockId: newBlock.id
+					})
+				);
 				setHighlightedBlockId(newBlock.id);
 				setManualIdeaText("");
 				return;
 			}
+
+			const transcriptResponse = await fetch(buildUserTranscriptUrl(sessionId, participantId), {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					transcript: normalizedContent
+				})
+			});
+
+			if (!transcriptResponse.ok) {
+				throw new Error("Failed to save transcript");
+			}
+
+			const savedTranscript = (await transcriptResponse.json()) as TranscriptResponse;
 
 			const response = await fetch(buildIdeaBlocksUrl(sessionId, participantId), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					title: derivedTitle,
-					summary: normalizedContent
+					summary: normalizedContent,
+					transcript_id: savedTranscript.id
 				})
 			});
 
@@ -753,6 +802,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 								/>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim() || isSavingManualIdea}>
 									{isSavingManualIdea ? "儲存中" : "新增"}
+								</Button>
+							</div>
+							<div className="flex justify-center">
+								<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
+									<Radio className="h-4 w-4" />
+									<span className="text-sm">悄悄話</span>
 								</Button>
 							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}

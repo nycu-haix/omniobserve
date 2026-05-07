@@ -85,7 +85,7 @@ function taskItemFallbackImageSrc(itemId: string): string {
 	return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function useTaskItemFallbackImage(event: React.SyntheticEvent<HTMLImageElement>, itemId: string) {
+function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>, itemId: string) {
 	event.currentTarget.src = taskItemFallbackImageSrc(itemId);
 }
 
@@ -171,7 +171,7 @@ function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPre
 				src={taskItemImageSrc(item.id)}
 				alt={TASK_ITEM_IMAGE_META[item.id]?.title ?? item.label}
 				draggable={false}
-				onError={event => useTaskItemFallbackImage(event, item.id)}
+				onError={event => handleTaskItemImageError(event, item.id)}
 			/>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
@@ -628,7 +628,7 @@ export default function MeetingRoom() {
 							<Mic className="h-4 w-4" />
 							公開發言
 						</Button>
-						<Button variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button className="hidden" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
@@ -652,7 +652,7 @@ export default function MeetingRoom() {
 							className="aspect-[16/11] w-full rounded-md border object-cover"
 							src={taskItemImageSrc(previewItem.id)}
 							alt={TASK_ITEM_IMAGE_META[previewItem.id]?.title ?? previewItem.label}
-							onError={event => useTaskItemFallbackImage(event, previewItem.id)}
+							onError={event => handleTaskItemImageError(event, previewItem.id)}
 						/>
 						<div className="flex items-center justify-between gap-3">
 							<div className="min-w-0">
@@ -679,7 +679,15 @@ export default function MeetingRoom() {
 					onPointerDown={handlePrivateBoardResizeStart}
 					onKeyDown={handlePrivateBoardResizeKeyDown}
 				/>
-				<PrivateBoard sessionId={sessionId} participantId={participantId} lastMessage={lastMessage} lastAudioMessage={lastAudioMessage} isConnected={isConnected} />
+				<PrivateBoard
+					sessionId={sessionId}
+					participantId={participantId}
+					lastMessage={lastMessage}
+					lastAudioMessage={lastAudioMessage}
+					isConnected={isConnected}
+					micMode={micMode}
+					onMicModeChange={handleMic}
+				/>
 			</aside>
 		</main>
 	);

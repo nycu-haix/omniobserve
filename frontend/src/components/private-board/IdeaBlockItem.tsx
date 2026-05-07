@@ -36,13 +36,17 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
 
 	useEffect(() => {
-		setDraftTitle(block.summary);
-		setSavedTitle(block.summary);
-		setDraftAiSummary(block.aiSummary || "");
-		setSavedAiSummary(block.aiSummary || "");
-		setDraftTranscript(block.transcript || "");
-		setSaveError(null);
-		setIsEditingTitle(false);
+		const timer = window.setTimeout(() => {
+			setDraftTitle(block.summary);
+			setSavedTitle(block.summary);
+			setDraftAiSummary(block.aiSummary || "");
+			setSavedAiSummary(block.aiSummary || "");
+			setDraftTranscript(block.transcript || "");
+			setSaveError(null);
+			setIsEditingTitle(false);
+		}, 0);
+
+		return () => window.clearTimeout(timer);
 	}, [block.aiSummary, block.summary, block.transcript, block.id]);
 
 	const cancelAiSummaryEditing = () => {
