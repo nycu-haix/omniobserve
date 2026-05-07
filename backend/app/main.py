@@ -91,6 +91,16 @@ async def startup() -> None:
                         ALTER TABLE transcript
                         ALTER COLUMN session_name TYPE varchar(255)
                         USING session_name::text;
+
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'transcript'
+                              AND column_name = 'visibility'
+                        ) THEN
+                            ALTER TABLE transcript ADD COLUMN visibility varchar(16) NOT NULL DEFAULT 'private';
+                        END IF;
                     END IF;
                 END $$;
                 """
@@ -168,6 +178,7 @@ async def startup() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(sql_text("DROP INDEX IF EXISTS idx_transcript_session_id"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_session_name ON transcript(session_name)"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_visibility ON transcript(visibility)"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_1 ON similarities(idea_block_id_1)"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_2 ON similarities(idea_block_id_2)"))
         await conn.execute(

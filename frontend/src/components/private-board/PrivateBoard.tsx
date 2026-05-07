@@ -131,6 +131,11 @@ function buildPublicTranscriptUrl(sessionId: string): string {
 	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts?visibility=public`);
 }
 
+function buildAllSessionTranscriptUrl(sessionId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts`);
+}
+
 function buildUserTranscriptUrl(sessionId: string, participantId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
 	const userId = getTranscriptUserId(participantId);
@@ -167,6 +172,15 @@ function transcriptResponseToLine(item: TranscriptResponse, participantId: strin
 		time: formatTranscriptTime(item.time_stamp),
 		text: item.transcript
 	};
+}
+
+async function fetchTranscriptHistory(url: string, signal: AbortSignal): Promise<TranscriptResponse[]> {
+	const response = await fetch(url, { signal });
+	if (!response.ok) {
+		console.warn("[private-board] failed transcript history response", response.status, url);
+		return [];
+	}
+	return (await response.json()) as TranscriptResponse[];
 }
 
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
@@ -381,16 +395,14 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		async function loadTranscripts() {
 			try {
-				const [publicResponse, privateResponse] = await Promise.all([
-					fetch(buildPublicTranscriptUrl(sessionId), { signal: controller.signal }),
-					fetch(buildPrivateTranscriptUrl(sessionId, participantId), { signal: controller.signal })
+				const [publicTranscripts, privateTranscripts] = await Promise.all([
+					fetchTranscriptHistory(buildPublicTranscriptUrl(sessionId), controller.signal),
+					fetchTranscriptHistory(buildPrivateTranscriptUrl(sessionId, participantId), controller.signal)
 				]);
-				if (!publicResponse.ok || !privateResponse.ok) {
-					throw new Error("Failed to load transcripts");
-				}
-
-				const [publicTranscripts, privateTranscripts] = (await Promise.all([publicResponse.json(), privateResponse.json()])) as [TranscriptResponse[], TranscriptResponse[]];
-				const transcriptLinesFromDb = [...publicTranscripts, ...privateTranscripts].map(item => transcriptResponseToLine(item, participantId));
+				const fallbackSessionTranscripts =
+					publicTranscripts.length === 0 ? await fetchTranscriptHistory(buildAllSessionTranscriptUrl(sessionId), controller.signal) : [];
+				const fallbackPublicTranscripts = fallbackSessionTranscripts.filter(item => item.visibility === "public");
+				const transcriptLinesFromDb = [...publicTranscripts, ...fallbackPublicTranscripts, ...privateTranscripts].map(item => transcriptResponseToLine(item, participantId));
 				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
