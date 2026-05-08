@@ -12,6 +12,7 @@ export interface IdeaBlock {
 	expanded?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
+	createdAtMs?: number;
 	status: IdeaBlockStatus;
 }
 

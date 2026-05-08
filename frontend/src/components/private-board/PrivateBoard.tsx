@@ -44,6 +44,7 @@ interface IdeaBlockResponse {
 	transcript: string | null;
 	similarity_id: number | null;
 	is_deleted?: boolean;
+	time_stamp?: string | null;
 }
 
 interface AudioIdeaBlocksUpdateMessage {
@@ -112,6 +113,7 @@ const createDraftIdeaBlock = (): IdeaBlock => ({
 	transcript: "",
 	expanded: true,
 	isDraft: true,
+	createdAtMs: Date.now(),
 	status: "ready"
 });
 
@@ -187,6 +189,7 @@ async function fetchTranscriptHistory(url: string, signal: AbortSignal): Promise
 
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 	const transcriptLineId = item.transcript_id == null ? undefined : String(item.transcript_id);
+	const createdAtMs = parseIdeaBlockCreatedAt(item.time_stamp);
 
 	return {
 		id: String(item.id),
@@ -197,8 +200,18 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
 		isDeleted: item.is_deleted ?? false,
+		createdAtMs,
 		status: "ready"
 	};
+}
+
+function parseIdeaBlockCreatedAt(value: string | null | undefined): number | undefined {
+	if (!value) {
+		return undefined;
+	}
+
+	const timestampMs = Date.parse(value);
+	return Number.isNaN(timestampMs) ? undefined : timestampMs;
 }
 
 function formatTranscriptTime(value: string | number | null | undefined): string | undefined {
@@ -324,22 +337,24 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 						...nextBlock,
 						expanded: block.expanded,
 						cueText: block.cueText,
-						hasCue: block.hasCue || nextBlock.hasCue
+						hasCue: block.hasCue || nextBlock.hasCue,
+						createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 					}
 				: block
-		);
+	);
 	}, baseBlocks));
 }
 
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
-		if (!!left.isDeleted !== !!right.isDeleted) {
-			return left.isDeleted ? -1 : 1;
+		const leftTime = left.createdAtMs ?? Number(left.id);
+		const rightTime = right.createdAtMs ?? Number(right.id);
+
+		if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+			return leftTime - rightTime;
 		}
-		if (!!left.isDraft !== !!right.isDraft) {
-			return left.isDraft ? 1 : -1;
-		}
-		return 0;
+
+		return left.id.localeCompare(right.id, undefined, { numeric: true });
 	});
 }
 
@@ -747,7 +762,8 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 							expanded: block.expanded,
 							cueText: block.cueText,
 							hasCue: block.hasCue || savedBlock.hasCue,
-							isDraft: false
+							isDraft: false,
+							createdAtMs: block.createdAtMs ?? savedBlock.createdAtMs
 						}
 					: block
 			);
@@ -802,20 +818,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					expanded: false,
 					isDraft: false
 				};
-				setIdeaBlocks(prev => sortIdeaBlocks([newBlock, ...prev]));
-				setTranscriptLines(prev =>
-					appendTranscriptLine(prev, {
-						id: `manual-transcript-${Date.now()}`,
-						source: "private",
-						origin: "live",
-						userId: participantId,
-						isOwn: true,
-						time: formatTranscriptTime(Date.now()),
-						timestampMs: Date.now(),
-						text: normalizedContent,
-						linkedBlockId: newBlock.id
-					})
-				);
+				setIdeaBlocks(prev => sortIdeaBlocks([...prev, newBlock]));
 				setHighlightedBlockId(newBlock.id);
 				setManualIdeaText("");
 				return;
@@ -851,7 +854,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			}
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
-			setIdeaBlocks(prev => sortIdeaBlocks([savedBlock, ...prev.filter(block => block.id !== savedBlock.id)]));
+			setIdeaBlocks(prev => sortIdeaBlocks([...prev.filter(block => block.id !== savedBlock.id), savedBlock]));
 			setHighlightedBlockId(savedBlock.id);
 			setIdeaBlockRefreshKey(current => current + 1);
 			setManualIdeaText("");

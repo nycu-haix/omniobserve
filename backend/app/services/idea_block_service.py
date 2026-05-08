@@ -74,7 +74,7 @@ async def list_idea_blocks(
         stmt = stmt.where(IdeaBlock.session_name == session_name)
     if similarity_id is not None:
         stmt = stmt.where(IdeaBlock.similarity_id == similarity_id)
-    stmt = stmt.order_by(IdeaBlock.is_deleted.desc(), IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
+    stmt = stmt.order_by(IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 

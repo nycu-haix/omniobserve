@@ -82,6 +82,7 @@ class IdeaBlockResponse(BaseModel):
 
 class IdeaBlockListResponse(BaseModel):
     id: int
+    time_stamp: datetime
     summary: str
     title: str
     transcript_id: int | None
@@ -96,6 +97,7 @@ class IdeaBlockOverviewResponse(BaseModel):
     id: int
     user_id: int
     session_name: str
+    time_stamp: datetime
     summary: str
     title: str
     transcript_id: int | None

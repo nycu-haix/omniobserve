@@ -40,6 +40,10 @@ export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
 	}
 ];
 
+MOCK_IDEA_BLOCKS.forEach((block, index) => {
+	block.createdAtMs ??= 1715157120000 + index * 60000;
+});
+
 export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t1",

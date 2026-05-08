@@ -348,6 +348,7 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
             "id": block.id,
             "title": block.title,
             "summary": block.summary,
+            "time_stamp": block.time_stamp.isoformat() if block.time_stamp else None,
             "transcript_id": block.transcript_id,
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
