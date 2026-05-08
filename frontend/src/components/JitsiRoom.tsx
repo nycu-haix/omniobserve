@@ -78,6 +78,8 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					<Loader2 className="h-6 w-6 animate-spin" />
 				</div>
 			)}
+			{/* Transparent overlay to prevent iframe interaction */}
+			<div className="absolute inset-0 z-20" />
 			<JitsiMeeting
 				domain={domain}
 				roomName={normalizedRoomName}
