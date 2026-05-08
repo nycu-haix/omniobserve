@@ -181,6 +181,7 @@ async def broadcast_public_transcript_line(
                 "source": "public",
                 "origin": "live",
                 "userId": participant_id,
+                "timestampMs": _now_ms(),
                 "text": text,
             },
         },

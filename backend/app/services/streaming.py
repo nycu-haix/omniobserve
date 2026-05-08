@@ -359,8 +359,11 @@ async def handle_audio_stream_websocket(
                         {
                             "type": "transcript_update",
                             "transcript_segment_id": last_segment_id,
+                            "participant_id": participant_id,
+                            "scope": stream_context.scope.value,
                             "text": last_text,
                             "is_final": True,
+                            "persisted": stream_context.scope == Visibility.PRIVATE,
                         },
                     )
                     if last_text:

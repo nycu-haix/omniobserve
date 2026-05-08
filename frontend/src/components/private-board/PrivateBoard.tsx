@@ -269,7 +269,8 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 		}
 
 		const itemUserId = item.userId == null ? undefined : String(item.userId);
-		return item.text.trim() === normalizedText && item.source === line.source && itemUserId === normalizedUserId;
+		const isSameUser = itemUserId == null || normalizedUserId == null || itemUserId === normalizedUserId;
+		return item.text.trim() === normalizedText && item.source === line.source && isSameUser;
 	});
 	if (!existingLine) {
 		return sortTranscriptLines([...lines, { ...line, text: normalizedText }]);
@@ -422,7 +423,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
-	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
@@ -484,7 +484,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		void loadTranscripts();
 
 		return () => controller.abort();
-	}, [participantId, sessionId, transcriptRefreshKey]);
+	}, [participantId, sessionId]);
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -542,7 +542,9 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					appendTranscriptLine(prev, {
 						...lastMessage.payload,
 						origin: "live",
-						isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId)
+						isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId),
+						timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
+						time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
 					})
 				);
 			}
@@ -730,7 +732,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			);
 			return sortIdeaBlocks(nextBlocks);
 		});
-		setTranscriptRefreshKey(current => current + 1);
 		setIdeaBlockRefreshKey(current => current + 1);
 	};
 
@@ -831,7 +832,6 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
 			setIdeaBlocks(prev => sortIdeaBlocks([savedBlock, ...prev.filter(block => block.id !== savedBlock.id)]));
 			setHighlightedBlockId(savedBlock.id);
-			setTranscriptRefreshKey(current => current + 1);
 			setIdeaBlockRefreshKey(current => current + 1);
 			setManualIdeaText("");
 		} catch (error) {
