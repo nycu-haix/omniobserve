@@ -8,7 +8,7 @@ logger = logging.getLogger("omniobserve")
 logging.basicConfig(level=logging.INFO)
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/omniobserve"
+    "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/omniobserve"
 )
 SKIP_DB_STARTUP = os.getenv("SKIP_DB_STARTUP", "").lower() in {"1", "true", "yes", "on"}
 RESET_DB_ON_STARTUP = os.getenv("RESET_DB_ON_STARTUP", "").lower() in {"1", "true", "yes", "on"}
@@ -253,4 +253,3 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 # ]
 # </Formatting>
 # '''.strip()
-
