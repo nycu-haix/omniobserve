@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
+import { AlertCircle, GripVertical, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -268,6 +268,7 @@ export default function MeetingRoom() {
 		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
 		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
 	});
+	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
@@ -302,6 +303,22 @@ export default function MeetingRoom() {
 		};
 		void queryPermission();
 	}, []);
+
+	useEffect(() => {
+		const handleFullscreenChange = () => {
+			setIsFullscreen(!!document.fullscreenElement);
+		};
+		document.addEventListener("fullscreenchange", handleFullscreenChange);
+		return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+	}, []);
+
+	const toggleFullscreen = async () => {
+		if (!document.fullscreenElement) {
+			await document.documentElement.requestFullscreen();
+		} else {
+			await document.exitFullscreen();
+		}
+	};
 
 	useEffect(() => {
 		const abortController = new AbortController();
@@ -655,19 +672,21 @@ export default function MeetingRoom() {
 						</div>
 					</header>
 					{isTaskDetailOpen && taskDetail && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{taskDetail}</p>}
-					<div className="grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
-						<LostAtSeaRankingPanel
-							title="Public 排序"
-							status="協作中"
-							items={publicItems}
-							sensors={sensors}
-							onDragStart={() => {
-								isDraggingRef.current.public = true;
-							}}
-							onDragCancel={() => handleRankingDragCancel("public")}
-							onDragEnd={event => handleRankingDragEnd("public", event)}
-							onPreviewItem={setPreviewItem}
-						/>
+					<div className={cn("grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:overflow-hidden lg:pr-0", currentPhase === "group" && "lg:grid-cols-2")}>
+						{currentPhase === "group" && (
+							<LostAtSeaRankingPanel
+								title="Public 排序"
+								status="協作中"
+								items={publicItems}
+								sensors={sensors}
+								onDragStart={() => {
+									isDraggingRef.current.public = true;
+								}}
+								onDragCancel={() => handleRankingDragCancel("public")}
+								onDragEnd={event => handleRankingDragEnd("public", event)}
+								onPreviewItem={setPreviewItem}
+							/>
+						)}
 						<LostAtSeaRankingPanel
 							title="Private 排序"
 							status="個人"
@@ -822,6 +841,13 @@ export default function MeetingRoom() {
 					timerEndTime={timerEndTime}
 				/>
 			</aside>
+			<button
+				onClick={toggleFullscreen}
+				className="fixed bottom-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-full bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				title={isFullscreen ? "退出全螢幕" : "全螢幕"}
+			>
+				{isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+			</button>
 		</main>
 	);
 }
