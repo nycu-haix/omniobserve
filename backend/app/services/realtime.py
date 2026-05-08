@@ -288,6 +288,22 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
     }
 
 
+def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
+    public_state = _get_public_ranking_state(session_id)
+    private_rankings = {
+        participant_id: _ranking_payload(state)
+        for participant_id, state in sorted(private_ranking_state[session_id].items())
+        if participant_id != "admin"
+    }
+    return {
+        "type": "admin_ranking_state",
+        "session_name": session_id,
+        "revision": public_state["revision"],
+        "public_ranking": _ranking_payload(public_state),
+        "private_rankings": private_rankings,
+    }
+
+
 def _apply_ranking_move(items: list[str], item_id: str, to_index: int) -> list[str]:
     if item_id not in items:
         raise ValueError("ranking item does not exist")
@@ -393,6 +409,7 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                         await board_manager.send_to(session_id, participant_id, message)
                     else:
                         await board_manager.broadcast(session_id, message)
+                    await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
                 continue
 
             if message_type in {"block_publish", "block_discard", "block_edit"}:
@@ -424,7 +441,13 @@ async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin
     await admin_manager.send_to(
         session_id,
         admin_id,
-        {"type": "joined", "session_name": session_id, "admin_id": admin_id, **_phase_state_message(session_id)},
+        {
+            "type": "joined",
+            "session_name": session_id,
+            "admin_id": admin_id,
+            **_phase_state_message(session_id),
+            "ranking_state": _admin_ranking_state_message(session_id),
+        },
     )
 
     try:
@@ -444,7 +467,13 @@ async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin
                 await admin_manager.send_to(
                     session_id,
                     admin_id,
-                    {"type": "joined", "session_name": session_id, "admin_id": admin_id, **_phase_state_message(session_id)},
+                    {
+                        "type": "joined",
+                        "session_name": session_id,
+                        "admin_id": admin_id,
+                        **_phase_state_message(session_id),
+                        "ranking_state": _admin_ranking_state_message(session_id),
+                    },
                 )
             elif message_type == "switch_phase":
                 new_phase = _normalize_session_phase(payload.get("phase"))
