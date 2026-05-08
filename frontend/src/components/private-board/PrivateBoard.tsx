@@ -19,13 +19,19 @@ interface PrivateBoardProps {
 	isConnected: boolean;
 	micMode: MicMode;
 	onMicModeChange: (mode: MicMode) => void | Promise<void>;
+	currentPhase?: SessionPhase;
+	timerEndTime?: number;
 }
 
 type BoardMessage =
 	| { type: "new_idea_block"; payload: IdeaBlock }
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
-	| { type: "similarity_cue"; payload: SimilarityCueData };
+	| { type: "similarity_cue"; payload: SimilarityCueData }
+	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
+	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number };
+
+type SessionPhase = "private" | "group";
 
 interface TranscriptResponse {
 	id: number;
@@ -93,7 +99,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		return false;
 	}
 
-	return message.type === "new_idea_block" || message.type === "update_idea_block" || message.type === "new_transcript_line" || message.type === "similarity_cue";
+	return message.type === "new_idea_block" || message.type === "update_idea_block" || message.type === "new_transcript_line" || message.type === "similarity_cue" || message.type === "phase_changed" || message.type === "board_state";
 }
 
 function isAudioTranscriptMessage(message: object | null): message is AudioTranscriptMessage {
@@ -447,8 +453,22 @@ function TranscriptLines({
 	);
 }
 
-export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioMessage, isConnected, micMode, onMicModeChange }: PrivateBoardProps) {
+export function PrivateBoard({
+	sessionId,
+	participantId,
+	lastMessage,
+	lastAudioMessage,
+	isConnected,
+	micMode,
+	onMicModeChange,
+	currentPhase: controlledPhase,
+	timerEndTime: controlledTimerEndTime
+}: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [timerEndTime, setTimerEndTime] = useState<number>(0);
+	const visiblePhase = controlledPhase ?? currentPhase;
+	const visibleTimerEndTime = controlledTimerEndTime ?? timerEndTime;
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
@@ -559,6 +579,32 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
+			return;
+		}
+
+		if (lastMessage.type === "phase_changed") {
+			const timer = window.setTimeout(() => {
+				setCurrentPhase(lastMessage.phase);
+				setTimerEndTime(lastMessage.end_time_ms || 0);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
+		if (lastMessage.type === "board_state") {
+			const timer = window.setTimeout(() => {
+				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				if (typeof lastMessage.timer_end_time_ms === "number") setTimerEndTime(lastMessage.timer_end_time_ms);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+	}, [lastMessage]);
+
+	useEffect(() => {
+		if (!isBoardMessage(lastMessage)) {
+			return;
+		}
+
+		if (lastMessage.type === "phase_changed" || lastMessage.type === "board_state") {
 			return;
 		}
 
@@ -916,7 +962,9 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 							Idea Blocks
 						</Button>
 					</div>
-					<div className="flex items-center gap-2">
+					<div className="flex items-center gap-3">
+						<PhaseBadge phase={visiblePhase} />
+						{visibleTimerEndTime > 0 && <PhaseTimer endTimeMs={visibleTimerEndTime} />}
 						<span className={`hidden h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
 					</div>
 				</header>
@@ -940,6 +988,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										onDelete={deleteIdeaBlock}
 										onJumpToTranscript={jumpToTranscript}
 										canJumpToTranscript={canJumpToTranscript(block)}
+										currentPhase={visiblePhase}
 									/>
 								</div>
 							))}
@@ -991,7 +1040,42 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				{activeTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
 			</section>
 
-			<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />
+			{visiblePhase === "group" && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
 		</>
+	);
+}
+
+function PhaseBadge({ phase }: { phase: SessionPhase }) {
+	const label = phase === "group" ? "Group Phase" : "Private Phase";
+	return (
+		<div
+			className={cn(
+				"rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
+				phase === "group" ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
+			)}
+		>
+			{label}
+		</div>
+	);
+}
+
+function PhaseTimer({ endTimeMs }: { endTimeMs: number }) {
+	const [timeLeft, setTimeLeft] = useState(() => Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+
+	useEffect(() => {
+		const updateTimer = () => {
+			setTimeLeft(Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+		};
+		updateTimer();
+		const interval = setInterval(updateTimer, 1000);
+		return () => clearInterval(interval);
+	}, [endTimeMs]);
+
+	const m = Math.floor(timeLeft / 60);
+	const s = timeLeft % 60;
+	return (
+		<div className="rounded-md bg-secondary px-2.5 py-1 text-sm font-medium text-secondary-foreground shadow-sm">
+			{m}:{s.toString().padStart(2, "0")}
+		</div>
 	);
 }

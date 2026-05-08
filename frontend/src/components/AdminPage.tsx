@@ -63,9 +63,33 @@ interface LatestParticipantTranscript {
 	receivedAt: string;
 }
 
+type SessionPhase = "private" | "group";
+
 const MAX_EVENTS = 80;
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
+
+function normalizeSessionPhase(value: unknown): SessionPhase | null {
+	return value === "private" || value === "group" ? value : null;
+}
+
+function durationSecondsFromMinutes(value: string) {
+	const minutes = Number.parseFloat(value);
+	if (!Number.isFinite(minutes) || minutes <= 0) {
+		return 0;
+	}
+	return Math.round(minutes * 60);
+}
+
+function formatDurationLabel(value: string) {
+	const seconds = durationSecondsFromMinutes(value);
+	if (seconds <= 0) {
+		return "No Timer";
+	}
+	const minutes = Math.floor(seconds / 60);
+	const remainder = seconds % 60;
+	return remainder === 0 ? `${minutes} Min` : `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
 
 function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]) {
 	const validIds = new Set(defaultItemIds);
@@ -135,6 +159,7 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 	const retryCountRef = useRef(0);
 	const retryTimerRef = useRef<number | null>(null);
 	const onEventRef = useRef(onEvent);
+	const socketRef = useRef<WebSocket | null>(null);
 
 	useEffect(() => {
 		onEventRef.current = onEvent;
@@ -152,6 +177,7 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 			const queryParam = source === "admin" ? `admin_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}` : `participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
 			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/${source}?${queryParam}`;
 			socket = new WebSocket(wsUrl);
+			socketRef.current = socket;
 
 			socket.onopen = () => {
 				retryCountRef.current = 0;
@@ -199,7 +225,13 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 		};
 	}, [sessionId, source]);
 
-	return { isConnected, lastMessage };
+	const sendMessage = useCallback((msg: object) => {
+		if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+			socketRef.current.send(JSON.stringify(msg));
+		}
+	}, []);
+
+	return { isConnected, lastMessage, sendMessage };
 }
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
@@ -226,6 +258,23 @@ function JsonPreview({ value }: { value: unknown }) {
 	return <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">{JSON.stringify(value, null, 2)}</pre>;
 }
 
+function AdminPhaseTimer({ endTimeMs }: { endTimeMs: number }) {
+	const [timeLeft, setTimeLeft] = useState(() => Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+
+	useEffect(() => {
+		const updateTimer = () => {
+			setTimeLeft(Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+		};
+		updateTimer();
+		const timer = window.setInterval(updateTimer, 1000);
+		return () => window.clearInterval(timer);
+	}, [endTimeMs]);
+
+	const minutes = Math.floor(timeLeft / 60);
+	const seconds = timeLeft % 60;
+	return <span className="font-mono text-sm font-semibold">{minutes}:{seconds.toString().padStart(2, "0")}</span>;
+}
+
 export function AdminPage() {
 	const roomName = useMemo(() => getRoomName(), []);
 	const [events, setEvents] = useState<EventRecord[]>([]);
@@ -240,6 +289,10 @@ export function AdminPage() {
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [timerEndTime, setTimerEndTime] = useState(0);
+	const [privateDurationMinutes, setPrivateDurationMinutes] = useState("5");
+	const [groupDurationMinutes, setGroupDurationMinutes] = useState("15");
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 
@@ -289,6 +342,16 @@ export function AdminPage() {
 		}).format(new Date());
 
 		setEvents(current => [{ id: `${source}-${Date.now()}-${Math.random()}`, source, receivedAt, message }, ...current].slice(0, MAX_EVENTS));
+
+		const nextPhase = normalizeSessionPhase(message.phase) ?? normalizeSessionPhase(message.current_phase);
+		if (nextPhase) {
+			setCurrentPhase(nextPhase);
+		}
+		if (typeof message.end_time_ms === "number") {
+			setTimerEndTime(message.end_time_ms);
+		} else if (typeof message.timer_end_time_ms === "number") {
+			setTimerEndTime(message.timer_end_time_ms);
+		}
 
 		if (isBoardStateMessage(message)) {
 			setBoardState(message);
@@ -351,8 +414,14 @@ export function AdminPage() {
 		return () => abortController.abort();
 	}, []);
 
-	const adminSocket = useAdminRealtimeSocket("admin", roomName, recordEvent);
-	const boardSocket = useAdminRealtimeSocket("board", roomName, recordEvent);
+	const { isConnected: adminConnected, lastMessage: adminLastMessage, sendMessage: sendAdminMessage } = useAdminRealtimeSocket("admin", roomName, recordEvent);
+	const { isConnected: boardConnected, lastMessage: boardLastMessage } = useAdminRealtimeSocket("board", roomName, recordEvent);
+	const startPhase = (phase: SessionPhase, minutesValue: string) => {
+		sendAdminMessage({ type: "switch_phase", phase, duration_s: durationSecondsFromMinutes(minutesValue) });
+	};
+	const clearPhaseTimer = () => {
+		sendAdminMessage({ type: "switch_phase", phase: currentPhase, duration_s: 0 });
+	};
 	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || [], defaultRankingItemIds);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -390,11 +459,11 @@ export function AdminPage() {
 					<div className="grid gap-3 text-sm">
 						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Board WS</span>
-							<ConnectionBadge connected={boardSocket.isConnected} />
+							<ConnectionBadge connected={boardConnected} />
 						</div>
 						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Admin WS</span>
-							<ConnectionBadge connected={adminSocket.isConnected} />
+							<ConnectionBadge connected={adminConnected} />
 						</div>
 						<div className="flex items-center justify-between gap-3">
 							<span className="text-muted-foreground">Presence API</span>
@@ -404,6 +473,58 @@ export function AdminPage() {
 							<span className="text-muted-foreground">Admin participant</span>
 							<span className="font-medium">{ADMIN_PARTICIPANT_ID}</span>
 						</div>
+					</div>
+				</section>
+
+				<section className="rounded-lg border bg-card p-4 text-card-foreground">
+					<header className="mb-3 flex items-center gap-2">
+						<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+						<h2 className="text-sm font-semibold">Phase Controls</h2>
+					</header>
+					<div className="grid gap-3">
+						<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+							<div className="min-w-0">
+								<div className="font-medium">{currentPhase === "group" ? "Group Phase" : "Private Phase"}</div>
+								<div className="text-xs text-muted-foreground">{timerEndTime > 0 ? "Countdown running" : "No countdown"}</div>
+							</div>
+							{timerEndTime > 0 ? <AdminPhaseTimer endTimeMs={timerEndTime} /> : <span className="text-sm text-muted-foreground">--:--</span>}
+						</div>
+
+						<div className="grid gap-2 rounded-md border bg-background p-3">
+							<label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="private-phase-duration">
+								Private duration (minutes)
+								<input
+									id="private-phase-duration"
+									className="h-9 rounded-md border bg-card px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+									inputMode="decimal"
+									type="text"
+									value={privateDurationMinutes}
+									onChange={event => setPrivateDurationMinutes(event.target.value)}
+								/>
+							</label>
+							<Button variant="outline" onClick={() => startPhase("private", privateDurationMinutes)}>
+								Start {formatDurationLabel(privateDurationMinutes)} Private Phase
+							</Button>
+						</div>
+
+						<div className="grid gap-2 rounded-md border bg-background p-3">
+							<label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="group-phase-duration">
+								Group duration (minutes)
+								<input
+									id="group-phase-duration"
+									className="h-9 rounded-md border bg-card px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+									inputMode="decimal"
+									type="text"
+									value={groupDurationMinutes}
+									onChange={event => setGroupDurationMinutes(event.target.value)}
+								/>
+							</label>
+							<Button onClick={() => startPhase("group", groupDurationMinutes)}>Start {formatDurationLabel(groupDurationMinutes)} Group Phase</Button>
+						</div>
+
+						<Button variant="secondary" onClick={clearPhaseTimer}>
+							Clear Countdown
+						</Button>
 					</div>
 				</section>
 
@@ -618,7 +739,7 @@ export function AdminPage() {
 						<h2 className="text-sm font-semibold">Last messages</h2>
 					</header>
 					<div className="grid gap-3">
-						<JsonPreview value={{ admin: adminSocket.lastMessage ?? null, board: boardSocket.lastMessage ?? null }} />
+						<JsonPreview value={{ admin: adminLastMessage ?? null, board: boardLastMessage ?? null }} />
 					</div>
 				</section>
 			</aside>

@@ -26,6 +26,7 @@ interface LostAtSeaItem {
 }
 
 type RankingScope = "public" | "private";
+type SessionPhase = "private" | "group";
 
 interface RankingSnapshot {
 	revision: number;
@@ -123,6 +124,8 @@ function isBoardStateMessage(message: object | null): message is {
 	ranking?: { items: string[] };
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
+	current_phase?: SessionPhase;
+	timer_end_time_ms?: number;
 } {
 	return (
 		!!message &&
@@ -132,6 +135,14 @@ function isBoardStateMessage(message: object | null): message is {
 			("private_ranking" in message && isRankingSnapshot(message.private_ranking)) ||
 			("ranking" in message && typeof message.ranking === "object" && message.ranking !== null && "items" in message.ranking && Array.isArray(message.ranking.items)))
 	);
+}
+
+function isPhaseChangedMessage(message: object | null): message is {
+	type: "phase_changed";
+	phase: SessionPhase;
+	end_time_ms?: number;
+} {
+	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
 }
 
 function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPreview: (item: LostAtSeaItem) => void }) {
@@ -214,6 +225,8 @@ export default function MeetingRoom() {
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
@@ -513,7 +526,24 @@ export default function MeetingRoom() {
 	};
 
 	useEffect(() => {
+		if (isPhaseChangedMessage(lastMessage)) {
+			const timer = window.setTimeout(() => {
+				setCurrentPhase(lastMessage.phase);
+				setTimerEndTime(lastMessage.end_time_ms || 0);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
 		if (isBoardStateMessage(lastMessage)) {
+			let phaseTimer: number | null = null;
+			const timerEndTimeMs = lastMessage.timer_end_time_ms;
+			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
+				phaseTimer = window.setTimeout(() => {
+					if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+					if (typeof timerEndTimeMs === "number") setTimerEndTime(timerEndTimeMs);
+				}, 0);
+			}
+
 			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
 			const privateRanking = lastMessage.private_ranking;
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
@@ -531,7 +561,11 @@ export default function MeetingRoom() {
 				}
 				applyRankingSnapshot(scope, nextRanking);
 			});
-			return;
+			return () => {
+				if (phaseTimer !== null) {
+					window.clearTimeout(phaseTimer);
+				}
+			};
 		}
 
 		if (isRankingStateMessage(lastMessage)) {
@@ -744,6 +778,8 @@ export default function MeetingRoom() {
 					isConnected={isConnected}
 					micMode={micMode}
 					onMicModeChange={handleMic}
+					currentPhase={currentPhase}
+					timerEndTime={timerEndTime}
 				/>
 			</aside>
 		</main>

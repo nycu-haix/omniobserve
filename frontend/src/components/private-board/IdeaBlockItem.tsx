@@ -14,9 +14,10 @@ interface IdeaBlockItemProps {
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
+	currentPhase?: string;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false }: IdeaBlockItemProps) {
+export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = "private" }: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -37,6 +38,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving;
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
+	const shouldShowCue = block.hasCue && currentPhase === "group";
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -147,7 +149,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			tabIndex={isGenerating || isEditingTitle ? -1 : 0}
 			className={cn(
 				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-				block.hasCue && "border-primary bg-accent",
+				shouldShowCue && "border-primary bg-accent",
 				block.isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
@@ -259,7 +261,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	return (
 		<div className="grid gap-2">
-			{block.hasCue && block.cueText ? (
+			{shouldShowCue && block.cueText ? (
 				<TooltipProvider>
 					<Tooltip>
 						<TooltipTrigger asChild>{row}</TooltipTrigger>
@@ -276,7 +278,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 			{block.expanded && !isGenerating && (
 				<div className={cn("ml-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
-					{block.hasCue && (
+					{shouldShowCue && (
 						<Badge className="w-fit" variant="secondary">
 							Similarity
 						</Badge>
