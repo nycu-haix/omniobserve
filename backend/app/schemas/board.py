@@ -110,3 +110,23 @@ class FrontendMockBoardSeedResponse(BaseModel):
 
 class TopicDescriptionResponse(BaseModel):
     topic_description: str
+
+
+class TaskConfigItemResponse(BaseModel):
+    id: str
+    label: str
+    label_zh: str
+    label_en: str
+    aliases: list[str]
+    image_title: str
+    image_bg: str
+    image_fg: str
+    image_mark: str
+
+
+class TaskConfigResponse(BaseModel):
+    task_id: str
+    title: str
+    topic_description: str
+    task_detail: str
+    items: list[TaskConfigItemResponse]

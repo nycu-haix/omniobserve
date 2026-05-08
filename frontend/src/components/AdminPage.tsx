@@ -2,7 +2,7 @@ import { Activity, ClipboardList, FileText, Lightbulb, Radio, RefreshCw, Search,
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
-import { apiUrl } from "../services/api";
+import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import { fetchSessionPresence, type ParticipantPresence } from "../services/presence";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -66,29 +66,11 @@ interface LatestParticipantTranscript {
 const MAX_EVENTS = 80;
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
-const RANKING_LABELS: Record<string, string> = {
-	mosquito_net: "蚊帳",
-	petrol: "一罐汽油",
-	water_container: "裝水容器",
-	shaving_mirror: "刮鬍鏡／小鏡子",
-	sextant: "六分儀",
-	emergency_rations: "緊急糧食",
-	sea_chart: "海圖",
-	floating_cushion: "可漂浮的坐墊",
-	rope: "繩子",
-	chocolate_bars: "巧克力棒",
-	waterproof_sheet: "防水塑膠布",
-	fishing_rod: "釣魚竿",
-	shark_repellent: "驅鯊劑",
-	rum: "一瓶蘭姆酒",
-	vhf_radio: "VHF 無線電"
-};
-const DEFAULT_RANKING_ITEM_IDS = Object.keys(RANKING_LABELS);
 
-function normalizeRankingItemIds(itemIds: string[]) {
-	const validIds = new Set(DEFAULT_RANKING_ITEM_IDS);
+function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]) {
+	const validIds = new Set(defaultItemIds);
 	const rankedValidIds = itemIds.filter((id, index) => validIds.has(id) && itemIds.indexOf(id) === index);
-	const missingIds = DEFAULT_RANKING_ITEM_IDS.filter(id => !rankedValidIds.includes(id));
+	const missingIds = defaultItemIds.filter(id => !rankedValidIds.includes(id));
 
 	return [...rankedValidIds, ...missingIds];
 }
@@ -255,8 +237,11 @@ export function AdminPage() {
 	const [apiError, setApiError] = useState<string | null>(null);
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
 	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
+	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
+	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
+	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 
 	const loadAdminApiData = useCallback(async () => {
 		setIsApiLoading(true);
@@ -346,9 +331,29 @@ export function AdminPage() {
 		};
 	}, [loadAdminApiData]);
 
+	useEffect(() => {
+		const abortController = new AbortController();
+
+		const loadTaskConfig = async () => {
+			try {
+				const taskConfig = await fetchTaskConfig(abortController.signal);
+				setTaskItems(taskConfig.items);
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.error("Failed to load task config", error);
+			}
+		};
+
+		void loadTaskConfig();
+
+		return () => abortController.abort();
+	}, []);
+
 	const adminSocket = useAdminRealtimeSocket("admin", roomName, recordEvent);
 	const boardSocket = useAdminRealtimeSocket("board", roomName, recordEvent);
-	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || []);
+	const rankingItems = normalizeRankingItemIds(boardState?.ranking?.items || [], defaultRankingItemIds);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
 		const ids = new Set<number>();
@@ -535,7 +540,7 @@ export function AdminPage() {
 							{rankingItems.map((item, index) => (
 								<div key={item} className="flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
 									<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold">{index + 1}</span>
-									<span className="min-w-0 flex-1 truncate">{RANKING_LABELS[item] || item}</span>
+									<span className="min-w-0 flex-1 truncate">{rankingLabels[item] || item}</span>
 								</div>
 							))}
 							<p className="pt-1 text-xs text-muted-foreground">revision {boardState?.revision ?? 0}</p>

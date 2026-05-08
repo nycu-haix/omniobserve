@@ -3,12 +3,13 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
+import { fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import type { MicMode } from "../types";
 import { JitsiRoom } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
@@ -18,6 +19,10 @@ interface LostAtSeaItem {
 	id: string;
 	label: string;
 	rank: number;
+	imageTitle: string;
+	imageBg: string;
+	imageFg: string;
+	imageMark: string;
 }
 
 type RankingScope = "public" | "private";
@@ -26,24 +31,6 @@ interface RankingSnapshot {
 	revision: number;
 	items: string[];
 }
-
-const INITIAL_ITEMS: LostAtSeaItem[] = [
-	{ id: "mosquito_net", label: "蚊帳", rank: 1 },
-	{ id: "petrol", label: "一罐汽油", rank: 2 },
-	{ id: "water_container", label: "裝水容器", rank: 3 },
-	{ id: "shaving_mirror", label: "刮鬍鏡／小鏡子", rank: 4 },
-	{ id: "sextant", label: "六分儀", rank: 5 },
-	{ id: "emergency_rations", label: "緊急糧食", rank: 6 },
-	{ id: "sea_chart", label: "海圖", rank: 7 },
-	{ id: "floating_cushion", label: "可漂浮的坐墊", rank: 8 },
-	{ id: "rope", label: "繩子", rank: 9 },
-	{ id: "chocolate_bars", label: "巧克力棒", rank: 10 },
-	{ id: "waterproof_sheet", label: "防水塑膠布", rank: 11 },
-	{ id: "fishing_rod", label: "釣魚竿", rank: 12 },
-	{ id: "shark_repellent", label: "驅鯊劑", rank: 13 },
-	{ id: "rum", label: "一瓶蘭姆酒", rank: 14 },
-	{ id: "vhf_radio", label: "VHF 無線電", rank: 15 }
-];
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
@@ -54,39 +41,33 @@ const DEFAULT_JITSI_HEIGHT = 120;
 const MIN_JITSI_HEIGHT = 96;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
-const LOST_AT_SEA_TASK_DETAIL =
-	"你和你的團隊被困在南太平洋的一艘橡皮救生筏上，具體位置不詳，周圍看不到陸地。團隊無法確定方向，也沒有足夠能力自行划回岸邊，因此主要策略是留在救生筏上、保存體力並等待救援。請根據物品對生存的重要程度進行排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。在公開討論以及私人想法輸出的時候，明確提及物品名稱並且附上簡短理由。";
+function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
+	return items.map((item, index) => createLostAtSeaItem(item, index));
+}
 
-const TASK_ITEM_IMAGE_META: Record<string, { title: string; bg: string; fg: string; mark: string }> = {
-	mosquito_net: { title: "Mosquito Net", bg: "#e0f2fe", fg: "#0369a1", mark: "NET" },
-	petrol: { title: "Petrol", bg: "#fee2e2", fg: "#b91c1c", mark: "FUEL" },
-	water_container: { title: "Water Container", bg: "#dbeafe", fg: "#1d4ed8", mark: "H2O" },
-	shaving_mirror: { title: "Shaving Mirror", bg: "#f1f5f9", fg: "#475569", mark: "MIR" },
-	sextant: { title: "Sextant", bg: "#fef3c7", fg: "#b45309", mark: "SEXT" },
-	emergency_rations: { title: "Emergency Rations", bg: "#ffedd5", fg: "#c2410c", mark: "FOOD" },
-	sea_chart: { title: "Sea Chart", bg: "#ccfbf1", fg: "#0f766e", mark: "MAP" },
-	floating_cushion: { title: "Floating Cushion", bg: "#fce7f3", fg: "#be185d", mark: "FLOAT" },
-	rope: { title: "Rope", bg: "#f5f5f4", fg: "#78716c", mark: "ROPE" },
-	chocolate_bars: { title: "Chocolate Bars", bg: "#ede9fe", fg: "#6d28d9", mark: "CHOC" },
-	waterproof_sheet: { title: "Waterproof Sheet", bg: "#dcfce7", fg: "#15803d", mark: "SHEET" },
-	fishing_rod: { title: "Fishing Rod", bg: "#e0f2fe", fg: "#075985", mark: "ROD" },
-	shark_repellent: { title: "Shark Repellent", bg: "#e5e7eb", fg: "#374151", mark: "SPRAY" },
-	rum: { title: "Rum", bg: "#fef9c3", fg: "#a16207", mark: "RUM" },
-	vhf_radio: { title: "VHF Radio", bg: "#d1fae5", fg: "#047857", mark: "VHF" }
-};
+function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem {
+	return {
+		id: item.id,
+		label: item.label,
+		rank: index + 1,
+		imageTitle: item.image_title || item.label_en || item.label,
+		imageBg: item.image_bg || "#f8fafc",
+		imageFg: item.image_fg || "#334155",
+		imageMark: item.image_mark || "ITEM"
+	};
+}
 
 function taskItemImageSrc(itemId: string): string {
 	return `/task-item-images/${itemId}.jpg`;
 }
 
-function taskItemFallbackImageSrc(itemId: string): string {
-	const meta = TASK_ITEM_IMAGE_META[itemId] ?? { title: itemId, bg: "#f8fafc", fg: "#334155", mark: "ITEM" };
-	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220"><rect width="320" height="220" rx="24" fill="${meta.bg}"/><circle cx="72" cy="76" r="36" fill="#fff" opacity=".72"/><rect x="112" y="48" width="136" height="96" rx="18" fill="#fff" opacity=".72"/><path d="M68 156 C112 126 156 188 204 146 C226 126 250 128 276 150" fill="none" stroke="${meta.fg}" stroke-width="10" stroke-linecap="round"/><text x="160" y="113" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="${meta.fg}">${meta.mark}</text><text x="160" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="600" fill="${meta.fg}">${meta.title}</text></svg>`;
+function taskItemFallbackImageSrc(item: LostAtSeaItem): string {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220"><rect width="320" height="220" rx="24" fill="${item.imageBg}"/><circle cx="72" cy="76" r="36" fill="#fff" opacity=".72"/><rect x="112" y="48" width="136" height="96" rx="18" fill="#fff" opacity=".72"/><path d="M68 156 C112 126 156 188 204 146 C226 126 250 128 276 150" fill="none" stroke="${item.imageFg}" stroke-width="10" stroke-linecap="round"/><text x="160" y="113" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="${item.imageFg}">${item.imageMark}</text><text x="160" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="600" fill="${item.imageFg}">${item.imageTitle}</text></svg>`;
 	return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>, itemId: string) {
-	event.currentTarget.src = taskItemFallbackImageSrc(itemId);
+function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>, item: LostAtSeaItem) {
+	event.currentTarget.src = taskItemFallbackImageSrc(item);
 }
 
 function clampPrivateBoardWidth(width: number) {
@@ -101,26 +82,31 @@ function clampJitsiHeight(height: number) {
 	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
 }
 
-const ITEM_LABELS = INITIAL_ITEMS.reduce<Record<string, string>>((labels, item) => {
-	labels[item.id] = item.label;
-	return labels;
-}, {});
-const DEFAULT_ITEM_IDS = INITIAL_ITEMS.map(item => item.id);
-
-function normalizeRankingItemIds(itemIds: string[]): string[] {
-	const validIds = new Set(DEFAULT_ITEM_IDS);
+function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): string[] {
+	const validIds = new Set(defaultItemIds);
 	const rankedValidIds = itemIds.filter((id, index) => validIds.has(id) && itemIds.indexOf(id) === index);
-	const missingIds = DEFAULT_ITEM_IDS.filter(id => !rankedValidIds.includes(id));
+	const missingIds = defaultItemIds.filter(id => !rankedValidIds.includes(id));
 
 	return [...rankedValidIds, ...missingIds];
 }
 
-function createRankedItems(itemIds: string[]): LostAtSeaItem[] {
-	return normalizeRankingItemIds(itemIds).map((id, index) => ({
-		id,
-		label: ITEM_LABELS[id] ?? id,
-		rank: index + 1
-	}));
+function createRankedItems(itemIds: string[], taskItemsById: Record<string, TaskConfigItem>, defaultItemIds: string[]): LostAtSeaItem[] {
+	return normalizeRankingItemIds(itemIds, defaultItemIds).map((id, index) =>
+		createLostAtSeaItem(
+			taskItemsById[id] ?? {
+				id,
+				label: id,
+				label_zh: id,
+				label_en: id,
+				aliases: [],
+				image_title: id,
+				image_bg: "#f8fafc",
+				image_fg: "#334155",
+				image_mark: "ITEM"
+			},
+			index
+		)
+	);
 }
 
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
@@ -169,9 +155,9 @@ function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPre
 			<img
 				className="h-9 w-12 shrink-0 rounded-md border object-cover"
 				src={taskItemImageSrc(item.id)}
-				alt={TASK_ITEM_IMAGE_META[item.id]?.title ?? item.label}
+				alt={item.imageTitle}
 				draggable={false}
-				onError={event => handleTaskItemImageError(event, item.id)}
+				onError={event => handleTaskItemImageError(event, item)}
 			/>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
@@ -221,8 +207,11 @@ function LostAtSeaRankingPanel({
 export default function MeetingRoom() {
 	const [micMode, setMicMode] = useState<MicMode>("off");
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
-	const [publicItems, setPublicItems] = useState(INITIAL_ITEMS);
-	const [privateItems, setPrivateItems] = useState(INITIAL_ITEMS);
+	const [taskTitle, setTaskTitle] = useState("Lost at Sea");
+	const [taskDetail, setTaskDetail] = useState("");
+	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
+	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
+	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
@@ -246,6 +235,8 @@ export default function MeetingRoom() {
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
+	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const meetingLayoutStyle = {
 		"--private-board-width": `${privateBoardWidth}px`,
 		"--jitsi-height": `${jitsiHeight}px`
@@ -264,6 +255,50 @@ export default function MeetingRoom() {
 			}
 		};
 		void queryPermission();
+	}, []);
+
+	useEffect(() => {
+		const abortController = new AbortController();
+
+		const loadTaskConfig = async () => {
+			try {
+				const taskConfig = await fetchTaskConfig(abortController.signal);
+				const nextTaskItemsById = Object.fromEntries(taskConfig.items.map(item => [item.id, item]));
+				const nextDefaultItemIds = taskConfig.items.map(item => item.id);
+				const nextItems = createInitialItems(taskConfig.items);
+
+				setTaskTitle(taskConfig.title);
+				setTaskDetail(taskConfig.task_detail);
+				setTaskItems(taskConfig.items);
+				setPublicItems(current =>
+					current.length > 0
+						? createRankedItems(
+								current.map(item => item.id),
+								nextTaskItemsById,
+								nextDefaultItemIds
+							)
+						: nextItems
+				);
+				setPrivateItems(current =>
+					current.length > 0
+						? createRankedItems(
+								current.map(item => item.id),
+								nextTaskItemsById,
+								nextDefaultItemIds
+							)
+						: nextItems
+				);
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.error("Failed to load task config", error);
+			}
+		};
+
+		void loadTaskConfig();
+
+		return () => abortController.abort();
 	}, []);
 
 	const requestMicPermission = async () => {
@@ -291,16 +326,38 @@ export default function MeetingRoom() {
 		await startAudioStream(nextMode);
 	};
 
-	const applyRankingSnapshot = useCallback((scope: RankingScope, snapshot: RankingSnapshot) => {
-		if (scope === "private") {
-			setPrivateRankingRevision(snapshot.revision);
-			setPrivateItems(createRankedItems(snapshot.items));
+	const applyRankingSnapshot = useCallback(
+		(scope: RankingScope, snapshot: RankingSnapshot) => {
+			if (defaultItemIds.length === 0) {
+				pendingRankingRef.current[scope] = snapshot;
+				return;
+			}
+			if (scope === "private") {
+				setPrivateRankingRevision(snapshot.revision);
+				setPrivateItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+				return;
+			}
+
+			setPublicRankingRevision(snapshot.revision);
+			setPublicItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+		},
+		[defaultItemIds, taskItemsById]
+	);
+
+	useEffect(() => {
+		if (defaultItemIds.length === 0) {
 			return;
 		}
 
-		setPublicRankingRevision(snapshot.revision);
-		setPublicItems(createRankedItems(snapshot.items));
-	}, []);
+		(["public", "private"] as RankingScope[]).forEach(scope => {
+			const pendingRanking = pendingRankingRef.current[scope];
+			if (!pendingRanking || isDraggingRef.current[scope]) {
+				return;
+			}
+			applyRankingSnapshot(scope, pendingRanking);
+			pendingRankingRef.current[scope] = null;
+		});
+	}, [applyRankingSnapshot, defaultItemIds.length]);
 
 	const handleRankingDragCancel = (scope: RankingScope) => {
 		isDraggingRef.current[scope] = false;
@@ -526,11 +583,11 @@ export default function MeetingRoom() {
 								aria-expanded={isTaskDetailOpen}
 								onClick={() => setIsTaskDetailOpen(current => !current)}
 							>
-								海上求生排序
+								{taskTitle}
 							</button>
 						</div>
 					</header>
-					{isTaskDetailOpen && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{LOST_AT_SEA_TASK_DETAIL}</p>}
+					{isTaskDetailOpen && taskDetail && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{taskDetail}</p>}
 					<div className="grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
 						<LostAtSeaRankingPanel
 							title="Public 排序"
@@ -651,13 +708,13 @@ export default function MeetingRoom() {
 						<img
 							className="aspect-[16/11] w-full rounded-md border object-cover"
 							src={taskItemImageSrc(previewItem.id)}
-							alt={TASK_ITEM_IMAGE_META[previewItem.id]?.title ?? previewItem.label}
-							onError={event => handleTaskItemImageError(event, previewItem.id)}
+							alt={previewItem.imageTitle}
+							onError={event => handleTaskItemImageError(event, previewItem)}
 						/>
 						<div className="flex items-center justify-between gap-3">
 							<div className="min-w-0">
 								<div className="truncate text-sm font-semibold">{previewItem.label}</div>
-								<div className="text-xs text-muted-foreground">{TASK_ITEM_IMAGE_META[previewItem.id]?.title ?? previewItem.id}</div>
+								<div className="text-xs text-muted-foreground">{previewItem.imageTitle}</div>
 							</div>
 							<Button type="button" variant="outline" onClick={() => setPreviewItem(null)}>
 								關閉

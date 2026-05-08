@@ -17,8 +17,10 @@ from ..schemas import (
     IdeaBlockGenerateResponse,
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
+    TaskConfigResponse,
     TopicDescriptionResponse,
 )
+from ..task_config import serialize_task_config
 from ..services.board_payloads import (
     serialize_frontend_board_idea_block,
     serialize_frontend_board_idea_block_update,
@@ -46,6 +48,16 @@ COMMON_ERROR_RESPONSES = {
 )
 async def get_topic_description() -> TopicDescriptionResponse:
     return TopicDescriptionResponse(topic_description=TOPIC_DESCRIPTION)
+
+
+@router.get(
+    "/api/task-config",
+    response_model=TaskConfigResponse,
+    summary="Get Task Config",
+    description="Returns the active ranking task description and item definitions for frontend display.",
+)
+async def get_task_config() -> dict[str, Any]:
+    return serialize_task_config()
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:

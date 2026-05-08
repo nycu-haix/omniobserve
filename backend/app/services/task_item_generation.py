@@ -10,42 +10,7 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import TaskItem
 from ..schemas import ApiError
-
-RANKING_ITEMS = [
-    "mosquito_net",
-    "petrol",
-    "water_container",
-    "shaving_mirror",
-    "sextant",
-    "emergency_rations",
-    "sea_chart",
-    "floating_cushion",
-    "rope",
-    "chocolate_bars",
-    "waterproof_sheet",
-    "fishing_rod",
-    "shark_repellent",
-    "rum",
-    "vhf_radio",
-]
-
-RANKING_ITEM_DISPLAY_NAMES = {
-    "mosquito_net": ("蚊帳", "mosquito net"),
-    "petrol": ("一罐汽油", "petrol, gasoline"),
-    "water_container": ("裝水容器", "water container"),
-    "shaving_mirror": ("刮鬍鏡／小鏡子", "shaving mirror, small mirror"),
-    "sextant": ("六分儀", "sextant"),
-    "emergency_rations": ("緊急口糧", "emergency rations"),
-    "sea_chart": ("海圖", "sea chart"),
-    "floating_cushion": ("漂浮坐墊", "floating cushion"),
-    "rope": ("繩子", "rope"),
-    "chocolate_bars": ("巧克力棒", "chocolate bars"),
-    "waterproof_sheet": ("防水布", "waterproof sheet, tarpaulin"),
-    "fishing_rod": ("釣魚竿", "fishing rod"),
-    "shark_repellent": ("驅鯊劑", "shark repellent"),
-    "rum": ("一瓶蘭姆酒", "rum"),
-    "vhf_radio": ("VHF 無線電", "VHF radio"),
-}
+from ..task_config import RANKING_ITEM_DISPLAY_NAMES, RANKING_ITEMS
 
 
 async def build_task_item_ids_with_llm(text: str) -> list[int]:

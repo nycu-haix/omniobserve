@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
+from ..task_config import RANKING_ITEMS
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
@@ -19,23 +20,7 @@ from .participant_status import mark_audio_disconnected, update_audio_status
 from .transcripts import save_ws_transcript_segment
 
 
-DEFAULT_RANKING_ITEMS = [
-    "mosquito_net",
-    "petrol",
-    "water_container",
-    "shaving_mirror",
-    "sextant",
-    "emergency_rations",
-    "sea_chart",
-    "floating_cushion",
-    "rope",
-    "chocolate_bars",
-    "waterproof_sheet",
-    "fishing_rod",
-    "shark_repellent",
-    "rum",
-    "vhf_radio",
-]
+DEFAULT_RANKING_ITEMS = RANKING_ITEMS
 DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
 
 

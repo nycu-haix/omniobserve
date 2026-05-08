@@ -1,6 +1,6 @@
-import type { MutableRefObject, UIEvent } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Radio } from "lucide-react";
+import type { UIEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -285,19 +285,21 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {
 		return lines;
 	}
-	return sortTranscriptLines(lines.map(item =>
-		item.id === existingLine.id
-			? {
-					...item,
-					...line,
-					id: existingLine.origin === "live" && line.origin === "history" ? line.id : existingLine.id,
-					origin: item.origin === "history" || line.origin === "history" ? "history" : line.origin,
-					text: normalizedText,
-					timestampMs: line.timestampMs ?? item.timestampMs,
-					linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
-				}
-			: item
-	));
+	return sortTranscriptLines(
+		lines.map(item =>
+			item.id === existingLine.id
+				? {
+						...item,
+						...line,
+						id: existingLine.origin === "live" && line.origin === "history" ? line.id : existingLine.id,
+						origin: item.origin === "history" || line.origin === "history" ? "history" : line.origin,
+						text: normalizedText,
+						timestampMs: line.timestampMs ?? item.timestampMs,
+						linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
+					}
+				: item
+		)
+	);
 }
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
@@ -318,25 +320,27 @@ function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] 
 }
 
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): IdeaBlock[] {
-	return sortIdeaBlocks(nextBlocks.reduce((blocks, nextBlock) => {
-		const existingBlock = blocks.find(block => block.id === nextBlock.id);
-		if (!existingBlock) {
-			return [...blocks, nextBlock];
-		}
+	return sortIdeaBlocks(
+		nextBlocks.reduce((blocks, nextBlock) => {
+			const existingBlock = blocks.find(block => block.id === nextBlock.id);
+			if (!existingBlock) {
+				return [...blocks, nextBlock];
+			}
 
-		return blocks.map(block =>
-			block.id === nextBlock.id
-				? {
-						...block,
-						...nextBlock,
-						expanded: block.expanded,
-						cueText: block.cueText,
-						hasCue: block.hasCue || nextBlock.hasCue,
-						createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
-					}
-				: block
+			return blocks.map(block =>
+				block.id === nextBlock.id
+					? {
+							...block,
+							...nextBlock,
+							expanded: block.expanded,
+							cueText: block.cueText,
+							hasCue: block.hasCue || nextBlock.hasCue,
+							createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
+						}
+					: block
+			);
+		}, baseBlocks)
 	);
-	}, baseBlocks));
 }
 
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -402,13 +406,19 @@ function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBl
 	return didChange ? linkedLines : lines;
 }
 
-function renderTranscriptLines(
-	lines: TranscriptLineType[],
-	emptyText: string,
-	onJumpToBlock: (blockId: string) => void,
-	transcriptRefs: MutableRefObject<Record<string, HTMLDivElement | null>>,
-	highlightedTranscriptId: string | null
-) {
+function TranscriptLines({
+	lines,
+	emptyText,
+	onJumpToBlock,
+	onTranscriptRef,
+	highlightedTranscriptId
+}: {
+	lines: TranscriptLineType[];
+	emptyText: string;
+	onJumpToBlock: (blockId: string) => void;
+	onTranscriptRef: (lineId: string, node: HTMLDivElement | null) => void;
+	highlightedTranscriptId: string | null;
+}) {
 	const firstLiveLineIndex = lines.findIndex(line => line.origin === "live");
 	const shouldShowLiveDivider = firstLiveLineIndex > 0 && lines.some((line, index) => index < firstLiveLineIndex && line.origin === "history");
 
@@ -419,7 +429,7 @@ function renderTranscriptLines(
 				<div
 					key={line.id}
 					ref={node => {
-						transcriptRefs.current[line.id] = node;
+						onTranscriptRef(line.id, node);
 					}}
 					className={cn("scroll-mt-3 rounded-md transition-shadow", highlightedTranscriptId === line.id && "ring-2 ring-primary")}
 				>
@@ -453,6 +463,9 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
+		transcriptRefs.current[lineId] = node;
+	}, []);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
@@ -474,8 +487,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					fetchTranscriptHistory(buildPrivateTranscriptUrl(sessionId, participantId), controller.signal)
 				]);
 				const allSessionTranscripts = await fetchTranscriptHistory(buildAllSessionTranscriptUrl(sessionId), controller.signal);
-				const legacyPublicTranscripts =
-					publicTranscripts.length === 0 ? allSessionTranscripts.filter(item => item.visibility === "private" && !isOwnTranscriptUser(item.user_id, participantId)) : [];
+				const legacyPublicTranscripts = publicTranscripts.length === 0 ? allSessionTranscripts.filter(item => item.visibility === "private" && !isOwnTranscriptUser(item.user_id, participantId)) : [];
 				const visibleSessionTranscripts = allSessionTranscripts.filter(item => item.visibility === "public" || (item.visibility === "private" && isOwnTranscriptUser(item.user_id, participantId)));
 				const transcriptLinesById = new Map<string, TranscriptLineType>();
 				[...publicTranscripts, ...privateTranscripts, ...visibleSessionTranscripts, ...legacyPublicTranscripts].forEach(item => {
@@ -721,7 +733,11 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		const normalizedContent = values.aiSummary.trim();
 		const currentBlock = ideaBlocks.find(block => block.id === id);
 		const isDraft = currentBlock ? !!currentBlock.isDraft : id.startsWith("draft-");
-		const derivedTitle = isDraft ? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea" : values.updateTitle ? values.summary.trim() || currentBlock?.summary || "Idea" : currentBlock?.summary || values.summary.trim() || "Idea";
+		const derivedTitle = isDraft
+			? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea"
+			: values.updateTitle
+				? values.summary.trim() || currentBlock?.summary || "Idea"
+				: currentBlock?.summary || values.summary.trim() || "Idea";
 
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 			setIdeaBlocks(prev =>
@@ -755,10 +771,10 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 						? {
 								title: derivedTitle
 							}
-					: {
-							summary: normalizedContent,
-							transcript: values.transcript
-						}
+						: {
+								summary: normalizedContent,
+								transcript: values.transcript
+							}
 			)
 		});
 
@@ -916,12 +932,20 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										blockRefs.current[block.id] = node;
 									}}
 								>
-									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} onJumpToTranscript={jumpToTranscript} canJumpToTranscript={canJumpToTranscript(block)} />
+									<IdeaBlockItem
+										block={block}
+										isHighlighted={highlightedBlockId === block.id}
+										onToggle={toggleBlock}
+										onSave={saveIdeaBlock}
+										onDelete={deleteIdeaBlock}
+										onJumpToTranscript={jumpToTranscript}
+										canJumpToTranscript={canJumpToTranscript(block)}
+									/>
 								</div>
 							))}
 						</div>
 					) : (
-						renderTranscriptLines(transcriptLines, "尚無逐字稿", jumpToBlock, transcriptRefs, highlightedTranscriptId)
+						<TranscriptLines lines={transcriptLines} emptyText="尚無逐字稿" onJumpToBlock={jumpToBlock} onTranscriptRef={setTranscriptRef} highlightedTranscriptId={highlightedTranscriptId} />
 					)}
 				</ScrollArea>
 
@@ -930,24 +954,24 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 						<div className="grid gap-2">
 							<div className="flex items-end gap-2">
 								<div className="relative flex-1">
-								<textarea
-									ref={manualIdeaTextareaRef}
-									aria-label="Manual idea block input"
-									className="min-h-10 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
-									placeholder="手動輸入 idea block"
-									value={manualIdeaText}
-									onChange={event => {
-										setManualIdeaText(event.target.value);
-										setManualIdeaError(null);
-									}}
-									onKeyDown={event => {
-										if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-											event.preventDefault();
-											void addManualIdeaBlock();
-										}
-									}}
-									disabled={isSavingManualIdea}
-								/>
+									<textarea
+										ref={manualIdeaTextareaRef}
+										aria-label="Manual idea block input"
+										className="min-h-10 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+										placeholder="手動輸入 idea block"
+										value={manualIdeaText}
+										onChange={event => {
+											setManualIdeaText(event.target.value);
+											setManualIdeaError(null);
+										}}
+										onKeyDown={event => {
+											if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+												event.preventDefault();
+												void addManualIdeaBlock();
+											}
+										}}
+										disabled={isSavingManualIdea}
+									/>
 									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 								</div>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim() || isSavingManualIdea}>

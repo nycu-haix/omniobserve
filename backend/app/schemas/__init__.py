@@ -8,6 +8,8 @@ from .board import (
     IdeaBlockGenerateResponse,
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
+    TaskConfigItemResponse,
+    TaskConfigResponse,
     TopicDescriptionResponse,
 )
 from .errors import ApiError, ErrorResponse
@@ -60,6 +62,8 @@ __all__ = [
     "StreamTranscript",
     "TaskItemCreate",
     "TaskItemResponse",
+    "TaskConfigItemResponse",
+    "TaskConfigResponse",
     "TopicDescriptionResponse",
     "TranscriptCreate",
     "TranscriptCreateRequest",

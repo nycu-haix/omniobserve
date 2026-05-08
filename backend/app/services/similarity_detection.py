@@ -9,18 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, Similarity, TaskItem
+from ..task_config import SIMILARITY_TASK_CONTEXT
 from .realtime import board_manager
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
 
-SIMILARITY_SYSTEM_PROMPT = """
+SIMILARITY_SYSTEM_PROMPT = f"""
 # Role
 你是一位精通海上求生策略與語意邏輯分析的助手。你的任務是從「候選想法列表」中，找出**第一個**在「生存邏輯」上與「核心想法 A」相似的想法。
 
 # Task Context: 海上求生 (Lost at Sea)
-參與者正在針對 15 項工具進行排序，分析必須基於海上漂流情境：
-- 蚊帳 (mosquito_net)、一罐汽油 (petrol)、裝水容器 (water_container)、刮鬍鏡 (shaving_mirror)、六分儀 (sextant)、緊急口糧 (emergency_rations)、海圖 (sea_chart)、漂浮坐墊 (floating_cushion)、繩子 (rope)、巧克力棒 (chocolate_bars)、防水布 (waterproof_sheet)、釣魚竿 (fishing_rod)、驅鯊劑 (shark_repellent)、一瓶蘭姆酒 (rum)、VHF 無線電 (vhf_radio)。
+{SIMILARITY_TASK_CONTEXT}
 
 # Similarity Criteria (判定標準)
 1. **意圖一致**：使用目的（例：求救、防護、飲食、導航）相同。
