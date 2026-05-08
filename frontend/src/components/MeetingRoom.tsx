@@ -42,6 +42,8 @@ const DEFAULT_JITSI_HEIGHT = 120;
 const MIN_JITSI_HEIGHT = 96;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
+
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
 }
@@ -110,6 +112,10 @@ function createRankedItems(itemIds: string[], taskItemsById: Record<string, Task
 	);
 }
 
+function createRankIndexById(items: LostAtSeaItem[]): Map<string, number> {
+	return new Map(items.map((item, index) => [item.id, index + 1]));
+}
+
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
 	return !!message && "type" in message && message.type === "ranking_state" && "items" in message && Array.isArray(message.items);
 }
@@ -145,20 +151,28 @@ function isPhaseChangedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
 }
 
-function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPreview: (item: LostAtSeaItem) => void }) {
+function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSeaItem; rankDelta?: number; onPreview: (item: LostAtSeaItem) => void }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
 	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
+	const isRankConflict = typeof rankDelta === "number" && Math.abs(rankDelta) > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
+	const rankConflictDirection = isRankConflict && rankDelta < 0 ? "up" : "down";
+	const rankConflictAmount = isRankConflict ? Math.abs(rankDelta) : 0;
 
 	return (
 		<div
 			ref={setNodeRef}
-			className={cn("flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2", isDragging && "opacity-50")}
+			className={cn(
+				"flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
+				isRankConflict && "border-muted-foreground/30",
+				isDragging && "opacity-50"
+			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
+			title={isRankConflict ? `與 Public 排序差 ${rankConflictAmount} 位` : undefined}
 			{...attributes}
 			{...listeners}
 			onDoubleClick={() => onPreview(item)}
@@ -172,6 +186,21 @@ function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPre
 			/>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
+			{isRankConflict && (
+				<span
+					className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold", rankConflictDirection === "up" ? "text-emerald-700" : "text-rose-700")}
+					aria-label={`與 Public 排序差 ${rankConflictAmount} 位，Private 排序${rankConflictDirection === "up" ? "較前" : "較後"}`}
+				>
+					<span
+						className={cn(
+							"h-0 w-0 border-x-[5px] border-x-transparent",
+							rankConflictDirection === "up" ? "border-b-[8px] border-b-emerald-600" : "border-t-[8px] border-t-rose-600"
+						)}
+						aria-hidden="true"
+					/>
+					{rankConflictAmount}
+				</span>
+			)}
 			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
@@ -185,7 +214,8 @@ function LostAtSeaRankingPanel({
 	onDragStart,
 	onDragCancel,
 	onDragEnd,
-	onPreviewItem
+	onPreviewItem,
+	getRankDelta
 }: {
 	title: string;
 	status: string;
@@ -195,6 +225,7 @@ function LostAtSeaRankingPanel({
 	onDragCancel: () => void;
 	onDragEnd: (event: DragEndEvent) => void;
 	onPreviewItem: (item: LostAtSeaItem) => void;
+	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
 }) {
 	return (
 		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
@@ -206,7 +237,7 @@ function LostAtSeaRankingPanel({
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} onPreview={onPreviewItem} />
+							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} onPreview={onPreviewItem} />
 						))}
 					</div>
 				</SortableContext>
@@ -250,6 +281,8 @@ export default function MeetingRoom() {
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
+	const shouldHighlightRankConflict = currentPhase === "group";
 	const meetingLayoutStyle = {
 		"--private-board-width": `${privateBoardWidth}px`,
 		"--jitsi-height": `${jitsiHeight}px`
@@ -646,6 +679,13 @@ export default function MeetingRoom() {
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							onPreviewItem={setPreviewItem}
+							getRankDelta={item => {
+								if (!shouldHighlightRankConflict) {
+									return undefined;
+								}
+								const publicRank = publicRankIndexById.get(item.id);
+								return publicRank == null ? undefined : item.rank - publicRank;
+							}}
 						/>
 					</div>
 				</section>
