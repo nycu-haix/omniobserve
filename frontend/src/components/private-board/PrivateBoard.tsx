@@ -345,6 +345,7 @@ function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 
 function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBlock[]): TranscriptLineType[] {
 	const transcriptBlockIds = new Map<string, string>();
+	const transcriptBlockTexts = new Map<string, string>();
 
 	blocks.forEach(block => {
 		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
@@ -353,6 +354,10 @@ function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBl
 				transcriptBlockIds.set(transcriptId, block.id);
 			}
 		});
+		const normalizedTranscript = block.transcript?.trim();
+		if (normalizedTranscript && !transcriptBlockTexts.has(normalizedTranscript)) {
+			transcriptBlockTexts.set(normalizedTranscript, block.id);
+		}
 	});
 
 	let didChange = false;
@@ -369,7 +374,7 @@ function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBl
 			};
 		}
 
-		const linkedBlockId = transcriptBlockIds.get(line.id);
+		const linkedBlockId = transcriptBlockIds.get(line.id) ?? transcriptBlockTexts.get(line.text.trim());
 		if (!linkedBlockId || line.linkedBlockId === linkedBlockId) {
 			return line;
 		}
@@ -432,6 +437,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
@@ -473,6 +479,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					totalCount: transcriptLinesFromDb.length
 				});
 				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
+				setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocksRef.current));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
 					return;
@@ -516,6 +523,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	}, [ideaBlockRefreshKey, participantId, sessionId]);
 
 	useEffect(() => {
+		ideaBlocksRef.current = ideaBlocks;
 		const timer = window.setTimeout(() => {
 			setTranscriptLines(prev => linkTranscriptLinesToBlocks(prev, ideaBlocks));
 		}, 0);
@@ -539,13 +547,16 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 			if (lastMessage.type === "new_transcript_line") {
 				setTranscriptLines(prev =>
-					appendTranscriptLine(prev, {
-						...lastMessage.payload,
-						origin: "live",
-						isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId),
-						timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
-						time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
-					})
+					linkTranscriptLinesToBlocks(
+						appendTranscriptLine(prev, {
+							...lastMessage.payload,
+							origin: "live",
+							isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId),
+							timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
+							time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
+						}),
+						ideaBlocks
+					)
 				);
 			}
 
@@ -556,7 +567,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastMessage, participantId]);
+	}, [ideaBlocks, lastMessage, participantId]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -578,16 +589,19 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				}
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
 				setTranscriptLines(prev =>
-					appendTranscriptLine(prev, {
-						...transcriptLine,
-						isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId)
-					})
+					linkTranscriptLinesToBlocks(
+						appendTranscriptLine(prev, {
+							...transcriptLine,
+							isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId)
+						}),
+						ideaBlocks
+					)
 				);
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, participantId]);
+	}, [ideaBlocks, lastAudioMessage, participantId]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
@@ -597,11 +611,15 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		const timer = window.setTimeout(() => {
 			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
 				const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
+				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
-					const mergedBlocks = mergeIdeaBlocks(prev, updatedBlocks);
-					setTranscriptLines(lines => linkTranscriptLinesToBlocks(lines, mergedBlocks));
-					return mergedBlocks;
+					mergedBlocksSnapshot = mergeIdeaBlocks(prev, updatedBlocks);
+					ideaBlocksRef.current = mergedBlocksSnapshot;
+					return mergedBlocksSnapshot;
 				});
+				window.setTimeout(() => {
+					setTranscriptLines(lines => linkTranscriptLinesToBlocks(lines, mergedBlocksSnapshot.length > 0 ? mergedBlocksSnapshot : updatedBlocks));
+				}, 0);
 			}
 
 			setIdeaBlockRefreshKey(current => current + 1);
