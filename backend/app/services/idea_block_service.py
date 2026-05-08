@@ -23,6 +23,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
+    _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -74,7 +75,7 @@ async def list_idea_blocks(
         stmt = stmt.where(IdeaBlock.session_name == session_name)
     if similarity_id is not None:
         stmt = stmt.where(IdeaBlock.similarity_id == similarity_id)
-    stmt = stmt.order_by(IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
+    stmt = stmt.order_by(IdeaBlock.is_deleted.desc(), IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
 

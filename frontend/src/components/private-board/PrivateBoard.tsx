@@ -138,12 +138,6 @@ function buildAllSessionTranscriptUrl(sessionId: string): string {
 	return apiUrl(`/api/sessions/${encodedSessionId}/transcripts`);
 }
 
-function buildUserTranscriptUrl(sessionId: string, participantId: string): string {
-	const encodedSessionId = encodeURIComponent(sessionId);
-	const userId = getTranscriptUserId(participantId);
-	return apiUrl(`/api/sessions/${encodedSessionId}/users/${encodeURIComponent(String(userId))}/transcripts`);
-}
-
 function buildIdeaBlocksUrl(sessionId: string, participantId: string): string {
 	const encodedSessionId = encodeURIComponent(sessionId);
 	const userId = getTranscriptUserId(participantId);
@@ -347,6 +341,10 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
+		if (!!left.isDeleted !== !!right.isDeleted) {
+			return left.isDeleted ? -1 : 1;
+		}
+
 		const leftTime = left.createdAtMs ?? Number(left.id);
 		const rightTime = right.createdAtMs ?? Number(right.id);
 
@@ -454,6 +452,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
@@ -686,6 +685,15 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		window.setTimeout(() => setHighlightedTranscriptId(transcriptId), 0);
 	};
 
+	const canJumpToTranscript = (block: IdeaBlock) => {
+		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
+		if (transcriptIds.length === 0) {
+			return false;
+		}
+
+		return transcriptLines.some(line => line.source === "private" && line.linkedBlockId === block.id && transcriptIds.includes(line.id));
+	};
+
 	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
 		shouldAutoScrollRef.current[activeTab] = isNearScrollBottom(event.currentTarget);
 	};
@@ -698,6 +706,16 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 		viewport.scrollTop = viewport.scrollHeight;
 	}, [activeTab, ideaBlocks, transcriptLines]);
+
+	useLayoutEffect(() => {
+		const textarea = manualIdeaTextareaRef.current;
+		if (!textarea) {
+			return;
+		}
+
+		textarea.style.height = "40px";
+		textarea.style.height = `${Math.max(40, textarea.scrollHeight)}px`;
+	}, [manualIdeaText]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
@@ -824,28 +842,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				return;
 			}
 
-			const transcriptResponse = await fetch(buildUserTranscriptUrl(sessionId, participantId), {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					transcript: normalizedContent,
-					visibility: "private"
-				})
-			});
-
-			if (!transcriptResponse.ok) {
-				throw new Error("Failed to save transcript");
-			}
-
-			const savedTranscript = (await transcriptResponse.json()) as TranscriptResponse;
-
 			const response = await fetch(buildIdeaBlocksUrl(sessionId, participantId), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					title: derivedTitle,
-					summary: normalizedContent,
-					transcript_id: savedTranscript.id
+					summary: normalizedContent
 				})
 			});
 
@@ -918,7 +920,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										blockRefs.current[block.id] = node;
 									}}
 								>
-									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} onJumpToTranscript={jumpToTranscript} />
+									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} onJumpToTranscript={jumpToTranscript} canJumpToTranscript={canJumpToTranscript(block)} />
 								</div>
 							))}
 						</div>
@@ -931,9 +933,11 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<div className="flex items-end gap-2">
+								<div className="relative flex-1">
 								<textarea
+									ref={manualIdeaTextareaRef}
 									aria-label="Manual idea block input"
-									className="max-h-28 min-h-11 flex-1 resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+									className="min-h-10 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 									placeholder="手動輸入 idea block"
 									value={manualIdeaText}
 									onChange={event => {
@@ -941,13 +945,15 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										setManualIdeaError(null);
 									}}
 									onKeyDown={event => {
-										if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+										if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 											event.preventDefault();
 											void addManualIdeaBlock();
 										}
 									}}
 									disabled={isSavingManualIdea}
 								/>
+									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
+								</div>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim() || isSavingManualIdea}>
 									{isSavingManualIdea ? "儲存中" : "新增"}
 								</Button>
