@@ -687,11 +687,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 
 	const canJumpToTranscript = (block: IdeaBlock) => {
 		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
-		if (transcriptIds.length === 0) {
-			return false;
-		}
-
-		return transcriptLines.some(line => line.source === "private" && line.linkedBlockId === block.id && transcriptIds.includes(line.id));
+		return transcriptIds.length > 0;
 	};
 
 	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
