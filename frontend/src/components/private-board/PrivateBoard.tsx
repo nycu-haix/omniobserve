@@ -1,4 +1,4 @@
-import type { UIEvent } from "react";
+import type { MutableRefObject, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Radio } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -161,8 +161,9 @@ function isOwnTranscriptUser(userId: string | number | null | undefined, partici
 	return userIdText === participantId || Number(userIdText) === getTranscriptUserId(participantId);
 }
 
-function transcriptResponseToLine(item: TranscriptResponse, participantId: string): TranscriptLineType {
-	const source = item.visibility === "public" || item.visibility === "private" ? item.visibility : "private";
+function transcriptResponseToLine(item: TranscriptResponse, participantId: string, sourceOverride?: TranscriptLineType["source"]): TranscriptLineType {
+	const source = sourceOverride ?? (item.visibility === "public" || item.visibility === "private" ? item.visibility : "private");
+	const timestampMs = Date.parse(item.time_stamp);
 	return {
 		id: String(item.id),
 		source,
@@ -170,6 +171,7 @@ function transcriptResponseToLine(item: TranscriptResponse, participantId: strin
 		userId: String(item.user_id),
 		isOwn: isOwnTranscriptUser(item.user_id, participantId),
 		time: formatTranscriptTime(item.time_stamp),
+		timestampMs: Number.isNaN(timestampMs) ? undefined : timestampMs,
 		text: item.transcript
 	};
 }
@@ -228,12 +230,14 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
 	const userId = message.participant_id ?? message.userId ?? message.user_id;
 	const source = transcriptSourceFromAudioMessage(message);
+	const timestampMs = typeof message.timestamp_ms === "number" ? message.timestamp_ms : Date.now();
 	return {
 		id: segmentId == null ? `audio-${Date.now()}` : String(segmentId),
 		source,
 		origin: "live",
 		userId: userId == null ? undefined : String(userId),
-		time: formatTranscriptTime(message.timestamp_ms),
+		time: formatTranscriptTime(timestampMs),
+		timestampMs,
 		text: message.text?.trim() ?? ""
 	};
 }
@@ -258,27 +262,51 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 		return lines;
 	}
 
-	const existingLine = lines.find(item => item.id === line.id);
+	const normalizedUserId = line.userId == null ? undefined : String(line.userId);
+	const existingLine = lines.find(item => {
+		if (item.id === line.id) {
+			return true;
+		}
+
+		const itemUserId = item.userId == null ? undefined : String(item.userId);
+		return item.text.trim() === normalizedText && item.source === line.source && itemUserId === normalizedUserId;
+	});
 	if (!existingLine) {
-		return [...lines, { ...line, text: normalizedText }];
+		return sortTranscriptLines([...lines, { ...line, text: normalizedText }]);
 	}
 	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {
 		return lines;
 	}
-	return lines.map(item =>
-		item.id === line.id
+	return sortTranscriptLines(lines.map(item =>
+		item.id === existingLine.id
 			? {
 					...item,
 					...line,
+					id: existingLine.origin === "live" && line.origin === "history" ? line.id : existingLine.id,
+					origin: item.origin === "history" || line.origin === "history" ? "history" : line.origin,
 					text: normalizedText,
+					timestampMs: line.timestampMs ?? item.timestampMs,
 					linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
 				}
 			: item
-	);
+	));
 }
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
 	return nextLines.reduce((lines, line) => appendTranscriptLine(lines, line), baseLines);
+}
+
+function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
+	return [...lines].sort((left, right) => {
+		const leftTime = left.timestampMs ?? Number(left.id);
+		const rightTime = right.timestampMs ?? Number(right.id);
+
+		if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+			return leftTime - rightTime;
+		}
+
+		return left.id.localeCompare(right.id, undefined, { numeric: true });
+	});
 }
 
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): IdeaBlock[] {
@@ -328,6 +356,18 @@ function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBl
 
 	let didChange = false;
 	const linkedLines = lines.map(line => {
+		if (line.source !== "private") {
+			if (!line.linkedBlockId) {
+				return line;
+			}
+
+			didChange = true;
+			return {
+				...line,
+				linkedBlockId: undefined
+			};
+		}
+
 		const linkedBlockId = transcriptBlockIds.get(line.id);
 		if (!linkedBlockId || line.linkedBlockId === linkedBlockId) {
 			return line;
@@ -343,7 +383,13 @@ function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBl
 	return didChange ? linkedLines : lines;
 }
 
-function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, onJumpToBlock: (blockId: string) => void) {
+function renderTranscriptLines(
+	lines: TranscriptLineType[],
+	emptyText: string,
+	onJumpToBlock: (blockId: string) => void,
+	transcriptRefs: MutableRefObject<Record<string, HTMLDivElement | null>>,
+	highlightedTranscriptId: string | null
+) {
 	const firstLiveLineIndex = lines.findIndex(line => line.origin === "live");
 	const shouldShowLiveDivider = firstLiveLineIndex > 0 && lines.some((line, index) => index < firstLiveLineIndex && line.origin === "history");
 
@@ -351,7 +397,13 @@ function renderTranscriptLines(lines: TranscriptLineType[], emptyText: string, o
 		<div className="grid gap-1">
 			{lines.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">{emptyText}</div>}
 			{lines.map((line, index) => (
-				<div key={line.id} className="contents">
+				<div
+					key={line.id}
+					ref={node => {
+						transcriptRefs.current[line.id] = node;
+					}}
+					className={cn("scroll-mt-3 rounded-md transition-shadow", highlightedTranscriptId === line.id && "ring-2 ring-primary")}
+				>
 					{shouldShowLiveDivider && index === firstLiveLineIndex && (
 						<div className="my-3 flex items-center gap-3 text-xs text-muted-foreground">
 							<div className="h-px flex-1 bg-border" />
@@ -373,11 +425,13 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 	const [transcriptRefreshKey, setTranscriptRefreshKey] = useState(0);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
+	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
 	const [isSavingManualIdea, setIsSavingManualIdea] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
@@ -399,10 +453,25 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 					fetchTranscriptHistory(buildPublicTranscriptUrl(sessionId), controller.signal),
 					fetchTranscriptHistory(buildPrivateTranscriptUrl(sessionId, participantId), controller.signal)
 				]);
-				const fallbackSessionTranscripts =
-					publicTranscripts.length === 0 ? await fetchTranscriptHistory(buildAllSessionTranscriptUrl(sessionId), controller.signal) : [];
-				const fallbackPublicTranscripts = fallbackSessionTranscripts.filter(item => item.visibility === "public");
-				const transcriptLinesFromDb = [...publicTranscripts, ...fallbackPublicTranscripts, ...privateTranscripts].map(item => transcriptResponseToLine(item, participantId));
+				const allSessionTranscripts = await fetchTranscriptHistory(buildAllSessionTranscriptUrl(sessionId), controller.signal);
+				const legacyPublicTranscripts =
+					publicTranscripts.length === 0 ? allSessionTranscripts.filter(item => item.visibility === "private" && !isOwnTranscriptUser(item.user_id, participantId)) : [];
+				const visibleSessionTranscripts = allSessionTranscripts.filter(item => item.visibility === "public" || (item.visibility === "private" && isOwnTranscriptUser(item.user_id, participantId)));
+				const transcriptLinesById = new Map<string, TranscriptLineType>();
+				[...publicTranscripts, ...privateTranscripts, ...visibleSessionTranscripts, ...legacyPublicTranscripts].forEach(item => {
+					const line = transcriptResponseToLine(item, participantId, legacyPublicTranscripts.includes(item) ? "public" : undefined);
+					transcriptLinesById.set(line.id, line);
+				});
+				const transcriptLinesFromDb = sortTranscriptLines(Array.from(transcriptLinesById.values()));
+				console.info("[private-board] loaded transcript history", {
+					sessionId,
+					participantId,
+					publicCount: publicTranscripts.length,
+					sessionCount: allSessionTranscripts.length,
+					legacyPublicCount: legacyPublicTranscripts.length,
+					privateCount: privateTranscripts.length,
+					totalCount: transcriptLinesFromDb.length
+				});
 				setTranscriptLines(prev => mergeTranscriptLines(transcriptLinesFromDb, prev));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -550,9 +619,33 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 		return () => window.clearTimeout(timer);
 	}, [highlightedBlockId]);
 
+	useEffect(() => {
+		if (!highlightedTranscriptId) {
+			return;
+		}
+
+		transcriptRefs.current[highlightedTranscriptId]?.scrollIntoView({
+			behavior: "smooth",
+			block: "center"
+		});
+
+		const timer = window.setTimeout(() => setHighlightedTranscriptId(null), 1500);
+		return () => window.clearTimeout(timer);
+	}, [highlightedTranscriptId, activeTab]);
+
 	const jumpToBlock = (blockId: string) => {
 		setActiveTab("ideablock");
 		setHighlightedBlockId(blockId);
+	};
+
+	const jumpToTranscript = (block: IdeaBlock) => {
+		const transcriptId = block.transcriptLineId ?? block.sourceTranscriptIds?.[0];
+		if (!transcriptId) {
+			return;
+		}
+
+		setActiveTab("transcript");
+		window.setTimeout(() => setHighlightedTranscriptId(transcriptId), 0);
 	};
 
 	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -696,6 +789,7 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 						userId: participantId,
 						isOwn: true,
 						time: formatTranscriptTime(Date.now()),
+						timestampMs: Date.now(),
 						text: normalizedContent,
 						linkedBlockId: newBlock.id
 					})
@@ -709,7 +803,8 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					transcript: normalizedContent
+					transcript: normalizedContent,
+					visibility: "private"
 				})
 			});
 
@@ -799,12 +894,12 @@ export function PrivateBoard({ sessionId, participantId, lastMessage, lastAudioM
 										blockRefs.current[block.id] = node;
 									}}
 								>
-									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} />
+									<IdeaBlockItem block={block} isHighlighted={highlightedBlockId === block.id} onToggle={toggleBlock} onSave={saveIdeaBlock} onDelete={deleteIdeaBlock} onJumpToTranscript={jumpToTranscript} />
 								</div>
 							))}
 						</div>
 					) : (
-						renderTranscriptLines(transcriptLines, "尚無逐字稿", jumpToBlock)
+						renderTranscriptLines(transcriptLines, "尚無逐字稿", jumpToBlock, transcriptRefs, highlightedTranscriptId)
 					)}
 				</ScrollArea>
 

@@ -99,7 +99,8 @@ async def startup() -> None:
                               AND table_name = 'transcript'
                               AND column_name = 'visibility'
                         ) THEN
-                            ALTER TABLE transcript ADD COLUMN visibility varchar(16) NOT NULL DEFAULT 'private';
+                            ALTER TABLE transcript ADD COLUMN visibility varchar(16) NOT NULL DEFAULT 'public';
+                            ALTER TABLE transcript ALTER COLUMN visibility SET DEFAULT 'private';
                         END IF;
                     END IF;
                 END $$;

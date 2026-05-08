@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useState, type MouseEvent } from "react";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
@@ -12,9 +12,10 @@ interface IdeaBlockItemProps {
 	onToggle: (id: string) => void;
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
+	onJumpToTranscript?: (block: IdeaBlock) => void;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete }: IdeaBlockItemProps) {
+export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript }: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -34,6 +35,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const titleTooLong = draftTitle.trim().length > 10;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving;
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
+	const hasLinkedTranscript = !!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0;
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -241,6 +243,13 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 								</Button>
 							</div>
 						</div>
+					)}
+
+					{hasLinkedTranscript && (
+						<Button className="w-fit gap-2" variant="ghost" size="sm" onClick={() => onJumpToTranscript?.(block)}>
+							<CornerDownLeft className="h-4 w-4" />
+							
+						</Button>
 					)}
 				</div>
 			)}

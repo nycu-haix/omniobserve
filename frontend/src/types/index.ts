@@ -19,6 +19,7 @@ export interface TranscriptLine {
 	id: string;
 	text: string;
 	time?: string;
+	timestampMs?: number;
 	source?: "public" | "private";
 	origin?: "history" | "live";
 	userId?: string;

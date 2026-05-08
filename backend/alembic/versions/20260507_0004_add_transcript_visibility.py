@@ -18,8 +18,9 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "transcript",
-        sa.Column("visibility", sa.String(length=16), nullable=False, server_default="private"),
+        sa.Column("visibility", sa.String(length=16), nullable=False, server_default="public"),
     )
+    op.alter_column("transcript", "visibility", server_default="private")
     op.create_index("idx_transcript_visibility", "transcript", ["visibility"])
 
 

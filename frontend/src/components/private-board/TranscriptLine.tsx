@@ -11,16 +11,17 @@ interface TranscriptLineProps {
 
 export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 	const isPrivate = line.source === "private";
+	const isOwn = !!line.isOwn;
 	const isOwnPublic = line.source === "public" && line.isOwn;
 	const speakerName = line.displayName || (line.userId ? getDefaultParticipantName(line.userId) : undefined);
 
 	return (
-		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", isPrivate ? "justify-end" : "justify-start")}>
-			<div className={cn("flex w-full min-w-0 flex-col gap-1", isPrivate ? "items-end" : "items-start")}>
+		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", isOwn ? "justify-end" : "justify-start")}>
+			<div className={cn("flex w-full min-w-0 flex-col gap-1", isOwn ? "items-end" : "items-start")}>
 				<div
 					className={cn(
 						"max-w-[75%] whitespace-normal text-left [overflow-wrap:normal] [word-break:normal]",
-						isPrivate && "rounded-md bg-muted px-3 py-1",
+						isPrivate && isOwn && "rounded-md bg-muted px-3 py-1",
 						isOwnPublic && "rounded-md border border-primary/70 px-3 py-1"
 					)}
 				>
@@ -30,8 +31,8 @@ export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 						{line.time && <span className="whitespace-nowrap text-xs text-muted-foreground">{line.time}</span>}
 					</div>
 				</div>
-				{line.linkedBlockId && (
-					<Button className={cn("shrink-0", isPrivate ? "self-end" : "self-start")} variant="ghost" size="sm" onClick={() => onJumpToBlock?.(line.linkedBlockId as string)}>
+				{line.source === "private" && line.linkedBlockId && (
+					<Button className={cn("shrink-0", isOwn ? "self-end" : "self-start")} variant="ghost" size="sm" onClick={() => onJumpToBlock?.(line.linkedBlockId as string)}>
 						<CornerDownRight className="h-4 w-4" />
 						跳至想法
 					</Button>

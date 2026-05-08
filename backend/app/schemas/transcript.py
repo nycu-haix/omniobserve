@@ -7,10 +7,12 @@ class TranscriptCreate(BaseModel):
     user_id: int
     session_name: str
     transcript: str
+    visibility: str = "private"
 
 
 class TranscriptCreateRequest(BaseModel):
     transcript: str
+    visibility: str = "private"
 
 
 class TranscriptResponse(BaseModel):

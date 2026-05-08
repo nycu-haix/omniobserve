@@ -27,12 +27,22 @@ async def save_ws_transcript_segment(
 
     try:
         db.add(transcript)
+        await db.flush()
         await db.commit()
+        await db.refresh(transcript)
     except SQLAlchemyError as exc:
         await db.rollback()
         logger.exception("Failed to save transcript segment from stream: %s", exc)
         return None
 
+    logger.info(
+        "transcript_segment_saved transcript_id=%s session_name=%s participant_id=%s visibility=%s chars=%s",
+        transcript.id,
+        session_name,
+        participant_id,
+        visibility.value,
+        len(transcript.transcript),
+    )
     return StreamTranscript(segment_id=str(transcript.id), text=transcript.transcript)
 
 

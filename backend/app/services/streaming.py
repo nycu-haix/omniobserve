@@ -215,8 +215,11 @@ async def handle_audio_stream_websocket(
                             {
                                 "type": "transcript_update",
                                 "transcript_segment_id": saved_segment.segment_id,
+                                "participant_id": participant_id,
+                                "scope": stream_context.scope.value,
                                 "text": saved_segment.text,
                                 "is_final": False,
+                                "persisted": True,
                             },
                         )
                         await broadcast_admin_transcript(
