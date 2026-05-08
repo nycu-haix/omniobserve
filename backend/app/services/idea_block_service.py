@@ -19,7 +19,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     idea_block_data = payload.model_dump()
-    idea_block_data["embedding_vector"] = await create_text_embedding(payload.summary)
+    idea_block_data["embedding_vector"] = await _create_embedding_or_none(payload.summary)
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
@@ -109,7 +109,7 @@ async def update_idea_block(
             idea_block.main_transcript.transcript = transcript_value
 
     if summary_changed:
-        update_data["embedding_vector"] = await create_text_embedding(update_data["summary"])
+        update_data["embedding_vector"] = await _create_embedding_or_none(update_data["summary"])
 
     for field, value in update_data.items():
         setattr(idea_block, field, value)
@@ -157,7 +157,7 @@ async def update_scoped_idea_block(
             idea_block.main_transcript.transcript = transcript_value
 
     if summary_changed:
-        update_data["embedding_vector"] = await create_text_embedding(update_data["summary"])
+        update_data["embedding_vector"] = await _create_embedding_or_none(update_data["summary"])
 
     for field, value in update_data.items():
         setattr(idea_block, field, value)
@@ -179,6 +179,20 @@ async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
     idea_block = await get_idea_block(idea_block_id, db)
     idea_block.is_deleted = True
     await db.commit()
+
+
+async def _create_embedding_or_none(text: str) -> list[float] | None:
+    try:
+        return await create_text_embedding(text)
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.warning(
+            "idea_block_embedding_skipped status=%s detail=%s",
+            exc.status_code,
+            exc.detail,
+        )
+        return None
 
 
 async def delete_scoped_idea_block(

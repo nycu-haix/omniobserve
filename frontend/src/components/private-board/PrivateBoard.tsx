@@ -154,6 +154,17 @@ function buildIdeaBlockDetailUrl(sessionId: string, participantId: string, ideaB
 	return `${buildIdeaBlocksUrl(sessionId, participantId)}/${encodeURIComponent(ideaBlockId)}`;
 }
 
+async function getResponseErrorMessage(response: Response, fallback: string): Promise<string> {
+	try {
+		const payload = (await response.json()) as { detail?: unknown; message?: unknown };
+		const detail = typeof payload.detail === "string" ? payload.detail : undefined;
+		const message = typeof payload.message === "string" ? payload.message : undefined;
+		return detail || message || `${fallback} (${response.status})`;
+	} catch {
+		return `${fallback} (${response.status})`;
+	}
+}
+
 function isOwnTranscriptUser(userId: string | number | null | undefined, participantId: string): boolean {
 	if (userId == null) {
 		return false;
@@ -767,8 +778,8 @@ export function PrivateBoard({
 			return;
 		}
 
-		textarea.style.height = "40px";
-		textarea.style.height = `${Math.max(40, textarea.scrollHeight)}px`;
+		textarea.style.height = "44px";
+		textarea.style.height = `${Math.max(44, textarea.scrollHeight)}px`;
 	}, [manualIdeaText]);
 
 	const toggleBlock = (id: string) => {
@@ -825,7 +836,7 @@ export function PrivateBoard({
 		});
 
 		if (!response.ok) {
-			throw new Error("Failed to save idea block");
+			throw new Error(await getResponseErrorMessage(response, "Failed to save idea block"));
 		}
 
 		const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
@@ -910,7 +921,7 @@ export function PrivateBoard({
 			});
 
 			if (!response.ok) {
-				throw new Error("Failed to save idea block");
+				throw new Error(await getResponseErrorMessage(response, "Failed to save idea block"));
 			}
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
@@ -1006,7 +1017,7 @@ export function PrivateBoard({
 									<textarea
 										ref={manualIdeaTextareaRef}
 										aria-label="Manual idea block input"
-										className="min-h-10 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+										className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 										placeholder="手動輸入 idea block"
 										value={manualIdeaText}
 										onChange={event => {

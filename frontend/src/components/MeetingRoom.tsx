@@ -11,7 +11,7 @@ import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import type { MicMode } from "../types";
-import { JitsiRoom } from "./JitsiRoom";
+import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
 
@@ -27,6 +27,12 @@ interface LostAtSeaItem {
 
 type RankingScope = "public" | "private";
 type SessionPhase = "private" | "group";
+const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
+	loading: "連線中",
+	connected: "已連線",
+	closed: "已離線",
+	unavailable: "未啟用"
+};
 
 interface RankingSnapshot {
 	revision: number;
@@ -260,6 +266,7 @@ export default function MeetingRoom() {
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
+	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -280,6 +287,9 @@ export default function MeetingRoom() {
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
+		setJitsiStatus(status);
+	}, []);
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
@@ -724,9 +734,10 @@ export default function MeetingRoom() {
 				</div>
 
 				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
+					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
 					<div className="hidden">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
 						{micPermission !== "granted" && micPermission !== "unknown" && (
 							<button onClick={() => void requestMicPermission()} className="text-left text-primary transition-colors hover:text-primary/80 hover:underline">
 								{micPermission === "denied" ? "麥克風已拒絕" : "允許麥克風權限"}
@@ -763,6 +774,7 @@ export default function MeetingRoom() {
 				<div className="relative flex items-center justify-center pt-2">
 					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
 						{micPermission !== "granted" && micPermission !== "unknown" && (
 							<button onClick={() => void requestMicPermission()} className="text-primary hover:underline hover:text-primary/80 transition-colors text-left">
 								{micPermission === "denied" ? "麥克風已拒絕 (需至瀏覽器開啟)" : "點擊允許麥克風權限"}
