@@ -25,6 +25,7 @@ from .idea_block import (
     IdeaBlockUpdate,
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
+from .ranking_move import RankingMoveResponse
 from .similarity import (
     SimilarityCreate,
     SimilarityResponse,
@@ -59,6 +60,7 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
+    "RankingMoveResponse",
     "SimilarityCreate",
     "SimilarityResponse",
     "SimilarityUpdate",

@@ -1,6 +1,9 @@
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import RankingMove
+
+MAX_RANKING_MOVE_HISTORY_LIMIT = 500
 
 
 async def create_ranking_move(
@@ -33,3 +36,27 @@ async def create_ranking_move(
     await db.commit()
     await db.refresh(ranking_move)
     return ranking_move
+
+
+async def list_ranking_moves_by_session(
+    session_name: str,
+    db: AsyncSession,
+    *,
+    scope: str | None = None,
+    participant_id: str | None = None,
+    limit: int = 100,
+) -> list[RankingMove]:
+    bounded_limit = min(max(limit, 1), MAX_RANKING_MOVE_HISTORY_LIMIT)
+    stmt = (
+        select(RankingMove)
+        .where(RankingMove.session_name == session_name)
+        .order_by(RankingMove.time_stamp.desc(), RankingMove.id.desc())
+        .limit(bounded_limit)
+    )
+    if scope is not None:
+        stmt = stmt.where(RankingMove.scope == scope)
+    if participant_id is not None:
+        stmt = stmt.where(RankingMove.participant_id == participant_id)
+
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
