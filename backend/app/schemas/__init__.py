@@ -12,6 +12,7 @@ from .board import (
     TaskConfigResponse,
     TopicDescriptionResponse,
 )
+from .chat_message import ChatMessageCreate, ChatMessageCreateRequest, ChatMessageResponse
 from .errors import ApiError, ErrorResponse
 from .idea_block import (
     IdeaBlockCreate,
@@ -35,6 +36,9 @@ from .transcript import TranscriptCreate, TranscriptCreateRequest, TranscriptRes
 
 __all__ = [
     "ApiError",
+    "ChatMessageCreate",
+    "ChatMessageCreateRequest",
+    "ChatMessageResponse",
     "ErrorResponse",
     "FrontendBoardBlockCreateRequest",
     "FrontendBoardBlockCreateResponse",

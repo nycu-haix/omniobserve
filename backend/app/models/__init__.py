@@ -1,4 +1,5 @@
 from .base import Base
+from .chat_message import ChatMessage
 from .idea_block import IdeaBlock
 from .idea_block_to_transcript import IdeaBlockToTranscript
 from .similarity import Similarity
@@ -8,6 +9,7 @@ from .visibility import Visibility
 
 __all__ = [
     "Base",
+    "ChatMessage",
     "IdeaBlock",
     "IdeaBlockToTranscript",
     "Similarity",

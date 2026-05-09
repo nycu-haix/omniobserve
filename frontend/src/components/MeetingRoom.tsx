@@ -849,6 +849,8 @@ export default function MeetingRoom() {
 					isConnected={isConnected}
 					micMode={micMode}
 					onMicModeChange={handleMic}
+					onSendBoardMessage={sendMessage}
+					displayName={displayName}
 					currentPhase={currentPhase}
 					timerEndTime={timerEndTime}
 				/>

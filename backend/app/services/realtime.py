@@ -12,9 +12,11 @@ from starlette.websockets import WebSocketState
 from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
+from ..schemas import ChatMessageCreate
 from ..task_config import RANKING_ITEMS
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
+from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import mark_audio_disconnected, update_audio_status
 from .transcripts import save_ws_transcript_segment
@@ -203,6 +205,19 @@ def _normalize_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= 0 else default
+
+
+def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
+    timestamp_ms = int(chat_message.time_stamp.timestamp() * 1000) if chat_message.time_stamp else _now_ms()
+    return {
+        "id": str(chat_message.id),
+        "sessionName": chat_message.session_name,
+        "userId": str(chat_message.user_id),
+        "displayName": chat_message.display_name,
+        "message": chat_message.message,
+        "timestampMs": timestamp_ms,
+        "isDeleted": chat_message.is_deleted,
+    }
 
 
 def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -410,6 +425,59 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                     else:
                         await board_manager.broadcast(session_id, message)
                     await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
+                continue
+
+            if message_type == "public_chat_send":
+                message_text = str(payload.get("message") or "").strip()
+                if not message_text:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "public_chat_error", "reason": "message cannot be empty"},
+                    )
+                    continue
+                if len(message_text) > 2000:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "public_chat_error", "reason": "message is too long"},
+                    )
+                    continue
+
+                display_name = str(payload.get("displayName") or "").strip() or None
+                async with SessionLocal() as db:
+                    try:
+                        saved_message = await create_chat_message(
+                            ChatMessageCreate(
+                                session_name=session_id,
+                                user_id=_normalize_int(participant_id, 0),
+                                display_name=display_name,
+                                message=message_text,
+                            ),
+                            db,
+                        )
+                    except Exception as exc:
+                        await db.rollback()
+                        logger.warning(
+                            "public_chat_send failed session_id=%s participant_id=%s reason=%s",
+                            session_id,
+                            participant_id,
+                            exc,
+                        )
+                        await board_manager.send_to(
+                            session_id,
+                            participant_id,
+                            {"type": "public_chat_error", "reason": "failed to save message"},
+                        )
+                        continue
+
+                await board_manager.broadcast(
+                    session_id,
+                    {
+                        "type": "public_chat_message",
+                        "payload": _chat_message_payload(saved_message),
+                    },
+                )
                 continue
 
             if message_type in {"block_publish", "block_discard", "block_edit"}:

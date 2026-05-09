@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from .chat_messages import router as chat_messages_router
 from .idea_block_to_transcript import router as idea_block_to_transcript_router
 from .idea_blocks import router as idea_blocks_router
 from .similarities import router as similarities_router
@@ -9,6 +10,7 @@ from .transcripts import router as transcripts_router
 router = APIRouter(prefix="/api")
 
 router.include_router(transcripts_router)
+router.include_router(chat_messages_router)
 router.include_router(idea_blocks_router)
 router.include_router(similarities_router)
 router.include_router(task_items_router)

@@ -16,6 +16,7 @@ OPENAPI_TAGS = [
     {"name": "Similarities", "description": "Manage similarity pairs between idea blocks."},
     {"name": "Task Items", "description": "Map idea blocks to external task item ids."},
     {"name": "Idea Block To Transcript", "description": "Map idea blocks to one or more transcripts."},
+    {"name": "Chat Messages", "description": "Public text chat messages for a session."},
 ]
 
 app = FastAPI(title="OmniObserve API", version="0.1.0", openapi_tags=OPENAPI_TAGS)
