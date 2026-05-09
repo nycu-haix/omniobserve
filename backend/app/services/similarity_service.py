@@ -1,3 +1,5 @@
+import time
+
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +7,7 @@ from sqlalchemy.orm import aliased, contains_eager
 
 from ..models import IdeaBlock, Similarity
 from ..schemas import SimilarityCreate, SimilarityUpdate
+from .realtime import board_manager
 
 
 async def create_similarity(
@@ -39,6 +42,7 @@ async def create_session_similarity(
         user_id=None,
         db=db,
     )
+    await _notify_similarity_cue(similarity)
     return similarity
 
 
@@ -140,6 +144,8 @@ async def delete_session_similarity(
     db: AsyncSession,
 ) -> None:
     similarity = await get_session_similarity(similarity_id, session_name=session_name, db=db)
+    idea_a = similarity.idea_block_1
+    idea_b = similarity.idea_block_2
     await db.delete(similarity)
     await _clear_pair_similarity_ids(
         similarity.idea_block_id_1,
@@ -147,6 +153,7 @@ async def delete_session_similarity(
         db,
     )
     await db.commit()
+    await _notify_similarity_removed(idea_a, idea_b)
 
 
 async def _get_similarity_in_session(
@@ -248,6 +255,76 @@ async def create_or_update_similarity_pair(
     similarity.idea_block_2 = idea_b if similarity.idea_block_id_2 == idea_b.id else idea_a
 
     return similarity, action
+
+
+async def _notify_similarity_cue(similarity: Similarity) -> None:
+    idea_a = similarity.idea_block_1
+    idea_b = similarity.idea_block_2
+    if idea_a.session_name != idea_b.session_name:
+        return
+
+    await _send_similarity_cue(
+        session_name=idea_a.session_name,
+        participant_id=str(idea_a.user_id),
+        own_block=idea_a,
+        other_block=idea_b,
+        similarity_id=similarity.id,
+    )
+    await _send_similarity_cue(
+        session_name=idea_b.session_name,
+        participant_id=str(idea_b.user_id),
+        own_block=idea_b,
+        other_block=idea_a,
+        similarity_id=similarity.id,
+    )
+
+
+async def _send_similarity_cue(
+    *,
+    session_name: str,
+    participant_id: str,
+    own_block: IdeaBlock,
+    other_block: IdeaBlock,
+    similarity_id: int,
+) -> None:
+    await board_manager.send_to(
+        session_name,
+        participant_id,
+        {
+            "type": "update_idea_block",
+            "payload": {"id": str(own_block.id)},
+        },
+    )
+    await board_manager.send_to(
+        session_name,
+        participant_id,
+        {
+            "type": "similarity_cue",
+            "payload": {
+                "id": f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}",
+                "blockId": str(own_block.id),
+                "blockSummary": other_block.title or other_block.summary,
+            },
+        },
+    )
+
+
+async def _notify_similarity_removed(idea_a: IdeaBlock, idea_b: IdeaBlock) -> None:
+    if idea_a.session_name != idea_b.session_name:
+        return
+    await _send_idea_block_refresh(idea_a)
+    await _send_idea_block_refresh(idea_b)
+
+
+async def _send_idea_block_refresh(idea_block: IdeaBlock) -> None:
+    await board_manager.send_to(
+        idea_block.session_name,
+        str(idea_block.user_id),
+        {
+            "type": "update_idea_block",
+            "payload": {"id": str(idea_block.id)},
+        },
+    )
 
 
 async def _find_similarity_pair(

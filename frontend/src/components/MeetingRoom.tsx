@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Mic, MicOff, Radio } from "lucide-react";
+import { AlertCircle, GripVertical, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -11,7 +11,7 @@ import { isValidParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import type { MicMode } from "../types";
-import { JitsiRoom } from "./JitsiRoom";
+import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
 
@@ -26,6 +26,13 @@ interface LostAtSeaItem {
 }
 
 type RankingScope = "public" | "private";
+type SessionPhase = "private" | "group";
+const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
+	loading: "連線中",
+	connected: "已連線",
+	closed: "已離線",
+	unavailable: "未啟用"
+};
 
 interface RankingSnapshot {
 	revision: number;
@@ -41,6 +48,8 @@ const DEFAULT_JITSI_HEIGHT = 120;
 const MIN_JITSI_HEIGHT = 96;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
+
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
 }
@@ -109,6 +118,10 @@ function createRankedItems(itemIds: string[], taskItemsById: Record<string, Task
 	);
 }
 
+function createRankIndexById(items: LostAtSeaItem[]): Map<string, number> {
+	return new Map(items.map((item, index) => [item.id, index + 1]));
+}
+
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
 	return !!message && "type" in message && message.type === "ranking_state" && "items" in message && Array.isArray(message.items);
 }
@@ -123,6 +136,8 @@ function isBoardStateMessage(message: object | null): message is {
 	ranking?: { items: string[] };
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
+	current_phase?: SessionPhase;
+	timer_end_time_ms?: number;
 } {
 	return (
 		!!message &&
@@ -134,20 +149,36 @@ function isBoardStateMessage(message: object | null): message is {
 	);
 }
 
-function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPreview: (item: LostAtSeaItem) => void }) {
+function isPhaseChangedMessage(message: object | null): message is {
+	type: "phase_changed";
+	phase: SessionPhase;
+	end_time_ms?: number;
+} {
+	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
+}
+
+function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSeaItem; rankDelta?: number; onPreview: (item: LostAtSeaItem) => void }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
 	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
+	const isRankConflict = typeof rankDelta === "number" && Math.abs(rankDelta) > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
+	const rankConflictDirection = isRankConflict && rankDelta < 0 ? "up" : "down";
+	const rankConflictAmount = isRankConflict ? Math.abs(rankDelta) : 0;
 
 	return (
 		<div
 			ref={setNodeRef}
-			className={cn("flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2", isDragging && "opacity-50")}
+			className={cn(
+				"flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
+				isRankConflict && "border-muted-foreground/30",
+				isDragging && "opacity-50"
+			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
+			title={isRankConflict ? `與 Public 排序差 ${rankConflictAmount} 位` : undefined}
 			{...attributes}
 			{...listeners}
 			onDoubleClick={() => onPreview(item)}
@@ -161,6 +192,21 @@ function SortableLostAtSeaItem({ item, onPreview }: { item: LostAtSeaItem; onPre
 			/>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
+			{isRankConflict && (
+				<span
+					className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold", rankConflictDirection === "up" ? "text-emerald-700" : "text-rose-700")}
+					aria-label={`與 Public 排序差 ${rankConflictAmount} 位，Private 排序${rankConflictDirection === "up" ? "較前" : "較後"}`}
+				>
+					<span
+						className={cn(
+							"h-0 w-0 border-x-[5px] border-x-transparent",
+							rankConflictDirection === "up" ? "border-b-[8px] border-b-emerald-600" : "border-t-[8px] border-t-rose-600"
+						)}
+						aria-hidden="true"
+					/>
+					{rankConflictAmount}
+				</span>
+			)}
 			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
@@ -174,7 +220,8 @@ function LostAtSeaRankingPanel({
 	onDragStart,
 	onDragCancel,
 	onDragEnd,
-	onPreviewItem
+	onPreviewItem,
+	getRankDelta
 }: {
 	title: string;
 	status: string;
@@ -184,6 +231,7 @@ function LostAtSeaRankingPanel({
 	onDragCancel: () => void;
 	onDragEnd: (event: DragEndEvent) => void;
 	onPreviewItem: (item: LostAtSeaItem) => void;
+	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
 }) {
 	return (
 		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
@@ -195,7 +243,7 @@ function LostAtSeaRankingPanel({
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} onPreview={onPreviewItem} />
+							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} onPreview={onPreviewItem} />
 						))}
 					</div>
 				</SortableContext>
@@ -214,8 +262,11 @@ export default function MeetingRoom() {
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
+	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -224,6 +275,7 @@ export default function MeetingRoom() {
 		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
 		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
 	});
+	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
@@ -235,8 +287,13 @@ export default function MeetingRoom() {
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
+		setJitsiStatus(status);
+	}, []);
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
+	const shouldHighlightRankConflict = currentPhase === "group";
 	const meetingLayoutStyle = {
 		"--private-board-width": `${privateBoardWidth}px`,
 		"--jitsi-height": `${jitsiHeight}px`
@@ -256,6 +313,22 @@ export default function MeetingRoom() {
 		};
 		void queryPermission();
 	}, []);
+
+	useEffect(() => {
+		const handleFullscreenChange = () => {
+			setIsFullscreen(!!document.fullscreenElement);
+		};
+		document.addEventListener("fullscreenchange", handleFullscreenChange);
+		return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+	}, []);
+
+	const toggleFullscreen = async () => {
+		if (!document.fullscreenElement) {
+			await document.documentElement.requestFullscreen();
+		} else {
+			await document.exitFullscreen();
+		}
+	};
 
 	useEffect(() => {
 		const abortController = new AbortController();
@@ -513,7 +586,24 @@ export default function MeetingRoom() {
 	};
 
 	useEffect(() => {
+		if (isPhaseChangedMessage(lastMessage)) {
+			const timer = window.setTimeout(() => {
+				setCurrentPhase(lastMessage.phase);
+				setTimerEndTime(lastMessage.end_time_ms || 0);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
 		if (isBoardStateMessage(lastMessage)) {
+			let phaseTimer: number | null = null;
+			const timerEndTimeMs = lastMessage.timer_end_time_ms;
+			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
+				phaseTimer = window.setTimeout(() => {
+					if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+					if (typeof timerEndTimeMs === "number") setTimerEndTime(timerEndTimeMs);
+				}, 0);
+			}
+
 			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
 			const privateRanking = lastMessage.private_ranking;
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
@@ -531,7 +621,11 @@ export default function MeetingRoom() {
 				}
 				applyRankingSnapshot(scope, nextRanking);
 			});
-			return;
+			return () => {
+				if (phaseTimer !== null) {
+					window.clearTimeout(phaseTimer);
+				}
+			};
 		}
 
 		if (isRankingStateMessage(lastMessage)) {
@@ -588,19 +682,21 @@ export default function MeetingRoom() {
 						</div>
 					</header>
 					{isTaskDetailOpen && taskDetail && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{taskDetail}</p>}
-					<div className="grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:grid-cols-2 lg:overflow-hidden lg:pr-0">
-						<LostAtSeaRankingPanel
-							title="Public 排序"
-							status="協作中"
-							items={publicItems}
-							sensors={sensors}
-							onDragStart={() => {
-								isDraggingRef.current.public = true;
-							}}
-							onDragCancel={() => handleRankingDragCancel("public")}
-							onDragEnd={event => handleRankingDragEnd("public", event)}
-							onPreviewItem={setPreviewItem}
-						/>
+					<div className={cn("grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:overflow-hidden lg:pr-0", currentPhase === "group" && "lg:grid-cols-2")}>
+						{currentPhase === "group" && (
+							<LostAtSeaRankingPanel
+								title="Public 排序"
+								status="協作中"
+								items={publicItems}
+								sensors={sensors}
+								onDragStart={() => {
+									isDraggingRef.current.public = true;
+								}}
+								onDragCancel={() => handleRankingDragCancel("public")}
+								onDragEnd={event => handleRankingDragEnd("public", event)}
+								onPreviewItem={setPreviewItem}
+							/>
+						)}
 						<LostAtSeaRankingPanel
 							title="Private 排序"
 							status="個人"
@@ -612,6 +708,13 @@ export default function MeetingRoom() {
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							onPreviewItem={setPreviewItem}
+							getRankDelta={item => {
+								if (!shouldHighlightRankConflict) {
+									return undefined;
+								}
+								const publicRank = publicRankIndexById.get(item.id);
+								return publicRank == null ? undefined : item.rank - publicRank;
+							}}
 						/>
 					</div>
 				</section>
@@ -631,9 +734,10 @@ export default function MeetingRoom() {
 				</div>
 
 				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} />
+					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
 					<div className="hidden">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
 						{micPermission !== "granted" && micPermission !== "unknown" && (
 							<button onClick={() => void requestMicPermission()} className="text-left text-primary transition-colors hover:text-primary/80 hover:underline">
 								{micPermission === "denied" ? "麥克風已拒絕" : "允許麥克風權限"}
@@ -670,6 +774,7 @@ export default function MeetingRoom() {
 				<div className="relative flex items-center justify-center pt-2">
 					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
+						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
 						{micPermission !== "granted" && micPermission !== "unknown" && (
 							<button onClick={() => void requestMicPermission()} className="text-primary hover:underline hover:text-primary/80 transition-colors text-left">
 								{micPermission === "denied" ? "麥克風已拒絕 (需至瀏覽器開啟)" : "點擊允許麥克風權限"}
@@ -744,8 +849,17 @@ export default function MeetingRoom() {
 					isConnected={isConnected}
 					micMode={micMode}
 					onMicModeChange={handleMic}
+					currentPhase={currentPhase}
+					timerEndTime={timerEndTime}
 				/>
 			</aside>
+			<button
+				onClick={toggleFullscreen}
+				className="fixed bottom-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-full bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				title={isFullscreen ? "退出全螢幕" : "全螢幕"}
+			>
+				{isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+			</button>
 		</main>
 	);
 }

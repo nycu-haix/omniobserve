@@ -10,7 +10,10 @@ interface JitsiRoomProps {
 	displayName?: string;
 	micMode: MicMode;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
+	onStatusChange?: (status: JitsiConnectionStatus) => void;
 }
+
+export type JitsiConnectionStatus = "loading" | "connected" | "closed" | "unavailable";
 
 function parseJitsiDomain(meetingDomain?: string): string | null {
 	if (!meetingDomain) {
@@ -53,11 +56,21 @@ async function setJitsiAudioMuted(api: IJitsiMeetExternalApi | null, muted: bool
 	}
 }
 
-export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady }: JitsiRoomProps) {
+export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
-	const [isReady, setIsReady] = useState(false);
+	const [readyMeetingKey, setReadyMeetingKey] = useState<string | null>(null);
 	const domain = parseJitsiDomain(meetingDomain);
 	const normalizedRoomName = roomName?.trim();
+	const meetingKey = domain && normalizedRoomName ? `${domain}/${normalizedRoomName}` : null;
+	const isReady = readyMeetingKey === meetingKey;
+
+	useEffect(() => {
+		onStatusChange?.(domain && normalizedRoomName ? "loading" : "unavailable");
+
+		return () => {
+			onStatusChange?.("closed");
+		};
+	}, [domain, normalizedRoomName, onStatusChange]);
 
 	useEffect(() => {
 		void setJitsiAudioMuted(apiRef.current, micMode !== "public");
@@ -110,9 +123,15 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 				}}
 				onApiReady={api => {
 					apiRef.current = api;
-					setIsReady(true);
+					setReadyMeetingKey(meetingKey);
+					onStatusChange?.("connected");
 					void setJitsiAudioMuted(api, micMode !== "public");
 					onApiReady?.(api);
+				}}
+				onReadyToClose={() => {
+					apiRef.current = null;
+					setReadyMeetingKey(null);
+					onStatusChange?.("closed");
 				}}
 				getIFrameRef={parentNode => {
 					parentNode.style.height = "100%";
