@@ -1245,17 +1245,20 @@ export function PrivateBoard({
 				{activeTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
 				{activeTab === "public-chat" && (
 					<footer className="border-t bg-card p-3">
-						<PublicChatComposer
-							messageText={publicChatText}
-							error={publicChatError}
-							isConnected={isConnected}
-							isSending={isSendingPublicChat}
-							onMessageTextChange={value => {
-								setPublicChatText(value);
-								setPublicChatError(null);
-							}}
-							onSend={sendPublicChatMessage}
-						/>
+						<div className="grid gap-2">
+							<PublicChatComposer
+								messageText={publicChatText}
+								error={publicChatError}
+								isConnected={isConnected}
+								isSending={isSendingPublicChat}
+								onMessageTextChange={value => {
+									setPublicChatText(value);
+									setPublicChatError(null);
+								}}
+								onSend={sendPublicChatMessage}
+							/>
+							{privateMicButton}
+						</div>
 					</footer>
 				)}
 			</section>
