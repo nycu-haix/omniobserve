@@ -78,7 +78,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 
 每個 idea block 請輸出：
 1) content：一句最多10個字的短總結，描述此 idea block 與物品清單中哪個 item 或哪個決策有關（給前端顯示用）
-2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文。
+2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文。summary 必須保留說話者原本的主觀立場與人稱；如果逐字稿使用「我覺得、我認為、我們應該」等第一人稱表述，summary 也要使用第一人稱，不要改寫成「參與者認為、說話者認為」等第三人稱描述。
 3) transcript：該 idea block 對應的逐字稿原文片段
 
 如果逐字稿中沒有任何與題目相關、值得記錄的內容，請回傳空陣列 []。
@@ -155,7 +155,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 [
   {{
     "content": "一句最多10個字的短總結，描述此 idea block 與物品清單中哪個 item 或哪個決策有關（給前端顯示用）",
-    "summary": "針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文。",
+    "summary": 保留說話者人稱與立場的解釋說明；例如逐字稿是「我覺得...」，summary 也用「我覺得...」，不要寫成「參與者認為...」。",
     "transcript": "對應逐字稿原文片段"
   }},
   {{
