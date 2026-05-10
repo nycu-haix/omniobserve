@@ -1,9 +1,11 @@
-import { Activity, AlertCircle, Check, ClipboardList, Copy, Download, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import { AlertCircle, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
-import { fetchSessionPresence, type ParticipantPresence } from "../services/presence";
+import type { ParticipantPresence } from "../services/presence";
+import type { PublicChatMessage } from "../types";
+import { PublicChatComposer, PublicChatMessages } from "./private-board/PublicChatPanel";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { ScrollArea } from "./ui/ScrollArea";
@@ -11,13 +13,6 @@ import { ScrollArea } from "./ui/ScrollArea";
 interface RealtimeMessage {
 	type?: string;
 	[key: string]: unknown;
-}
-
-interface EventRecord {
-	id: string;
-	source: "admin" | "board";
-	receivedAt: string;
-	message: RealtimeMessage;
 }
 
 interface BoardStateMessage extends RealtimeMessage {
@@ -42,7 +37,7 @@ interface AdminRankingStateMessage extends RealtimeMessage {
 }
 
 interface TranscriptRecord {
-	id: number;
+	id: number | string;
 	user_id: number;
 	session_name: string;
 	time_stamp: string;
@@ -81,7 +76,20 @@ interface ParticipantTranscriptMessage extends RealtimeMessage {
 	text?: string;
 	is_final?: boolean;
 	persisted?: boolean;
+	transcript_segment_id?: string | number | null;
 	timestamp_ms?: number;
+}
+
+interface PresenceStateMessage extends RealtimeMessage {
+	type: "presence_state";
+	participants?: unknown;
+	participant_ids?: unknown;
+}
+
+interface IdeaBlocksUpdateMessage extends RealtimeMessage {
+	type: "idea_blocks_update";
+	participant_id?: string | number;
+	idea_blocks?: unknown;
 }
 
 interface LatestParticipantTranscript {
@@ -92,12 +100,33 @@ interface LatestParticipantTranscript {
 	receivedAt: string;
 }
 
+interface ChatMessageResponse {
+	id: number;
+	session_name: string;
+	user_id: number;
+	display_name?: string | null;
+	message: string;
+	time_stamp: string;
+	is_deleted?: boolean;
+}
+
+interface PublicChatMessagePayload {
+	id: string;
+	sessionName?: string;
+	userId?: string;
+	displayName?: string | null;
+	message: string;
+	timestampMs?: number;
+	isDeleted?: boolean;
+}
+
 type SessionPhase = "private" | "group";
 type CueCondition = "experimental" | "control";
+type AdminTab = "ranking" | "transcript" | "chat";
 
-const MAX_EVENTS = 80;
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
+const ADMIN_PARTICIPANT_ID_PREFIX = `${ADMIN_PARTICIPANT_ID}-`;
 const DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH = 320;
 const DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH = 360;
 const MIN_ADMIN_LEFT_SIDEBAR_WIDTH = 280;
@@ -172,22 +201,23 @@ function getWsBaseUrl() {
 	return (import.meta.env.VITE_WS_BASE_URL as string | undefined) || `${protocol}://${window.location.host}`;
 }
 
-function formatMessageType(message: RealtimeMessage) {
-	return message.type || "raw_message";
+function createAdminClientId() {
+	const randomId = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	return `${ADMIN_PARTICIPANT_ID_PREFIX}${randomId}`;
 }
 
 function buildSessionApiUrl(roomName: string, path: string) {
 	return apiUrl(`/api/sessions/${encodeURIComponent(roomName)}${path}`);
 }
 
-function formatApiTime(value: string | null | undefined) {
+function formatApiTime(value: string | number | null | undefined) {
 	if (!value) {
 		return "-";
 	}
 
-	const date = new Date(value);
+	const date = new Date(typeof value === "number" ? value : value);
 	if (Number.isNaN(date.getTime())) {
-		return value;
+		return String(value);
 	}
 
 	return new Intl.DateTimeFormat("zh-TW", {
@@ -239,8 +269,152 @@ function isParticipantTranscriptMessage(message: RealtimeMessage | null): messag
 	return message?.type === "participant_transcript" && typeof message.participant_id === "string" && typeof message.text === "string";
 }
 
+function isPresenceStateMessage(message: RealtimeMessage | null): message is PresenceStateMessage {
+	return message?.type === "presence_state";
+}
+
+function isIdeaBlocksUpdateMessage(message: RealtimeMessage | null): message is IdeaBlocksUpdateMessage {
+	return message?.type === "idea_blocks_update" && Array.isArray(message.idea_blocks);
+}
+
+function normalizePresenceParticipant(item: unknown): ParticipantPresence | null {
+	if (typeof item === "string") {
+		return {
+			id: item,
+			mic_mode: "off",
+			audio_connected: false
+		};
+	}
+
+	if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string") {
+		return null;
+	}
+
+	const participant = item as Record<string, unknown>;
+	return {
+		id: item.id,
+		mic_mode: typeof participant.mic_mode === "string" ? participant.mic_mode : "off",
+		audio_connected: typeof participant.audio_connected === "boolean" ? participant.audio_connected : false,
+		is_speaking: typeof participant.is_speaking === "boolean" ? participant.is_speaking : false,
+		display_name: typeof participant.display_name === "string" ? participant.display_name : null,
+		client_id: typeof participant.client_id === "string" ? participant.client_id : null,
+		updated_at: typeof participant.updated_at === "string" ? participant.updated_at : null
+	};
+}
+
+function normalizePresenceParticipants(message: PresenceStateMessage) {
+	const rawParticipants = Array.isArray(message.participants) ? message.participants : Array.isArray(message.participant_ids) ? message.participant_ids : [];
+	return rawParticipants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null && !isAdminParticipantId(item.id));
+}
+
+function participantIdToNumber(value: string | number | null | undefined) {
+	const numericId = Number(value);
+	return Number.isInteger(numericId) ? numericId : 0;
+}
+
+function normalizeWsIdeaBlock(item: unknown, fallbackParticipantId: string | number | undefined): IdeaBlockRecord | null {
+	if (!item || typeof item !== "object" || !("id" in item)) {
+		return null;
+	}
+
+	const block = item as Record<string, unknown>;
+	const id = Number(block.id);
+	if (!Number.isInteger(id)) {
+		return null;
+	}
+
+	return {
+		id,
+		user_id: participantIdToNumber(block.user_id as string | number | null | undefined) || participantIdToNumber(fallbackParticipantId),
+		session_name: typeof block.session_name === "string" ? block.session_name : "",
+		title: typeof block.title === "string" ? block.title : undefined,
+		summary: typeof block.summary === "string" ? block.summary : undefined,
+		transcript: typeof block.transcript === "string" ? block.transcript : null,
+		similarity_id: typeof block.similarity_id === "number" ? block.similarity_id : null,
+		content: typeof block.content === "string" ? block.content : undefined
+	};
+}
+
+function upsertById<T extends { id: string | number }>(current: T[], nextItems: T[]) {
+	const byId = new Map(current.map(item => [item.id, item]));
+	nextItems.forEach(item => {
+		byId.set(item.id, { ...byId.get(item.id), ...item });
+	});
+	return Array.from(byId.values());
+}
+
 function isAdminParticipantId(participantId: string | number | null | undefined) {
-	return String(participantId ?? "").toLowerCase() === ADMIN_PARTICIPANT_ID;
+	const normalizedId = String(participantId ?? "").toLowerCase();
+	return normalizedId === ADMIN_PARTICIPANT_ID || normalizedId.startsWith(ADMIN_PARTICIPANT_ID_PREFIX);
+}
+
+function isOwnTranscriptUser(userId: string | number | null | undefined, participantId: string): boolean {
+	if (userId == null) {
+		return false;
+	}
+
+	const userIdText = String(userId);
+	return userIdText === participantId || Number(userIdText) === participantIdToNumber(participantId);
+}
+
+function chatMessageResponseToMessage(item: ChatMessageResponse, participantId: string): PublicChatMessage {
+	const timestampMs = Date.parse(item.time_stamp);
+	return {
+		id: String(item.id),
+		sessionName: item.session_name,
+		userId: String(item.user_id),
+		displayName: item.display_name ?? undefined,
+		message: item.message,
+		time: formatApiTime(timestampMs),
+		timestampMs: Number.isNaN(timestampMs) ? undefined : timestampMs,
+		isOwn: isOwnTranscriptUser(item.user_id, participantId),
+		isDeleted: item.is_deleted ?? false
+	};
+}
+
+function publicChatPayloadToMessage(payload: PublicChatMessagePayload, participantId: string): PublicChatMessage {
+	const timestampMs = payload.timestampMs ?? Date.now();
+	return {
+		id: payload.id,
+		sessionName: payload.sessionName,
+		userId: payload.userId,
+		displayName: payload.displayName ?? undefined,
+		message: payload.message,
+		time: formatApiTime(timestampMs),
+		timestampMs,
+		isOwn: isOwnTranscriptUser(payload.userId, participantId),
+		isDeleted: payload.isDeleted ?? false
+	};
+}
+
+function sortPublicChatMessages(messages: PublicChatMessage[]) {
+	return [...messages].sort((left, right) => {
+		const leftTime = left.timestampMs ?? Number(left.id);
+		const rightTime = right.timestampMs ?? Number(right.id);
+
+		if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+			return leftTime - rightTime;
+		}
+
+		return left.id.localeCompare(right.id, undefined, { numeric: true });
+	});
+}
+
+function mergePublicChatMessages(baseMessages: PublicChatMessage[], nextMessages: PublicChatMessage[]) {
+	const byId = new Map(baseMessages.map(message => [message.id, message]));
+	nextMessages.forEach(message => {
+		const normalizedMessage = message.message.trim();
+		if (!normalizedMessage) {
+			return;
+		}
+		byId.set(message.id, {
+			...byId.get(message.id),
+			...message,
+			message: normalizedMessage,
+			timestampMs: message.timestampMs ?? byId.get(message.id)?.timestampMs
+		});
+	});
+	return sortPublicChatMessages([...byId.values()]);
 }
 
 function getRankConflict(itemId: string | undefined, publicRank: number, privateRankIndexById: Map<string, number>) {
@@ -259,7 +433,7 @@ function getRankConflict(itemId: string | undefined, publicRank: number, private
 	} as const;
 }
 
-function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, onEvent: (source: "admin" | "board", message: RealtimeMessage) => void) {
+function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, adminClientId: string, onEvent: (source: "admin" | "board", message: RealtimeMessage) => void) {
 	const [isConnected, setIsConnected] = useState(false);
 	const [lastMessage, setLastMessage] = useState<RealtimeMessage | null>(null);
 	const retryCountRef = useRef(0);
@@ -280,7 +454,7 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 				return;
 			}
 
-			const queryParam = source === "admin" ? `admin_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}` : `participant_id=${encodeURIComponent(ADMIN_PARTICIPANT_ID)}`;
+			const queryParam = source === "admin" ? `admin_id=${encodeURIComponent(adminClientId)}` : `participant_id=${encodeURIComponent(adminClientId)}`;
 			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/${source}?${queryParam}`;
 			socket = new WebSocket(wsUrl);
 			socketRef.current = socket;
@@ -291,7 +465,7 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 				socket?.send(
 					JSON.stringify({
 						type: "join",
-						participant_id: ADMIN_PARTICIPANT_ID
+						participant_id: adminClientId
 					})
 				);
 			};
@@ -332,7 +506,7 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 			}
 			socket?.close();
 		};
-	}, [sessionId, source]);
+	}, [adminClientId, sessionId, source]);
 
 	const sendMessage = useCallback((msg: object) => {
 		if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -341,6 +515,74 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 	}, []);
 
 	return { isConnected, lastMessage, sendMessage };
+}
+
+function useAdminPresenceSocket(sessionId: string, adminClientId: string, onEvent: (source: "presence", message: RealtimeMessage) => void) {
+	const [isConnected, setIsConnected] = useState(false);
+	const retryCountRef = useRef(0);
+	const retryTimerRef = useRef<number | null>(null);
+	const onEventRef = useRef(onEvent);
+
+	useEffect(() => {
+		onEventRef.current = onEvent;
+	}, [onEvent]);
+
+	useEffect(() => {
+		let disposed = false;
+		let socket: WebSocket | null = null;
+
+		const connect = () => {
+			if (!sessionId || disposed) {
+				return;
+			}
+
+			const wsUrl = `${getWsBaseUrl()}/ws/sessions/${encodeURIComponent(sessionId)}/presence?participant_id=${encodeURIComponent(adminClientId)}`;
+			socket = new WebSocket(wsUrl);
+
+			socket.onopen = () => {
+				retryCountRef.current = 0;
+				setIsConnected(true);
+				socket?.send(JSON.stringify({ type: "join", participant_id: adminClientId }));
+			};
+
+			socket.onmessage = event => {
+				let parsedMessage: RealtimeMessage;
+				try {
+					parsedMessage = JSON.parse(event.data) as RealtimeMessage;
+				} catch {
+					parsedMessage = { type: "raw_message", payload: event.data };
+				}
+				onEventRef.current("presence", parsedMessage);
+			};
+
+			socket.onclose = event => {
+				setIsConnected(false);
+				if (event.code === 1008) {
+					return;
+				}
+				if (!disposed && retryCountRef.current < 5) {
+					retryCountRef.current += 1;
+					retryTimerRef.current = window.setTimeout(connect, 3000);
+				}
+			};
+
+			socket.onerror = () => {
+				socket?.close();
+			};
+		};
+
+		connect();
+
+		return () => {
+			disposed = true;
+			if (retryTimerRef.current !== null) {
+				window.clearTimeout(retryTimerRef.current);
+			}
+			socket?.close();
+		};
+	}, [adminClientId, sessionId]);
+
+	return { isConnected };
 }
 
 function ConnectionBadge({ connected }: { connected: boolean }) {
@@ -361,10 +603,6 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
 			</div>
 		</div>
 	);
-}
-
-function JsonPreview({ value }: { value: unknown }) {
-	return <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs leading-5 text-muted-foreground">{JSON.stringify(value, null, 2)}</pre>;
 }
 
 function AdminPhaseTimer({ endTimeMs }: { endTimeMs: number }) {
@@ -390,13 +628,18 @@ function AdminPhaseTimer({ endTimeMs }: { endTimeMs: number }) {
 
 export function AdminPage() {
 	const roomName = useMemo(() => getRoomName(), []);
-	const [events, setEvents] = useState<EventRecord[]>([]);
+	const adminClientId = useMemo(() => createAdminClientId(), []);
+	const [activeTab, setActiveTab] = useState<AdminTab>("ranking");
 	const [boardState, setBoardState] = useState<BoardStateMessage | null>(null);
 	const [adminRankingState, setAdminRankingState] = useState<AdminRankingStateMessage | null>(null);
 	const [participants, setParticipants] = useState<ParticipantPresence[]>([]);
 	const [transcripts, setTranscripts] = useState<TranscriptRecord[]>([]);
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlockRecord[]>([]);
 	const [similarities, setSimilarities] = useState<SimilarityRecord[]>([]);
+	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
+	const [publicChatText, setPublicChatText] = useState("");
+	const [publicChatError, setPublicChatError] = useState<string | null>(null);
+	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [isApiLoading, setIsApiLoading] = useState(false);
 	const [apiError, setApiError] = useState<string | null>(null);
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
@@ -411,8 +654,7 @@ export function AdminPage() {
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState(0);
-	const [privateDurationMinutes, setPrivateDurationMinutes] = useState("5");
-	const [groupDurationMinutes, setGroupDurationMinutes] = useState("15");
+	const [countdownDurationMinutes, setCountdownDurationMinutes] = useState("15");
 	const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY));
 		return clampAdminLeftSidebarWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH, DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH);
@@ -435,11 +677,10 @@ export function AdminPage() {
 		setApiError(null);
 
 		try {
-			const [transcriptsResponse, ideaBlocksResponse, similaritiesResponse, nextParticipants] = await Promise.all([
+			const [transcriptsResponse, ideaBlocksResponse, similaritiesResponse] = await Promise.all([
 				fetch(buildSessionApiUrl(roomName, "/transcripts")),
 				fetch(buildSessionApiUrl(roomName, "/idea-blocks")),
-				fetch(buildSessionApiUrl(roomName, "/similarities")),
-				fetchSessionPresence(roomName)
+				fetch(buildSessionApiUrl(roomName, "/similarities"))
 			]);
 
 			if (!transcriptsResponse.ok) {
@@ -457,10 +698,9 @@ export function AdminPage() {
 				IdeaBlockRecord[],
 				SimilarityRecord[]
 			];
-			setTranscripts(nextTranscripts);
-			setIdeaBlocks(nextIdeaBlocks);
+			setTranscripts(current => upsertById(current, nextTranscripts));
+			setIdeaBlocks(current => upsertById(current, nextIdeaBlocks));
 			setSimilarities(nextSimilarities);
-			setParticipants(nextParticipants.filter(participant => participant.id !== ADMIN_PARTICIPANT_ID));
 			setLastApiLoadedAt(
 				new Intl.DateTimeFormat("zh-TW", {
 					hour: "2-digit",
@@ -476,15 +716,24 @@ export function AdminPage() {
 		}
 	}, [roomName]);
 
-	const recordEvent = (source: "admin" | "board", message: RealtimeMessage) => {
+	const loadChatHistory = useCallback(async () => {
+		try {
+			const response = await fetch(buildSessionApiUrl(roomName, "/chat-messages"));
+			if (!response.ok) return;
+			const chatMessagesFromDb = ((await response.json()) as ChatMessageResponse[]).map(item => chatMessageResponseToMessage(item, adminClientId));
+			setPublicChatMessages(prev => mergePublicChatMessages(chatMessagesFromDb, prev));
+		} catch (error) {
+			console.warn("[admin] failed to load chat history", error);
+		}
+	}, [adminClientId, roomName]);
+
+	const recordEvent = (message: RealtimeMessage) => {
 		const receivedAt = new Intl.DateTimeFormat("zh-TW", {
 			hour: "2-digit",
 			minute: "2-digit",
 			second: "2-digit",
 			hour12: false
 		}).format(new Date());
-
-		setEvents(current => [{ id: `${source}-${Date.now()}-${Math.random()}`, source, receivedAt, message }, ...current].slice(0, MAX_EVENTS));
 
 		const nextPhase = normalizeSessionPhase(message.phase) ?? normalizeSessionPhase(message.current_phase);
 		if (nextPhase) {
@@ -538,22 +787,54 @@ export function AdminPage() {
 		}
 
 		if (isParticipantTranscriptMessage(message)) {
+			const transcriptText = message.text ?? "";
+			const transcriptId = message.transcript_segment_id ?? message.timestamp_ms ?? `${message.participant_id}-${receivedAt}`;
+			const timeStamp = typeof message.timestamp_ms === "number" ? new Date(message.timestamp_ms).toISOString() : new Date().toISOString();
+			const transcriptRecord: TranscriptRecord = {
+				id: transcriptId,
+				user_id: participantIdToNumber(message.participant_id),
+				session_name: typeof message.session_name === "string" ? message.session_name : roomName,
+				time_stamp: timeStamp,
+				transcript: transcriptText.trim()
+			};
+			setTranscripts(current => upsertById(current, [transcriptRecord]));
 			setLatestTranscripts(current => ({
 				...current,
 				[message.participant_id]: {
 					scope: typeof message.scope === "string" ? message.scope : "unknown",
-					text: message.text?.trim() || "",
+					text: transcriptText.trim(),
 					isFinal: message.is_final === true,
 					persisted: message.persisted === true,
 					receivedAt
 				}
 			}));
 		}
+
+		if (isPresenceStateMessage(message)) {
+			setParticipants(normalizePresenceParticipants(message));
+		}
+
+		if (isIdeaBlocksUpdateMessage(message)) {
+			const nextBlocks = (message.idea_blocks as unknown[]).map(item => normalizeWsIdeaBlock(item, message.participant_id)).filter((item): item is IdeaBlockRecord => item !== null);
+			setIdeaBlocks(current => upsertById(current, nextBlocks));
+		}
+
+		if (message.type === "public_chat_message") {
+			setIsSendingPublicChat(false);
+			const chatPayload = message.payload as PublicChatMessagePayload;
+			setPublicChatMessages(prev => mergePublicChatMessages(prev, [publicChatPayloadToMessage(chatPayload, adminClientId)]));
+		}
+
+		if (message.type === "public_chat_error") {
+			setIsSendingPublicChat(false);
+			setPublicChatError((message.reason as string) || "公開訊息傳送失敗");
+		}
 	};
 
 	useEffect(() => {
 		const initialTimer = window.setTimeout(() => {
 			void loadAdminApiData();
+			void loadChatHistory();
 		}, 0);
 		const timer = window.setInterval(() => {
 			void loadAdminApiData();
@@ -563,7 +844,7 @@ export function AdminPage() {
 			window.clearTimeout(initialTimer);
 			window.clearInterval(timer);
 		};
-	}, [loadAdminApiData]);
+	}, [loadAdminApiData, loadChatHistory]);
 
 	useEffect(() => {
 		const abortController = new AbortController();
@@ -607,8 +888,10 @@ export function AdminPage() {
 		window.localStorage.setItem(ADMIN_RIGHT_SIDEBAR_WIDTH_STORAGE_KEY, String(rightSidebarWidth));
 	}, [rightSidebarWidth]);
 
-	const { isConnected: adminConnected, lastMessage: adminLastMessage, sendMessage: sendAdminMessage } = useAdminRealtimeSocket("admin", roomName, recordEvent);
-	const { isConnected: boardConnected, lastMessage: boardLastMessage } = useAdminRealtimeSocket("board", roomName, recordEvent);
+	const { isConnected: adminConnected, lastMessage: adminLastMessage, sendMessage: sendAdminMessage } = useAdminRealtimeSocket("admin", roomName, adminClientId, (_, msg) => recordEvent(msg));
+	const { isConnected: boardConnected, lastMessage: boardLastMessage } = useAdminRealtimeSocket("board", roomName, adminClientId, (_, msg) => recordEvent(msg));
+	const { isConnected: presenceConnected } = useAdminPresenceSocket(roomName, adminClientId, (_, msg) => recordEvent(msg));
+
 	const joinRejectedMessage = (isJoinRejectedMessage(adminLastMessage) ? adminLastMessage.message : null) || (isJoinRejectedMessage(boardLastMessage) ? boardLastMessage.message : null);
 	const handleLeftSidebarResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
@@ -688,11 +971,14 @@ export function AdminPage() {
 		const direction = event.key === "ArrowLeft" ? 1 : -1;
 		setRightSidebarWidth(current => clampAdminRightSidebarWidth(current + direction * 24, leftSidebarWidth));
 	};
-	const startPhase = (phase: SessionPhase, minutesValue: string) => {
-		sendAdminMessage({ type: "switch_phase", phase, duration_s: durationSecondsFromMinutes(minutesValue) });
+	const switchPhase = (phase: SessionPhase) => {
+		sendAdminMessage({ type: "switch_phase", phase });
 	};
-	const clearPhaseTimer = () => {
-		sendAdminMessage({ type: "switch_phase", phase: currentPhase, duration_s: 0 });
+	const startCountdown = (minutesValue: string) => {
+		sendAdminMessage({ type: "set_countdown", duration_s: durationSecondsFromMinutes(minutesValue) });
+	};
+	const clearCountdown = () => {
+		sendAdminMessage({ type: "set_countdown", duration_s: 0 });
 	};
 	const setSessionCueCondition = (condition: CueCondition) => {
 		sendAdminMessage({ type: "set_cue_condition", condition });
@@ -820,16 +1106,11 @@ export function AdminPage() {
 				throw new Error(`Failed to create manual cue (${response.status})`);
 			}
 
-			const createdSimilarity = (await response.json()) as { id: number };
+			await response.json();
 			setIdeaBlocks(current =>
 				current.map(block => (block.id === firstBlock.id ? { ...block, similarity_id: secondBlock.id } : block.id === secondBlock.id ? { ...block, similarity_id: firstBlock.id } : block))
 			);
-			recordEvent("admin", {
-				type: "manual_similarity_cue",
-				similarity_id: createdSimilarity.id,
-				idea_block_id_1: firstBlock.id,
-				idea_block_id_2: secondBlock.id
-			});
+			// Removed recordEvent call for local state since events are not tracked anymore
 			setSelectedCueBlockIds([]);
 			void loadAdminApiData();
 		} catch (error) {
@@ -838,6 +1119,25 @@ export function AdminPage() {
 			setIsCreatingManualCue(false);
 		}
 	};
+	const sendPublicChatMessage = () => {
+		const normalizedMessage = publicChatText.trim();
+		if (!normalizedMessage) {
+			return;
+		}
+
+		setIsSendingPublicChat(true);
+		setPublicChatError(null);
+		sendAdminMessage({
+			type: "public_chat_send",
+			message: normalizedMessage,
+			displayName: "Admin"
+		});
+		setPublicChatText("");
+		window.setTimeout(() => {
+			setIsSendingPublicChat(false);
+		}, 5000);
+	};
+
 	const undoManualCue = async (similarity: SimilarityRecord) => {
 		if (undoingManualCueId !== null) {
 			return;
@@ -864,12 +1164,7 @@ export function AdminPage() {
 						: block
 				)
 			);
-			recordEvent("admin", {
-				type: "manual_similarity_cue_undone",
-				similarity_id: similarity.id,
-				idea_block_id_1: similarity.idea_block_id_1,
-				idea_block_id_2: similarity.idea_block_id_2
-			});
+			// Removed recordEvent call for local state since events are not tracked anymore
 			void loadAdminApiData();
 		} catch (error) {
 			setManualCueError(error instanceof Error ? error.message : String(error));
@@ -897,14 +1192,14 @@ export function AdminPage() {
 
 	return (
 		<main
-			className="grid min-h-screen grid-cols-1 gap-4 bg-muted/40 p-4 text-foreground xl:grid-cols-[var(--admin-left-sidebar-width)_minmax(0,1fr)_var(--admin-right-sidebar-width)]"
+			className="grid min-h-screen grid-cols-1 gap-4 bg-muted/40 p-4 text-foreground xl:h-screen xl:grid-cols-[var(--admin-left-sidebar-width)_minmax(0,1fr)_var(--admin-right-sidebar-width)] xl:overflow-hidden"
 			style={adminLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<aside className="relative flex min-h-0 min-w-[var(--admin-left-sidebar-width)] flex-col gap-4">
+			<aside className="relative min-h-0 min-w-[var(--admin-left-sidebar-width)] xl:h-full">
 				<button
 					type="button"
-					className="absolute -right-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+					className="absolute -right-3 top-1/2 z-10 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
 					aria-label="調整左側 Admin 欄寬"
 					aria-orientation="vertical"
 					aria-valuemin={MIN_ADMIN_LEFT_SIDEBAR_WIDTH}
@@ -913,184 +1208,196 @@ export function AdminPage() {
 					onPointerDown={handleLeftSidebarResizeStart}
 					onKeyDown={handleLeftSidebarResizeKeyDown}
 				/>
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<div className="mb-4 flex items-start justify-between gap-3">
-						<div className="min-w-0">
-							<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Admin monitor</p>
-							<h1 className="truncate text-xl font-semibold">{roomName}</h1>
-						</div>
-						<Badge variant="outline">live</Badge>
-					</div>
-					<div className="grid gap-3 text-sm">
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Board WS</span>
-							<ConnectionBadge connected={boardConnected} />
-						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Admin WS</span>
-							<ConnectionBadge connected={adminConnected} />
-						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Presence API</span>
-							<span className="font-medium">{participants.length} participants</span>
-						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Admin participant</span>
-							<span className="font-medium">{ADMIN_PARTICIPANT_ID}</span>
-						</div>
-					</div>
-				</section>
-
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Phase Controls</h2>
-					</header>
-					<div className="grid gap-3">
-						<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+				<div className="flex h-full flex-col gap-4 overflow-y-auto xl:pr-1">
+					<section className="shrink-0 rounded-lg border bg-card p-4 text-card-foreground">
+						<div className="mb-4 flex items-start justify-between gap-3">
 							<div className="min-w-0">
-								<div className="font-medium">{currentPhase === "group" ? "Group Phase" : "Private Phase"}</div>
-								<div className="text-xs text-muted-foreground">{timerEndTime > 0 ? "Countdown running" : "No countdown"}</div>
+								<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Admin monitor</p>
+								<h1 className="truncate text-xl font-semibold">{roomName}</h1>
 							</div>
-							{timerEndTime > 0 ? <AdminPhaseTimer endTimeMs={timerEndTime} /> : <span className="text-sm text-muted-foreground">--:--</span>}
+							<Badge variant="outline">live</Badge>
 						</div>
-
-						<div className="grid gap-2 rounded-md border bg-background p-3">
-							<label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="private-phase-duration">
-								Private duration (minutes)
-								<input
-									id="private-phase-duration"
-									className="h-9 rounded-md border bg-card px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-									inputMode="decimal"
-									type="text"
-									value={privateDurationMinutes}
-									onChange={event => setPrivateDurationMinutes(event.target.value)}
-								/>
-							</label>
-							<Button variant="outline" onClick={() => startPhase("private", privateDurationMinutes)}>
-								Start {formatDurationLabel(privateDurationMinutes)} Private Phase
-							</Button>
-						</div>
-
-						<div className="grid gap-2 rounded-md border bg-background p-3">
-							<label className="grid gap-1 text-xs font-medium text-muted-foreground" htmlFor="group-phase-duration">
-								Group duration (minutes)
-								<input
-									id="group-phase-duration"
-									className="h-9 rounded-md border bg-card px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-									inputMode="decimal"
-									type="text"
-									value={groupDurationMinutes}
-									onChange={event => setGroupDurationMinutes(event.target.value)}
-								/>
-							</label>
-							<Button onClick={() => startPhase("group", groupDurationMinutes)}>Start {formatDurationLabel(groupDurationMinutes)} Group Phase</Button>
-						</div>
-
-						<Button variant="secondary" onClick={clearPhaseTimer}>
-							Clear Countdown
-						</Button>
-					</div>
-				</section>
-
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<Lightbulb className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Cue Condition</h2>
-					</header>
-					<div className="grid gap-3">
-						<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
-							<div className="min-w-0">
-								<div className="font-medium">{isExperimentalCondition ? "實驗組" : "對照組"}</div>
-								<div className="text-xs text-muted-foreground">{isSimilarityCueActive ? "Similarity cue on" : "Similarity cue off"}</div>
+						<div className="grid gap-3 text-sm">
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Board WS</span>
+								<ConnectionBadge connected={boardConnected} />
 							</div>
-							<Badge variant={isExperimentalCondition ? "secondary" : "outline"}>{isExperimentalCondition ? "cue on" : "cue off"}</Badge>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Admin WS</span>
+								<ConnectionBadge connected={adminConnected} />
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Presence WS</span>
+								<ConnectionBadge connected={presenceConnected} />
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Participants</span>
+								<span className="font-medium">{participants.length}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Admin participant</span>
+								<span className="min-w-0 truncate font-medium" title={adminClientId}>
+									{ADMIN_PARTICIPANT_ID}
+								</span>
+							</div>
 						</div>
-						<div className="grid grid-cols-2 gap-2">
-							<Button type="button" variant={isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("experimental")}>
-								實驗組
-							</Button>
-							<Button type="button" variant={!isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("control")}>
-								對照組
-							</Button>
-						</div>
-					</div>
-				</section>
+					</section>
 
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Presence</h2>
-					</header>
-					{participants.length > 0 ? (
-						<div className="grid gap-2">
-							{participants.map(participant => (
-								<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm">
-									{(() => {
-										const latestTranscript = latestTranscripts[participant.id];
-										return (
-											<>
-												<div className="flex items-center justify-between gap-3">
-													<span className="min-w-0 truncate font-medium">{participant.display_name || participant.id}</span>
-													<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
-												</div>
-												<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-													<span className="truncate">ID {participant.id}</span>
-													<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "off"}</span>
-												</div>
-												{latestTranscript && (
-													<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
-														<div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
-															<span>{latestTranscript.scope}</span>
-															<span>{latestTranscript.receivedAt}</span>
-														</div>
-														<p className="line-clamp-3 whitespace-pre-wrap text-foreground">{latestTranscript.text}</p>
-													</div>
-												)}
-											</>
-										);
-									})()}
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Phase Controls</h2>
+						</header>
+						<div className="grid gap-3">
+							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+								<div className="min-w-0">
+									<div className="font-medium">{currentPhase === "group" ? "Group Phase" : "Private Phase"}</div>
+									<div className="text-xs text-muted-foreground">Current phase</div>
 								</div>
-							))}
+								<Badge variant={currentPhase === "group" ? "secondary" : "outline"}>{currentPhase}</Badge>
+							</div>
+							<div className="grid grid-cols-2 gap-2">
+								<Button type="button" variant={currentPhase === "private" ? "default" : "outline"} onClick={() => switchPhase("private")}>
+									Private Phase
+								</Button>
+								<Button type="button" variant={currentPhase === "group" ? "default" : "outline"} onClick={() => switchPhase("group")}>
+									Group Phase
+								</Button>
+							</div>
 						</div>
-					) : (
-						<EmptyState title="尚未取得 presence" detail="這裡讀取 REST presence API，會列出目前連到同一個 room 的 participant id 與 mic 狀態。" />
-					)}
-				</section>
+					</section>
 
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<RefreshCw className={cn("h-4 w-4 text-muted-foreground", isApiLoading && "animate-spin")} aria-hidden="true" />
-						<h2 className="text-sm font-semibold">API data</h2>
-					</header>
-					<div className="grid gap-3 text-sm">
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Transcripts</span>
-							<span className="font-medium">{transcripts.length}</span>
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center justify-between gap-3">
+							<div className="flex items-center gap-2">
+								<Clock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+								<h2 className="text-sm font-semibold">Countdown</h2>
+							</div>
+							{timerEndTime > 0 ? <AdminPhaseTimer endTimeMs={timerEndTime} /> : <span className="font-mono text-sm font-semibold text-muted-foreground">--:--</span>}
+						</header>
+						<div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+							<label className="sr-only" htmlFor="countdown-duration">
+								Countdown duration (minutes)
+							</label>
+							<input
+								id="countdown-duration"
+								aria-label="Countdown duration in minutes"
+								className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+								inputMode="decimal"
+								type="text"
+								value={countdownDurationMinutes}
+								onChange={event => setCountdownDurationMinutes(event.target.value)}
+							/>
+							<Button onClick={() => startCountdown(countdownDurationMinutes)}>Start {formatDurationLabel(countdownDurationMinutes)}</Button>
+							<Button variant="secondary" onClick={clearCountdown}>
+								Clear
+							</Button>
 						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Idea blocks</span>
-							<span className="font-medium">{ideaBlocks.length}</span>
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<Lightbulb className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Cue Condition</h2>
+						</header>
+						<div className="grid gap-3">
+							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+								<div className="min-w-0">
+									<div className="font-medium">{isExperimentalCondition ? "實驗組" : "對照組"}</div>
+									<div className="text-xs text-muted-foreground">{isSimilarityCueActive ? "Similarity cue on" : "Similarity cue off"}</div>
+								</div>
+								<Badge variant={isExperimentalCondition ? "secondary" : "outline"}>{isExperimentalCondition ? "cue on" : "cue off"}</Badge>
+							</div>
+							<div className="grid grid-cols-2 gap-2">
+								<Button type="button" variant={isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("experimental")}>
+									實驗組
+								</Button>
+								<Button type="button" variant={!isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("control")}>
+									對照組
+								</Button>
+							</div>
 						</div>
-						<div className="flex items-center justify-between gap-3">
-							<span className="text-muted-foreground">Last refresh</span>
-							<span className="font-medium">{lastApiLoadedAt || "-"}</span>
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Presence</h2>
+						</header>
+						{participants.length > 0 ? (
+							<div className="grid gap-2">
+								{participants.map(participant => (
+									<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm">
+										{(() => {
+											const latestTranscript = latestTranscripts[participant.id];
+											return (
+												<>
+													<div className="flex items-center justify-between gap-3">
+														<span className="min-w-0 truncate font-medium">{participant.display_name || participant.id}</span>
+														<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
+													</div>
+													<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+														<span className="truncate">ID {participant.id}</span>
+														<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "off"}</span>
+													</div>
+													{latestTranscript && (
+														<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
+															<div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
+																<span>{latestTranscript.scope}</span>
+																<span>{latestTranscript.receivedAt}</span>
+															</div>
+															<p className="line-clamp-3 whitespace-pre-wrap text-foreground">{latestTranscript.text}</p>
+														</div>
+													)}
+												</>
+											);
+										})()}
+									</div>
+								))}
+							</div>
+						) : (
+							<EmptyState title="尚未收到 presence" detail="Presence WebSocket 會即時同步目前連到同一個 room 的 participant id 與 mic 狀態。" />
+						)}
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<RefreshCw className={cn("h-4 w-4 text-muted-foreground", isApiLoading && "animate-spin")} aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Live data</h2>
+						</header>
+						<div className="grid gap-3 text-sm">
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Participants</span>
+								<span className="font-medium">{participants.length}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Transcripts</span>
+								<span className="font-medium">{transcripts.length}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Idea blocks</span>
+								<span className="font-medium">{ideaBlocks.length}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Similarity sync</span>
+								<span className="font-medium">{lastApiLoadedAt || "-"}</span>
+							</div>
+							<Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void loadAdminApiData()} disabled={isApiLoading}>
+								<RefreshCw className={cn("h-3.5 w-3.5", isApiLoading && "animate-spin")} aria-hidden="true" />
+								Refresh similarities
+							</Button>
+							{apiError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{apiError}</p>}
 						</div>
-						<Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void loadAdminApiData()} disabled={isApiLoading}>
-							<RefreshCw className={cn("h-3.5 w-3.5", isApiLoading && "animate-spin")} aria-hidden="true" />
-							Refresh API data
-						</Button>
-						{apiError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{apiError}</p>}
-					</div>
-				</section>
+					</section>
+				</div>
 			</aside>
 
-			<section className="flex min-h-[calc(100vh-2rem)] min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
+			<section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-card-foreground xl:h-full">
 				<header className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
 					<div>
 						<div className="flex items-center gap-2 text-sm text-muted-foreground">
 							<Lightbulb className="h-4 w-4" aria-hidden="true" />
-							<span>REST API</span>
+							<span>WebSocket</span>
 						</div>
 						<h2 className="mt-1 text-lg font-semibold">Idea blocks</h2>
 					</div>
@@ -1174,7 +1481,7 @@ export function AdminPage() {
 						</div>
 					)}
 				</div>
-				<ScrollArea className="min-h-0 flex-1 p-4">
+				<ScrollArea className="min-h-0 flex-1 p-4" viewportProps={{ className: "overflow-x-hidden" }}>
 					{filteredIdeaBlocks.length > 0 ? (
 						<div className="grid gap-3">
 							{filteredIdeaBlocks.map(block => {
@@ -1209,15 +1516,15 @@ export function AdminPage() {
 							})}
 						</div>
 					) : (
-						<EmptyState title="尚無 idea blocks" detail="這裡只讀取 REST API 的 session idea blocks，不使用 board WebSocket block payload。" />
+						<EmptyState title="尚無 idea blocks" detail="Idea blocks 會由 WebSocket 即時同步；產生或更新後會直接出現在這裡。" />
 					)}
 				</ScrollArea>
 			</section>
 
-			<aside className="relative flex min-h-0 min-w-[var(--admin-right-sidebar-width)] flex-col gap-4">
+			<aside className="relative min-h-0 min-w-[var(--admin-right-sidebar-width)] xl:h-full">
 				<button
 					type="button"
-					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+					className="absolute -left-3 top-1/2 z-10 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
 					aria-label="調整右側 Admin 欄寬"
 					aria-orientation="vertical"
 					aria-valuemin={MIN_ADMIN_RIGHT_SIDEBAR_WIDTH}
@@ -1226,176 +1533,200 @@ export function AdminPage() {
 					onPointerDown={handleRightSidebarResizeStart}
 					onKeyDown={handleRightSidebarResizeKeyDown}
 				/>
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center justify-between gap-3">
-						<div className="flex items-center gap-2">
-							<ClipboardList className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-							<h2 className="text-sm font-semibold">Ranking state</h2>
+				<div className="flex h-full flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
+					<header className="flex items-center justify-between gap-3 border-b p-3">
+						<div className="flex rounded-lg bg-muted p-1">
+							<Button
+								aria-pressed={activeTab === "ranking"}
+								className={cn("transition-all active:translate-y-px active:scale-[0.98]", activeTab === "ranking" && "bg-primary text-primary-foreground shadow-inner")}
+								variant={activeTab === "ranking" ? "default" : "ghost"}
+								onClick={() => setActiveTab("ranking")}
+							>
+								Ranking
+							</Button>
+							<Button
+								aria-pressed={activeTab === "transcript"}
+								className={cn("transition-all active:translate-y-px active:scale-[0.98]", activeTab === "transcript" && "bg-primary text-primary-foreground shadow-inner")}
+								variant={activeTab === "transcript" ? "default" : "ghost"}
+								onClick={() => setActiveTab("transcript")}
+							>
+								逐字稿
+							</Button>
+							<Button
+								aria-pressed={activeTab === "chat"}
+								className={cn("transition-all active:translate-y-px active:scale-[0.98]", activeTab === "chat" && "bg-primary text-primary-foreground shadow-inner")}
+								variant={activeTab === "chat" ? "default" : "ghost"}
+								onClick={() => setActiveTab("chat")}
+							>
+								聊天室
+							</Button>
 						</div>
-						{publicRankingSnapshot && (
-							<div className="flex shrink-0 items-center gap-1.5">
-								<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => void copyRankings()} aria-label="複製排序到剪貼簿">
-									{rankingsCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-									{rankingsCopied ? "已複製" : "複製"}
-								</Button>
-								<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={downloadRankings} aria-label="下載排序 CSV 檔">
-									<Download className="h-3.5 w-3.5" aria-hidden="true" />
-									下載
-								</Button>
-							</div>
-						)}
 					</header>
-					{publicRankingSnapshot ? (
-						<div className="overflow-x-auto rounded-lg border bg-background">
-							<table className="w-full min-w-[320px] border-collapse text-left text-xs">
-								<thead>
-									<tr className="border-b bg-muted/60">
-										<th className="sticky left-0 z-10 w-10 bg-muted/95 px-2 py-2 font-semibold text-muted-foreground">#</th>
-										<th className="min-w-40 px-2 py-2 font-semibold">
-											<div className="flex min-w-0 items-center justify-between gap-2">
-												<span className="truncate">Public</span>
-												<span className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">r{publicRankingSnapshot.revision}</span>
-											</div>
-										</th>
-										{privateRankingColumns.map(column => (
-											<th key={column.key} className="w-16 px-2 py-2 text-center font-semibold">
-												<div className="flex min-w-0 items-center justify-between gap-2">
-													<span className="truncate">{column.label}</span>
-													<span className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">r{column.revision}</span>
-												</div>
-											</th>
-										))}
-									</tr>
-								</thead>
-								<tbody>
-									{rankingRowIndexes.map(rowIndex => (
-										<tr key={rowIndex} className="border-b last:border-b-0">
-											<td className="sticky left-0 z-10 bg-background px-2 py-2 font-semibold text-muted-foreground">{rowIndex + 1}</td>
-											<td className="max-w-44 px-2 py-2 align-top">
-												<span className="block truncate rounded-md bg-muted px-2 py-1 font-medium">{rankingLabels[publicRankingItems[rowIndex]] || publicRankingItems[rowIndex] || "-"}</span>
-											</td>
-											{privateRankingColumns.map(column => {
-												const conflict = getRankConflict(publicRankingItems[rowIndex], rowIndex + 1, column.rankIndexById);
-												return (
-													<td key={column.key} className="px-2 py-2 text-center align-middle">
-														<span
-															className={cn(
-																"inline-flex min-h-6 min-w-8 items-center justify-center rounded-md px-1.5 py-1 font-medium text-muted-foreground",
-																!conflict?.isConflict && "bg-muted/60",
-																conflict?.isConflict && "ring-1 ring-muted-foreground/30"
-															)}
-															title={conflict ? `與 Public 排序差 ${conflict.amount} 位` : undefined}
-														>
-															{conflict && conflict.amount > 0 ? (
-																<span
-																	className={cn(
-																		"inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold",
-																		conflict.isConflict && conflict.direction === "up" && "text-emerald-700",
-																		conflict.isConflict && conflict.direction === "down" && "text-rose-700",
-																		!conflict.isConflict && "text-muted-foreground/60"
-																	)}
-																	aria-label={`與 Public 排序差 ${conflict.amount} 位，Private 排序${conflict.direction === "up" ? "較前" : "較後"}`}
-																>
+
+					<ScrollArea className="min-h-0 flex-1 p-3" viewportProps={{ className: "overflow-x-hidden" }}>
+						{activeTab === "ranking" && (
+							<div className="grid gap-4">
+								<header className="flex items-center justify-between gap-3">
+									<div className="flex items-center gap-2">
+										<ClipboardList className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+										<h2 className="text-sm font-semibold">Ranking state</h2>
+									</div>
+									{publicRankingSnapshot && (
+										<div className="flex shrink-0 items-center gap-1.5">
+											<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => void copyRankings()} aria-label="複製排序到剪貼簿">
+												{rankingsCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+												{rankingsCopied ? "已複製" : "複製"}
+											</Button>
+											<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={downloadRankings} aria-label="下載排序 CSV 檔">
+												<Download className="h-3.5 w-3.5" aria-hidden="true" />
+												下載
+											</Button>
+										</div>
+									)}
+								</header>
+								{publicRankingSnapshot ? (
+									<div className="overflow-x-auto rounded-lg border bg-background">
+										<table className="w-full min-w-[280px] border-collapse text-left text-xs">
+											<thead>
+												<tr className="border-b bg-muted/60">
+													<th className="sticky left-0 z-10 w-10 bg-muted/95 px-2 py-2 font-semibold text-muted-foreground">#</th>
+													<th className="min-w-32 px-2 py-2 font-semibold">
+														<div className="flex min-w-0 items-center justify-between gap-2">
+															<span className="truncate">Public</span>
+															<span className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">r{publicRankingSnapshot.revision}</span>
+														</div>
+													</th>
+													{privateRankingColumns.map(column => (
+														<th key={column.key} className="w-14 px-2 py-2 text-center font-semibold">
+															<div className="flex min-w-0 items-center justify-between gap-2">
+																<span className="truncate">{column.label}</span>
+																<span className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">r{column.revision}</span>
+															</div>
+														</th>
+													))}
+												</tr>
+											</thead>
+											<tbody>
+												{rankingRowIndexes.map(rowIndex => (
+													<tr key={rowIndex} className="border-b last:border-b-0">
+														<td className="sticky left-0 z-10 bg-background px-2 py-2 font-semibold text-muted-foreground">{rowIndex + 1}</td>
+														<td className="max-w-40 px-2 py-2 align-top">
+															<span className="block truncate rounded-md bg-muted px-2 py-1 font-medium">{rankingLabels[publicRankingItems[rowIndex]] || publicRankingItems[rowIndex] || "-"}</span>
+														</td>
+														{privateRankingColumns.map(column => {
+															const conflict = getRankConflict(publicRankingItems[rowIndex], rowIndex + 1, column.rankIndexById);
+															return (
+																<td key={column.key} className="px-2 py-2 text-center align-middle">
 																	<span
 																		className={cn(
-																			"h-0 w-0 border-x-[4px] border-x-transparent",
-																			conflict.direction === "up" && conflict.isConflict && "border-b-[7px] border-b-emerald-600",
-																			conflict.direction === "down" && conflict.isConflict && "border-t-[7px] border-t-rose-600",
-																			conflict.direction === "up" && !conflict.isConflict && "border-b-[7px] border-b-muted-foreground/40",
-																			conflict.direction === "down" && !conflict.isConflict && "border-t-[7px] border-t-muted-foreground/40"
+																			"inline-flex min-h-6 min-w-8 items-center justify-center rounded-md px-1.5 py-1 font-medium text-muted-foreground",
+																			!conflict?.isConflict && "bg-muted/60",
+																			conflict?.isConflict && "ring-1 ring-muted-foreground/30"
 																		)}
-																		aria-hidden="true"
-																	/>
-																	{conflict.amount}
-																</span>
-															) : (
-																<span className="text-muted-foreground/60" aria-hidden="true">
-																	-
-																</span>
-															)}
-														</span>
-													</td>
-												);
-											})}
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					) : (
-						<EmptyState title="尚未收到 ranking state" detail="admin WebSocket join 後會回傳 public 與每位 participant 的 private ranking；有排序更新時會即時刷新。" />
+																		title={conflict ? `與 Public 排序差 ${conflict.amount} 位` : undefined}
+																	>
+																		{conflict && conflict.amount > 0 ? (
+																			<span
+																				className={cn(
+																					"inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold",
+																					conflict.isConflict && conflict.direction === "up" && "text-emerald-700",
+																					conflict.isConflict && conflict.direction === "down" && "text-rose-700",
+																					!conflict.isConflict && "text-muted-foreground/60"
+																				)}
+																				aria-label={`與 Public 排序差 ${conflict.amount} 位，Private 排序${conflict.direction === "up" ? "較前" : "較後"}`}
+																			>
+																				<span
+																					className={cn(
+																						"h-0 w-0 border-x-[4px] border-x-transparent",
+																						conflict.direction === "up" && conflict.isConflict && "border-b-[7px] border-b-emerald-600",
+																						conflict.direction === "down" && conflict.isConflict && "border-t-[7px] border-t-rose-600",
+																						conflict.direction === "up" && !conflict.isConflict && "border-b-[7px] border-b-muted-foreground/40",
+																						conflict.direction === "down" && !conflict.isConflict && "border-t-[7px] border-t-muted-foreground/40"
+																					)}
+																					aria-hidden="true"
+																				/>
+																				{conflict.amount}
+																			</span>
+																		) : (
+																			<span className="text-muted-foreground/60" aria-hidden="true">
+																				-
+																			</span>
+																		)}
+																	</span>
+																</td>
+															);
+														})}
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								) : (
+									<EmptyState title="尚未收到 ranking state" detail="admin WebSocket join 後會回傳 public 與每位 participant 的 private ranking；有排序更新時會即時刷新。" />
+								)}
+							</div>
+						)}
+
+						{activeTab === "transcript" && (
+							<div className="grid gap-4">
+								<header className="flex items-center justify-between gap-3">
+									<div className="flex items-center gap-2">
+										<FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+										<h2 className="text-sm font-semibold">Transcripts</h2>
+									</div>
+									<Badge variant="outline">{filteredTranscripts.length}</Badge>
+								</header>
+								{filteredTranscripts.length > 0 ? (
+									<div className="grid gap-3">
+										{filteredTranscripts.map(item => (
+											<article key={item.id} className="rounded-lg border bg-background p-3 text-sm">
+												<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+													<div className="flex items-center gap-2">
+														<Badge variant="outline">user {item.user_id}</Badge>
+														<span className="font-medium">#{item.id}</span>
+													</div>
+													<span className="text-xs text-muted-foreground">{formatApiTime(item.time_stamp)}</span>
+												</div>
+												<p className="line-clamp-5 whitespace-pre-wrap leading-5">{item.transcript}</p>
+											</article>
+										))}
+									</div>
+								) : (
+									<EmptyState title="尚無 transcripts" detail="Transcripts 會由 WebSocket 即時同步；participant 開始說話後會直接出現在這裡。" />
+								)}
+							</div>
+						)}
+
+						{activeTab === "chat" && (
+							<div className="grid gap-4">
+								<header className="flex items-center justify-between gap-3">
+									<div className="flex items-center gap-2">
+										<MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+										<h2 className="text-sm font-semibold">聊天室</h2>
+									</div>
+									<Badge variant="outline">{publicChatMessages.length}</Badge>
+								</header>
+								<PublicChatMessages messages={publicChatMessages} />
+							</div>
+						)}
+					</ScrollArea>
+
+					{activeTab === "chat" && (
+						<footer className="border-t bg-card p-3">
+							<PublicChatComposer
+								messageText={publicChatText}
+								error={publicChatError}
+								isConnected={adminConnected}
+								isSending={isSendingPublicChat}
+								onMessageTextChange={value => {
+									setPublicChatText(value);
+									setPublicChatError(null);
+								}}
+								onSend={sendPublicChatMessage}
+							/>
+						</footer>
 					)}
-				</section>
-
-				<section className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-card text-card-foreground">
-					<header className="flex items-center justify-between gap-3 border-b p-4">
-						<div className="flex items-center gap-2">
-							<FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-							<h2 className="text-sm font-semibold">Transcripts</h2>
-						</div>
-						<Badge variant="outline">{filteredTranscripts.length}</Badge>
-					</header>
-					<ScrollArea className="h-[360px] p-4">
-						{filteredTranscripts.length > 0 ? (
-							<div className="grid gap-3">
-								{filteredTranscripts.map(item => (
-									<article key={item.id} className="rounded-lg border bg-background p-3 text-sm">
-										<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-											<div className="flex items-center gap-2">
-												<Badge variant="outline">user {item.user_id}</Badge>
-												<span className="font-medium">#{item.id}</span>
-											</div>
-											<span className="text-xs text-muted-foreground">{formatApiTime(item.time_stamp)}</span>
-										</div>
-										<p className="line-clamp-5 whitespace-pre-wrap leading-5">{item.transcript}</p>
-									</article>
-								))}
-							</div>
-						) : (
-							<EmptyState title="尚無 transcripts" detail="這裡只讀取 REST API，不使用 WebSocket 的 transcript 或 idea block 事件。" />
-						)}
-					</ScrollArea>
-				</section>
-
-				<section className="min-h-0 overflow-hidden rounded-lg border bg-card text-card-foreground">
-					<header className="flex items-center justify-between gap-3 border-b p-4">
-						<div className="flex items-center gap-2">
-							<Activity className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-							<h2 className="text-sm font-semibold">WS diagnostics</h2>
-						</div>
-						<Badge variant="outline">{events.length}</Badge>
-					</header>
-					<ScrollArea className="h-[260px] p-4">
-						{events.length > 0 ? (
-							<div className="grid gap-3">
-								{events.map(event => (
-									<article key={event.id} className="rounded-lg border bg-background p-3">
-										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-											<div className="flex items-center gap-2">
-												<Badge variant={event.source === "board" ? "secondary" : "outline"}>{event.source}</Badge>
-												<span className="text-sm font-medium">{formatMessageType(event.message)}</span>
-											</div>
-											<span className="text-xs text-muted-foreground">{event.receivedAt}</span>
-										</div>
-										<JsonPreview value={event.message} />
-									</article>
-								))}
-							</div>
-						) : (
-							<EmptyState title="尚未收到 WS event" detail="這裡顯示 board/admin WebSocket 診斷；admin WS 會收到 participant transcript。" />
-						)}
-					</ScrollArea>
-				</section>
-
-				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Last messages</h2>
-					</header>
-					<div className="grid gap-3">
-						<JsonPreview value={{ admin: adminLastMessage ?? null, board: boardLastMessage ?? null }} />
-					</div>
-				</section>
+				</div>
 			</aside>
 		</main>
 	);

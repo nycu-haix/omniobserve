@@ -15,7 +15,7 @@ from ..schemas import StreamContext, StreamTranscript
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .participant_status import mark_audio_disconnected, update_audio_status
-from .realtime import broadcast_admin_transcript, broadcast_public_transcript_line
+from .realtime import broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
@@ -92,17 +92,23 @@ async def send_ws_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> No
         logger.warning("Failed to send WebSocket message: %s", exc)
 
 
-async def send_similarity_idea_blocks_update(websocket: WebSocket, idea_blocks: list[Any]) -> None:
+async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_name: str, participant_id: str, idea_blocks: list[Any]) -> None:
     logger.info(
         "similarity_detection_ws_patch_send idea_blocks=%s",
         len(idea_blocks),
     )
+    serialized_idea_blocks = serialize_idea_blocks(idea_blocks)
     await send_ws_json_safe(
         websocket,
         {
             "type": "idea_blocks_update",
-            "idea_blocks": serialize_idea_blocks(idea_blocks),
+            "idea_blocks": serialized_idea_blocks,
         },
+    )
+    await broadcast_admin_idea_blocks_update(
+        session_name,
+        participant_id=participant_id,
+        idea_blocks=serialized_idea_blocks,
     )
 
 
@@ -253,6 +259,7 @@ async def handle_audio_stream_websocket(
                 display_name=str(stream_context.start_message.get("displayName") or "") or None,
                 client_id=stream_context.client_id,
             )
+            await broadcast_presence_state(session_name)
         except WebSocketDisconnect:
             return
         except Exception as exc:
@@ -330,7 +337,12 @@ async def handle_audio_stream_websocket(
                                 transcript=None,
                                 is_final=True,
                                 visibility=stream_context.scope,
-                                on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(websocket, idea_blocks),
+                                on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
+                                    websocket,
+                                    session_name=session_name,
+                                    participant_id=participant_id,
+                                    idea_blocks=idea_blocks,
+                                ),
                             )
                         except Exception:
                             logger.exception(
@@ -383,6 +395,11 @@ async def handle_audio_stream_websocket(
                             "idea_blocks": idea_blocks_payload,
                         },
                     )
+                    await broadcast_admin_idea_blocks_update(
+                        session_name,
+                        participant_id=participant_id,
+                        idea_blocks=idea_blocks_payload,
+                    )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -408,6 +425,7 @@ async def handle_audio_stream_websocket(
                 await websocket.close(code=1011)
         finally:
             mark_audio_disconnected(session_name, participant_id)
+            await broadcast_presence_state(session_name)
             if not stop_received and websocket.client_state == WebSocketState.CONNECTED:
                 # Keep connection open unless stop arrives; close only in error paths above.
                 await websocket.close()
@@ -650,7 +668,12 @@ async def handle_transcript_segments_websocket(
                         transcript=saved_segment,
                         is_final=True,
                         visibility=visibility,
-                        on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(websocket, idea_blocks),
+                        on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
+                            websocket,
+                            session_name=session_name,
+                            participant_id=participant_id,
+                            idea_blocks=idea_blocks,
+                        ),
                     )
                 except Exception:
                     logger.exception(
@@ -692,6 +715,11 @@ async def handle_transcript_segments_websocket(
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
                     },
+                )
+                await broadcast_admin_idea_blocks_update(
+                    session_name,
+                    participant_id=participant_id,
+                    idea_blocks=serialized_result["idea_blocks"],
                 )
                 logger.info(
                     "pipeline_ws_send_task_items_update session_name=%s participant_id=%s task_items=%s",

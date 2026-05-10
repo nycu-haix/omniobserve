@@ -18,16 +18,30 @@ from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
-from .participant_status import mark_audio_disconnected, update_audio_status
+from .participant_status import (
+    get_participant_presence,
+    mark_audio_disconnected,
+    update_audio_status,
+)
 from .ranking_move_service import create_ranking_move
 from .transcripts import save_ws_transcript_segment
-
 
 DEFAULT_RANKING_ITEMS = RANKING_ITEMS
 DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
-DUPLICATE_PARTICIPANT_MESSAGE = "這個 participant ID 已經在此 session 中，不能重複進入。"
+DUPLICATE_PARTICIPANT_MESSAGE = (
+    "這個 participant ID 已經在此 session 中，不能重複進入。"
+)
 DUPLICATE_ADMIN_MESSAGE = "這個 admin 已經在此 session 中，不能重複進入。"
+ADMIN_PARTICIPANT_ID = "admin"
+ADMIN_PARTICIPANT_ID_PREFIX = f"{ADMIN_PARTICIPANT_ID}-"
+
+
+def _is_admin_participant_id(participant_id: str | None) -> bool:
+    normalized_id = str(participant_id or "").lower()
+    return normalized_id == ADMIN_PARTICIPANT_ID or normalized_id.startswith(
+        ADMIN_PARTICIPANT_ID_PREFIX
+    )
 
 
 class ConnectionManager:
@@ -70,7 +84,9 @@ class ConnectionManager:
             self.connections[session_id][participant_id] = websocket
             return True
 
-    async def disconnect(self, session_id: str, participant_id: str, websocket: WebSocket | None = None) -> None:
+    async def disconnect(
+        self, session_id: str, participant_id: str, websocket: WebSocket | None = None
+    ) -> None:
         async with self._lock:
             participants = self.connections.get(session_id)
             if not participants:
@@ -82,7 +98,9 @@ class ConnectionManager:
             if not participants:
                 self.connections.pop(session_id, None)
 
-    async def send_to(self, session_id: str, participant_id: str, message: dict[str, Any]) -> bool:
+    async def send_to(
+        self, session_id: str, participant_id: str, message: dict[str, Any]
+    ) -> bool:
         websocket = self.connections.get(session_id, {}).get(participant_id)
         if websocket is None:
             return False
@@ -98,7 +116,9 @@ class ConnectionManager:
         exclude = exclude or set()
         targets = [
             (participant_id, websocket)
-            for participant_id, websocket in self.connections.get(session_id, {}).items()
+            for participant_id, websocket in self.connections.get(
+                session_id, {}
+            ).items()
             if participant_id not in exclude
         ]
         disconnected: list[str] = []
@@ -112,7 +132,9 @@ class ConnectionManager:
     def get_participants(self, session_id: str) -> list[str]:
         return sorted(self.connections.get(session_id, {}).keys())
 
-    async def _send_json_safely(self, websocket: WebSocket, message: dict[str, Any]) -> bool:
+    async def _send_json_safely(
+        self, websocket: WebSocket, message: dict[str, Any]
+    ) -> bool:
         if websocket.client_state != WebSocketState.CONNECTED:
             return False
         try:
@@ -122,7 +144,9 @@ class ConnectionManager:
             logger.warning("Failed to send WebSocket payload: %s", exc)
             return False
 
-    async def _close_safely(self, websocket: WebSocket, *, code: int, reason: str | None = None) -> None:
+    async def _close_safely(
+        self, websocket: WebSocket, *, code: int, reason: str | None = None
+    ) -> None:
         try:
             await websocket.close(code=code, reason=reason or "")
         except Exception:
@@ -153,7 +177,9 @@ board_blocks: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
 )
 cue_responses: dict[str, list[dict[str, Any]]] = defaultdict(list)
 session_phases: dict[str, str] = defaultdict(lambda: "private")
-session_timers: dict[str, dict[str, Any]] = defaultdict(lambda: {"end_time_ms": 0, "duration_s": 0})
+session_timers: dict[str, dict[str, Any]] = defaultdict(
+    lambda: {"end_time_ms": 0, "duration_s": 0}
+)
 session_cue_conditions: dict[str, str] = defaultdict(lambda: "experimental")
 
 
@@ -186,9 +212,46 @@ def _phase_state_message(session_id: str) -> dict[str, Any]:
     }
 
 
+def _set_session_countdown(session_id: str, duration_s: int) -> None:
+    if duration_s > 0:
+        session_timers[session_id] = {
+            "end_time_ms": _now_ms() + duration_s * 1000,
+            "duration_s": duration_s,
+        }
+    else:
+        session_timers[session_id] = {"end_time_ms": 0, "duration_s": 0}
+
+
+def _phase_changed_message(session_id: str) -> dict[str, Any]:
+    timer = session_timers[session_id]
+    return {
+        "type": "phase_changed",
+        "phase": session_phases[session_id],
+        "end_time_ms": timer["end_time_ms"],
+        "duration_s": timer["duration_s"],
+        "cue_condition": session_cue_conditions[session_id],
+        "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
+        "timestamp_ms": _now_ms(),
+    }
+
+
+def _countdown_changed_message(session_id: str) -> dict[str, Any]:
+    timer = session_timers[session_id]
+    return {
+        "type": "countdown_changed",
+        "current_phase": session_phases[session_id],
+        "timer_end_time_ms": timer["end_time_ms"],
+        "end_time_ms": timer["end_time_ms"],
+        "duration_s": timer["duration_s"],
+        "cue_condition": session_cue_conditions[session_id],
+        "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
+        "timestamp_ms": _now_ms(),
+    }
+
+
 def _is_websocket_disconnect_runtime_error(exc: RuntimeError) -> bool:
     message = str(exc)
-    return "WebSocket is not connected" in message or "Cannot call \"receive\"" in message
+    return "WebSocket is not connected" in message or 'Cannot call "receive"' in message
 
 
 async def broadcast_admin_transcript(
@@ -219,6 +282,62 @@ async def broadcast_admin_transcript(
     )
 
 
+def _presence_state_message(session_id: str) -> dict[str, Any]:
+    participant_ids = sorted(
+        {
+            *presence_manager.get_participants(session_id),
+            *board_manager.get_participants(session_id),
+        }
+    )
+    return {
+        "type": "presence_state",
+        "session_name": session_id,
+        "participant_ids": participant_ids,
+        "participants": get_participant_presence(session_id, participant_ids),
+        "timestamp_ms": _now_ms(),
+    }
+
+
+async def broadcast_presence_state(session_id: str) -> None:
+    await presence_manager.broadcast(session_id, _presence_state_message(session_id))
+    await admin_manager.broadcast(session_id, _presence_state_message(session_id))
+
+
+async def broadcast_admin_idea_blocks_update(
+    session_id: str,
+    *,
+    participant_id: str,
+    idea_blocks: list[dict[str, Any]],
+) -> None:
+    await admin_manager.broadcast(
+        session_id,
+        {
+            "type": "idea_blocks_update",
+            "session_name": session_id,
+            "participant_id": participant_id,
+            "idea_blocks": idea_blocks,
+            "timestamp_ms": _now_ms(),
+        },
+    )
+
+
+def _serialize_admin_idea_blocks(idea_blocks: list[Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": block.id,
+            "user_id": block.user_id,
+            "title": block.title,
+            "summary": block.summary,
+            "time_stamp": block.time_stamp.isoformat() if block.time_stamp else None,
+            "transcript_id": block.transcript_id,
+            "transcript": block.transcript,
+            "similarity_id": block.similarity_id,
+            "similarity_is_same_reason": block.similarity_is_same_reason,
+        }
+        for block in idea_blocks
+    ]
+
+
 async def broadcast_public_transcript_line(
     session_id: str,
     *,
@@ -231,7 +350,9 @@ async def broadcast_public_transcript_line(
         {
             "type": "new_transcript_line",
             "payload": {
-                "id": str(transcript_segment_id) if transcript_segment_id is not None else f"public-{participant_id}-{_now_ms()}",
+                "id": str(transcript_segment_id)
+                if transcript_segment_id is not None
+                else f"public-{participant_id}-{_now_ms()}",
                 "source": "public",
                 "origin": "live",
                 "userId": participant_id,
@@ -258,7 +379,11 @@ def _normalize_optional_int(value: Any) -> int | None:
 
 
 def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
-    timestamp_ms = int(chat_message.time_stamp.timestamp() * 1000) if chat_message.time_stamp else _now_ms()
+    timestamp_ms = (
+        int(chat_message.time_stamp.timestamp() * 1000)
+        if chat_message.time_stamp
+        else _now_ms()
+    )
     return {
         "id": str(chat_message.id),
         "sessionName": chat_message.session_name,
@@ -313,7 +438,9 @@ def _get_private_ranking_state(session_id: str, participant_id: str) -> dict[str
     return private_ranking_state[session_id][participant_id]
 
 
-def _get_ranking_state(session_id: str, participant_id: str, scope: str) -> dict[str, Any]:
+def _get_ranking_state(
+    session_id: str, participant_id: str, scope: str
+) -> dict[str, Any]:
     if scope == "private":
         return _get_private_ranking_state(session_id, participant_id)
     return _get_public_ranking_state(session_id)
@@ -360,7 +487,7 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     private_rankings = {
         participant_id: _ranking_payload(state)
         for participant_id, state in sorted(private_ranking_state[session_id].items())
-        if participant_id != "admin"
+        if not _is_admin_participant_id(participant_id)
     }
     return {
         "type": "admin_ranking_state",
@@ -380,7 +507,9 @@ def _apply_ranking_move(items: list[str], item_id: str, to_index: int) -> list[s
     return next_items
 
 
-async def handle_board_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
+async def handle_board_websocket(
+    websocket: WebSocket, *, session_id: str, participant_id: str
+) -> None:
     connected = await board_manager.connect(session_id, participant_id, websocket)
     if not connected:
         logger.info(
@@ -398,7 +527,11 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
     await board_manager.send_to(
         session_id,
         participant_id,
-        {"type": "joined", "session_name": session_id, "participant_id": participant_id},
+        {
+            "type": "joined",
+            "session_name": session_id,
+            "participant_id": participant_id,
+        },
     )
 
     try:
@@ -427,7 +560,9 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                 continue
 
             if message_type == "ping":
-                await board_manager.send_to(session_id, participant_id, {"type": "pong"})
+                await board_manager.send_to(
+                    session_id, participant_id, {"type": "pong"}
+                )
                 continue
 
             if message_type == "ranking_move":
@@ -448,9 +583,15 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                 async with session_locks[session_id]:
                     state = _get_ranking_state(session_id, participant_id, scope)
                     previous_items = list(state["items"])
-                    from_index = previous_items.index(item_id) if item_id in previous_items else None
+                    from_index = (
+                        previous_items.index(item_id)
+                        if item_id in previous_items
+                        else None
+                    )
                     try:
-                        next_items = _apply_ranking_move(previous_items, item_id, to_index)
+                        next_items = _apply_ranking_move(
+                            previous_items, item_id, to_index
+                        )
                     except ValueError as exc:
                         logger.warning(
                             "ranking_move rejected session_id=%s participant_id=%s scope=%s reason=%s",
@@ -462,7 +603,12 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                         await board_manager.send_to(
                             session_id,
                             participant_id,
-                            {"type": "ranking_error", "scope": scope, "reason": str(exc), "current": _ranking_payload(state)},
+                            {
+                                "type": "ranking_error",
+                                "scope": scope,
+                                "reason": str(exc),
+                                "current": _ranking_payload(state),
+                            },
                         )
                         continue
                     next_revision = state["revision"] + 1
@@ -495,7 +641,12 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                             await board_manager.send_to(
                                 session_id,
                                 participant_id,
-                                {"type": "ranking_error", "scope": scope, "reason": "failed to save ranking move", "current": _ranking_payload(state)},
+                                {
+                                    "type": "ranking_error",
+                                    "scope": scope,
+                                    "reason": "failed to save ranking move",
+                                    "current": _ranking_payload(state),
+                                },
                             )
                             continue
                     state["items"] = next_items
@@ -520,7 +671,9 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                         await board_manager.send_to(session_id, participant_id, message)
                     else:
                         await board_manager.broadcast(session_id, message)
-                    await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
+                    await admin_manager.broadcast(
+                        session_id, _admin_ranking_state_message(session_id)
+                    )
                 continue
 
             if message_type == "public_chat_send":
@@ -529,7 +682,10 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                     await board_manager.send_to(
                         session_id,
                         participant_id,
-                        {"type": "public_chat_error", "reason": "message cannot be empty"},
+                        {
+                            "type": "public_chat_error",
+                            "reason": "message cannot be empty",
+                        },
                     )
                     continue
                 if len(message_text) > 2000:
@@ -563,7 +719,10 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                         await board_manager.send_to(
                             session_id,
                             participant_id,
-                            {"type": "public_chat_error", "reason": "failed to save message"},
+                            {
+                                "type": "public_chat_error",
+                                "reason": "failed to save message",
+                            },
                         )
                         continue
 
@@ -594,7 +753,9 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
         )
 
 
-async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin_id: str) -> None:
+async def handle_admin_websocket(
+    websocket: WebSocket, *, session_id: str, admin_id: str
+) -> None:
     connected = await admin_manager.connect(
         session_id,
         admin_id,
@@ -654,25 +815,24 @@ async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin
                 )
             elif message_type == "switch_phase":
                 new_phase = _normalize_session_phase(payload.get("phase"))
-                duration_s = _normalize_int(payload.get("duration_s"), 0)
                 session_phases[session_id] = new_phase
-                if duration_s > 0:
-                    session_timers[session_id] = {"end_time_ms": _now_ms() + duration_s * 1000, "duration_s": duration_s}
-                else:
-                    session_timers[session_id] = {"end_time_ms": 0, "duration_s": 0}
+                if "duration_s" in payload:
+                    _set_session_countdown(
+                        session_id, _normalize_int(payload.get("duration_s"), 0)
+                    )
 
-                phase_changed_msg = {
-                    "type": "phase_changed",
-                    "phase": new_phase,
-                    "end_time_ms": session_timers[session_id]["end_time_ms"],
-                    "duration_s": session_timers[session_id]["duration_s"],
-                    "cue_condition": session_cue_conditions[session_id],
-                    "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
-                    "timestamp_ms": _now_ms(),
-                }
+                phase_changed_msg = _phase_changed_message(session_id)
                 await admin_manager.broadcast(session_id, phase_changed_msg)
                 await board_manager.broadcast(session_id, phase_changed_msg)
                 await cue_manager.broadcast(session_id, phase_changed_msg)
+            elif message_type == "set_countdown":
+                _set_session_countdown(
+                    session_id, _normalize_int(payload.get("duration_s"), 0)
+                )
+                countdown_changed_msg = _countdown_changed_message(session_id)
+                await admin_manager.broadcast(session_id, countdown_changed_msg)
+                await board_manager.broadcast(session_id, countdown_changed_msg)
+                await cue_manager.broadcast(session_id, countdown_changed_msg)
             elif message_type == "set_cue_condition":
                 next_condition = _normalize_cue_condition(payload.get("condition"))
                 session_cue_conditions[session_id] = next_condition
@@ -686,6 +846,62 @@ async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin
                 await admin_manager.broadcast(session_id, cue_condition_msg)
                 await board_manager.broadcast(session_id, cue_condition_msg)
                 await cue_manager.broadcast(session_id, cue_condition_msg)
+            elif message_type == "public_chat_send":
+                message_text = str(payload.get("message") or "").strip()
+                if not message_text:
+                    await admin_manager.send_to(
+                        session_id,
+                        admin_id,
+                        {
+                            "type": "public_chat_error",
+                            "reason": "message cannot be empty",
+                        },
+                    )
+                    continue
+                if len(message_text) > 2000:
+                    await admin_manager.send_to(
+                        session_id,
+                        admin_id,
+                        {"type": "public_chat_error", "reason": "message is too long"},
+                    )
+                    continue
+
+                display_name = str(payload.get("displayName") or "").strip() or None
+                async with SessionLocal() as db:
+                    try:
+                        saved_message = await create_chat_message(
+                            ChatMessageCreate(
+                                session_name=session_id,
+                                user_id=0,
+                                display_name=display_name,
+                                message=message_text,
+                            ),
+                            db,
+                        )
+                    except Exception as exc:
+                        await db.rollback()
+                        logger.warning(
+                            "admin public_chat_send failed session_id=%s admin_id=%s reason=%s",
+                            session_id,
+                            admin_id,
+                            exc,
+                        )
+                        await admin_manager.send_to(
+                            session_id,
+                            admin_id,
+                            {
+                                "type": "public_chat_error",
+                                "reason": "failed to save message",
+                            },
+                        )
+                        continue
+
+                chat_msg = {
+                    "type": "public_chat_message",
+                    "payload": _chat_message_payload(saved_message),
+                }
+                await board_manager.broadcast(session_id, chat_msg)
+                await admin_manager.broadcast(session_id, chat_msg)
     except WebSocketDisconnect:
         pass
     except RuntimeError as exc:
@@ -715,7 +931,11 @@ async def _handle_board_block_message(
         await board_manager.send_to(
             session_id,
             participant_id,
-            {"type": "block_discarded", "block_id": block_id, "participant_id": participant_id},
+            {
+                "type": "block_discarded",
+                "block_id": block_id,
+                "participant_id": participant_id,
+            },
         )
         return
 
@@ -731,8 +951,17 @@ async def _handle_board_block_message(
         "timestamp_ms": _now_ms(),
     }
 
-    target_list = blocks["public_blocks"] if scope == "public" else blocks["private_blocks"]
-    existing_index = next((index for index, existing in enumerate(target_list) if existing.get("block_id") == block_id), None)
+    target_list = (
+        blocks["public_blocks"] if scope == "public" else blocks["private_blocks"]
+    )
+    existing_index = next(
+        (
+            index
+            for index, existing in enumerate(target_list)
+            if existing.get("block_id") == block_id
+        ),
+        None,
+    )
     if existing_index is None:
         target_list.append(block)
     else:
@@ -744,7 +973,9 @@ async def _handle_board_block_message(
         await board_manager.send_to(session_id, participant_id, block)
 
 
-async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
+async def handle_cue_websocket(
+    websocket: WebSocket, *, session_id: str, participant_id: str
+) -> None:
     connected = await cue_manager.connect(session_id, participant_id, websocket)
     if not connected:
         logger.info(
@@ -756,7 +987,12 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
     await cue_manager.send_to(
         session_id,
         participant_id,
-        {"type": "joined", "session_name": session_id, "participant_id": participant_id, **_phase_state_message(session_id)},
+        {
+            "type": "joined",
+            "session_name": session_id,
+            "participant_id": participant_id,
+            **_phase_state_message(session_id),
+        },
     )
 
     try:
@@ -776,7 +1012,12 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
                 await cue_manager.send_to(
                     session_id,
                     participant_id,
-                    {"type": "joined", "session_name": session_id, "participant_id": participant_id, **_phase_state_message(session_id)},
+                    {
+                        "type": "joined",
+                        "session_name": session_id,
+                        "participant_id": participant_id,
+                        **_phase_state_message(session_id),
+                    },
                 )
             elif message_type == "cue_response":
                 cue_responses[session_id].append(
@@ -787,7 +1028,11 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
                         "timestamp_ms": payload.get("timestamp_ms", _now_ms()),
                     }
                 )
-                await cue_manager.send_to(session_id, participant_id, {"type": "cue_response_recorded", "cue_id": payload.get("cue_id")})
+                await cue_manager.send_to(
+                    session_id,
+                    participant_id,
+                    {"type": "cue_response_recorded", "cue_id": payload.get("cue_id")},
+                )
     except WebSocketDisconnect:
         pass
     except RuntimeError as exc:
@@ -797,7 +1042,9 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
         await cue_manager.disconnect(session_id, participant_id, websocket)
 
 
-async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
+async def handle_presence_websocket(
+    websocket: WebSocket, *, session_id: str, participant_id: str
+) -> None:
     connected = await presence_manager.connect(session_id, participant_id, websocket)
     if not connected:
         logger.info(
@@ -810,20 +1057,10 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
         session_id,
         participant_id,
         {
-            "type": "presence_state",
-            "session_name": session_id,
-            "participants": presence_manager.get_participants(session_id),
+            **_presence_state_message(session_id),
         },
     )
-    await presence_manager.broadcast(
-        session_id,
-        {
-            "type": "participant_joined",
-            "participant_id": participant_id,
-            "total": len(presence_manager.get_participants(session_id)),
-        },
-        exclude={participant_id},
-    )
+    await broadcast_presence_state(session_id)
 
     try:
         while True:
@@ -837,15 +1074,15 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
 
             message_type = payload.get("type")
             if message_type == "ping":
-                await presence_manager.send_to(session_id, participant_id, {"type": "pong"})
+                await presence_manager.send_to(
+                    session_id, participant_id, {"type": "pong"}
+                )
             elif message_type == "join":
                 await presence_manager.send_to(
                     session_id,
                     participant_id,
                     {
-                        "type": "presence_state",
-                        "session_name": session_id,
-                        "participants": presence_manager.get_participants(session_id),
+                        **_presence_state_message(session_id),
                     },
                 )
             elif message_type == "activity":
@@ -864,17 +1101,12 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
             raise
     finally:
         await presence_manager.disconnect(session_id, participant_id, websocket)
-        await presence_manager.broadcast(
-            session_id,
-            {
-                "type": "participant_left",
-                "participant_id": participant_id,
-                "total": len(presence_manager.get_participants(session_id)),
-            },
-        )
+        await broadcast_presence_state(session_id)
 
 
-async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
+async def handle_audio_websocket(
+    websocket: WebSocket, *, session_id: str, participant_id: str
+) -> None:
     connected = await audio_manager.connect(session_id, participant_id, websocket)
     if not connected:
         logger.info(
@@ -886,9 +1118,12 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
     state = AudioConnectionState(websocket=websocket)
     audio_connections[session_id][participant_id] = state
     transcript_segments = []
-    logger.info("audio ws connected session_id=%s participant_id=%s", session_id, participant_id)
+    logger.info(
+        "audio ws connected session_id=%s participant_id=%s", session_id, participant_id
+    )
 
     async with SessionLocal() as db:
+
         async def flush_buffer() -> None:
             if not state.audio_buffer:
                 return
@@ -962,7 +1197,9 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                 db,
                 session_name=session_id,
                 participant_id=participant_id,
-                visibility=Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC,
+                visibility=Visibility.PRIVATE
+                if state.mic_mode == "private"
+                else Visibility.PUBLIC,
                 transcript_text=transcript_text,
                 started_at=now,
                 ended_at=now,
@@ -1024,7 +1261,9 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
 
                 message_type = payload.get("type")
                 if message_type == "join":
-                    state.sample_rate = _normalize_int(payload.get("sample_rate"), 16000) or 16000
+                    state.sample_rate = (
+                        _normalize_int(payload.get("sample_rate"), 16000) or 16000
+                    )
                     state.mic_mode = str(payload.get("mic_mode") or "private")
                     update_audio_status(
                         session_id,
@@ -1033,6 +1272,7 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         audio_connected=True,
                         is_speaking=state.is_speaking,
                     )
+                    await broadcast_presence_state(session_id)
                     logger.info(
                         "audio ws join session_id=%s participant_id=%s sample_rate=%s mic_mode=%s",
                         session_id,
@@ -1043,7 +1283,11 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                     await audio_manager.send_to(
                         session_id,
                         participant_id,
-                        {"type": "joined", "session_name": session_id, "participant_id": participant_id},
+                        {
+                            "type": "joined",
+                            "session_name": session_id,
+                            "participant_id": participant_id,
+                        },
                     )
                 elif message_type == "speaking_start":
                     state.is_speaking = True
@@ -1054,7 +1298,12 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         audio_connected=True,
                         is_speaking=True,
                     )
-                    logger.info("audio ws speaking_start session_id=%s participant_id=%s", session_id, participant_id)
+                    await broadcast_presence_state(session_id)
+                    logger.info(
+                        "audio ws speaking_start session_id=%s participant_id=%s",
+                        session_id,
+                        participant_id,
+                    )
                 elif message_type == "speaking_end":
                     state.is_speaking = False
                     update_audio_status(
@@ -1064,10 +1313,17 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
                         audio_connected=True,
                         is_speaking=False,
                     )
-                    logger.info("audio ws speaking_end session_id=%s participant_id=%s", session_id, participant_id)
+                    await broadcast_presence_state(session_id)
+                    logger.info(
+                        "audio ws speaking_end session_id=%s participant_id=%s",
+                        session_id,
+                        participant_id,
+                    )
                     await flush_buffer()
                 elif message_type == "ping":
-                    await audio_manager.send_to(session_id, participant_id, {"type": "pong"})
+                    await audio_manager.send_to(
+                        session_id, participant_id, {"type": "pong"}
+                    )
 
         except WebSocketDisconnect:
             await flush_buffer()
@@ -1084,15 +1340,27 @@ async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, parti
             )
         finally:
             if transcript_segments and state.mic_mode == "private":
-                await generate_idea_blocks_from_stream_transcripts(
+                idea_blocks = await generate_idea_blocks_from_stream_transcripts(
                     db,
                     session_name=session_id,
                     participant_id=participant_id,
-                    visibility=Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC,
+                    visibility=Visibility.PRIVATE
+                    if state.mic_mode == "private"
+                    else Visibility.PUBLIC,
                     transcripts=transcript_segments,
+                )
+                await broadcast_admin_idea_blocks_update(
+                    session_id,
+                    participant_id=participant_id,
+                    idea_blocks=_serialize_admin_idea_blocks(idea_blocks),
                 )
             if audio_connections.get(session_id, {}).get(participant_id) is state:
                 audio_connections.get(session_id, {}).pop(participant_id, None)
             mark_audio_disconnected(session_id, participant_id)
+            await broadcast_presence_state(session_id)
             await audio_manager.disconnect(session_id, participant_id, websocket)
-            logger.info("audio ws disconnected session_id=%s participant_id=%s", session_id, participant_id)
+            logger.info(
+                "audio ws disconnected session_id=%s participant_id=%s",
+                session_id,
+                participant_id,
+            )

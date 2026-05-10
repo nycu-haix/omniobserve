@@ -177,6 +177,15 @@ function isPhaseChangedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
 }
 
+function isCountdownChangedMessage(message: object | null): message is {
+	type: "countdown_changed";
+	current_phase?: SessionPhase;
+	timer_end_time_ms?: number;
+	end_time_ms?: number;
+} {
+	return !!message && "type" in message && message.type === "countdown_changed";
+}
+
 function isJoinRejectedMessage(message: object | null): message is {
 	type: "join_rejected";
 	message?: string;
@@ -619,6 +628,14 @@ export default function MeetingRoom() {
 			const timer = window.setTimeout(() => {
 				setCurrentPhase(lastMessage.phase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
+		if (isCountdownChangedMessage(lastMessage)) {
+			const timer = window.setTimeout(() => {
+				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				setTimerEndTime(lastMessage.timer_end_time_ms ?? lastMessage.end_time_ms ?? 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}

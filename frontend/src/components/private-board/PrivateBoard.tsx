@@ -34,6 +34,7 @@ type BoardMessage =
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
+	| { type: "countdown_changed"; current_phase?: SessionPhase; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
 	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number; cue_condition?: CueCondition }
 	| { type: "cue_condition_changed"; cue_condition?: CueCondition; condition?: CueCondition };
 
@@ -135,6 +136,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
+		message.type === "countdown_changed" ||
 		message.type === "board_state" ||
 		message.type === "cue_condition_changed"
 	);
@@ -771,6 +773,14 @@ export function PrivateBoard({
 			const timer = window.setTimeout(() => {
 				setCurrentPhase(lastMessage.phase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
+		if (lastMessage.type === "countdown_changed") {
+			const timer = window.setTimeout(() => {
+				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				setTimerEndTime(lastMessage.timer_end_time_ms ?? lastMessage.end_time_ms ?? 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}
