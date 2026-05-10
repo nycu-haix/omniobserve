@@ -71,7 +71,9 @@ You judge whether a new idea block is similar to one existing candidate idea blo
 # Similarity Criteria
 1. First decide whether the conclusion or proposal is similar: the two ideas must make a similar claim about the same tool, item, strategy, or task decision.
 2. Do not match only because wording is similar. Match only when the practical conclusion in the task is similar.
-3. If multiple candidates are similar, choose the single clearest and most relevant candidate id.
+3. If the ideas compare or rank the same tools/items in opposite directions, they are NOT similar. For example, "GPS is more important than the map" and "the map is better than GPS" must return `id: null`.
+4. If one idea supports prioritizing/keeping/using an item and the other rejects, deprioritizes, or ranks another item above it, they are NOT similar.
+5. If multiple candidates are similar, choose the single clearest and most relevant candidate id.
 
 # Same Reason Classification
 If a similar idea is found, also output `is_same_reason`:
@@ -83,6 +85,8 @@ Return JSON only.
 If a similar idea is found:
 {{"id": 123, "reason": "Briefly explain why the conclusions are similar and whether the reason/intent is the same.", "is_same_reason": true}}
 If no similar idea is found:
+{{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
+If the ideas discuss the same topic but reach opposite ranking or priority conclusions, this is no similar idea and must return:
 {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
 """.strip()
 
@@ -191,6 +195,13 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(
             idea_block,
             f"LLM returned invalid candidate id: {selected_id}",
+            db,
+        )
+        return
+    if _reason_rejects_similarity(reason):
+        await _clear_similarity_for_idea_block(
+            idea_block,
+            f"LLM selected a candidate while rejecting similarity: {reason}",
             db,
         )
         return
@@ -463,3 +474,32 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
         if normalized in {"false", "0", "no", "n"}:
             return False
     return default
+
+
+def _reason_rejects_similarity(reason: str) -> bool:
+    normalized = reason.casefold()
+    if not normalized:
+        return False
+
+    rejection_markers = (
+        "not similar",
+        "no similar",
+        "not the same",
+        "opposite conclusion",
+        "opposite conclusions",
+        "opposite ranking",
+        "opposite rankings",
+        "opposite priority",
+        "opposite priorities",
+        "contradictory",
+        "contradict",
+        "conflict",
+        "different conclusion",
+        "different conclusions",
+        "相反",
+        "不相似",
+        "不同",
+        "衝突",
+        "矛盾",
+    )
+    return any(marker in normalized for marker in rejection_markers)
