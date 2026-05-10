@@ -1255,7 +1255,7 @@ export function PrivateBoard({
 									<textarea
 										ref={manualIdeaTextareaRef}
 										aria-label="Manual idea block input"
-										className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-28 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+										className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 										placeholder="手動輸入 idea block"
 										value={manualIdeaText}
 										onChange={event => {

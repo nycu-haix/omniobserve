@@ -43,7 +43,7 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 		}
 
 		textarea.style.height = "44px";
-		textarea.style.height = `${Math.max(44, Math.min(textarea.scrollHeight, 120))}px`;
+		textarea.style.height = `${Math.max(44, textarea.scrollHeight)}px`;
 	}, [messageText]);
 
 	return (
@@ -53,7 +53,7 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 					<textarea
 						ref={textareaRef}
 						aria-label="Public chat input"
-						className="block min-h-11 max-h-32 w-full resize-none overflow-y-auto rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						placeholder="傳送公開訊息"
 						value={messageText}
 						maxLength={2000}
