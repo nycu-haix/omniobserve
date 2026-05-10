@@ -858,7 +858,7 @@ export default function MeetingRoom() {
 						)}
 						<LostAtSeaRankingPanel
 							title="Private 排序"
-							status="個人"
+							status={`${displayName} (${participantId})`}
 							items={privateItems}
 							sensors={sensors}
 							onDragStart={() => {
