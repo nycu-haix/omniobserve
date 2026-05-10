@@ -820,7 +820,15 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "similarity_cue") {
+				console.info("[private-board] similarity_cue received", {
+					sessionId,
+					participantId,
+					visiblePhase,
+					ideaBlockId: lastMessage.payload.blockId,
+					isSameReason: lastMessage.payload.isSameReason
+				});
 				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
+				setIdeaBlockRefreshKey(current => current + 1);
 				setIdeaBlocks(prev =>
 					prev.map(block =>
 						block.id === lastMessage.payload.blockId
@@ -842,7 +850,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ideaBlocks, lastMessage, participantId, sessionId]);
+	}, [ideaBlocks, lastMessage, participantId, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {

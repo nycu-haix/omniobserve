@@ -8,6 +8,21 @@ from .realtime import board_manager
 async def notify_similarity_cue(similarity: Similarity) -> None:
     idea_a = similarity.idea_block_1
     idea_b = similarity.idea_block_2
+    await notify_similarity_cue_for_blocks(
+        similarity_id=similarity.id,
+        is_same_reason=similarity.is_same_reason,
+        idea_a=idea_a,
+        idea_b=idea_b,
+    )
+
+
+async def notify_similarity_cue_for_blocks(
+    *,
+    similarity_id: int,
+    is_same_reason: bool,
+    idea_a: IdeaBlock,
+    idea_b: IdeaBlock,
+) -> None:
     if idea_a.session_name != idea_b.session_name:
         return
 
@@ -16,16 +31,16 @@ async def notify_similarity_cue(similarity: Similarity) -> None:
         participant_id=str(idea_a.user_id),
         own_block=idea_a,
         other_block=idea_b,
-        similarity_id=similarity.id,
-        is_same_reason=similarity.is_same_reason,
+        similarity_id=similarity_id,
+        is_same_reason=is_same_reason,
     )
     await send_similarity_cue(
         session_name=idea_b.session_name,
         participant_id=str(idea_b.user_id),
         own_block=idea_b,
         other_block=idea_a,
-        similarity_id=similarity.id,
-        is_same_reason=similarity.is_same_reason,
+        similarity_id=similarity_id,
+        is_same_reason=is_same_reason,
     )
 
 

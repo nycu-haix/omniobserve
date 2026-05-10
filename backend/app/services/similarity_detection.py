@@ -10,7 +10,7 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, Similarity, TaskItem
 from ..task_config import SIMILARITY_TASK_CONTEXT
-from .similarity_notifications import notify_similarity_cue
+from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
@@ -58,6 +58,32 @@ SIMILARITY_SYSTEM_PROMPT = f"""
    {{"id": 123, "reason": "簡述兩者結論如何相似，以及原因/意圖是否一致。", "is_same_reason": true}}
 3. 如果沒有相似想法，輸出：
    {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
+""".strip()
+
+
+SIMILARITY_SYSTEM_PROMPT = f"""
+# Role
+You judge whether a new idea block is similar to one existing candidate idea block in a Lost at Sea group discussion.
+
+# Task Context
+{SIMILARITY_TASK_CONTEXT}
+
+# Similarity Criteria
+1. First decide whether the conclusion or proposal is similar: the two ideas must make a similar claim about the same tool, item, strategy, or task decision.
+2. Do not match only because wording is similar. Match only when the practical conclusion in the task is similar.
+3. If multiple candidates are similar, choose the single clearest and most relevant candidate id.
+
+# Same Reason Classification
+If a similar idea is found, also output `is_same_reason`:
+- `true`: both ideas use the tool or strategy for the same purpose, intent, or rationale, such as rescue, protection, food/water, navigation, or survival.
+- `false`: the conclusions are similar, but the purpose, intent, or rationale is different.
+
+# Output Requirements
+Return JSON only.
+If a similar idea is found:
+{{"id": 123, "reason": "Briefly explain why the conclusions are similar and whether the reason/intent is the same.", "is_same_reason": true}}
+If no similar idea is found:
+{{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
 """.strip()
 
 
@@ -343,9 +369,22 @@ async def _replace_similarity_pair(
     await db.refresh(idea_block)
     await db.refresh(similar_idea_block)
     await db.refresh(similarity)
-    similarity.idea_block_1 = idea_block
-    similarity.idea_block_2 = similar_idea_block
-    await notify_similarity_cue(similarity)
+    try:
+        await notify_similarity_cue_for_blocks(
+            similarity_id=similarity.id,
+            is_same_reason=similarity.is_same_reason,
+            idea_a=idea_block,
+            idea_b=similar_idea_block,
+        )
+    except Exception as exc:
+        logger.warning(
+            "similarity_detection_notify_failed similarity_id=%s idea_block_id=%s similar_idea_block_id=%s error_type=%s error=%s",
+            similarity.id,
+            idea_block.id,
+            similar_idea_block.id,
+            exc.__class__.__name__,
+            exc,
+        )
 
 
 async def _clear_similarity_for_idea_block(idea_block: IdeaBlock, reason: str, db: AsyncSession) -> None:
