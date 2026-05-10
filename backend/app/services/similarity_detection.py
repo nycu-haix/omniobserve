@@ -89,7 +89,7 @@ Return `id: null` if any of the following apply:
 - The practical ranking conclusion is unclear, neutral, or too generic.
 - One idea prioritizes an item while the other deprioritizes it.
 - The ideas compare the same items in opposite directions.
-  Example: "GPS is more important than the map" vs "the map is better than GPS."
+  Example: "the sextant is more important than the map" vs "the map is better than the sextant."
 - One idea ranks item A above item B, while the other ranks item B above item A.
 - For relative comparisons, the relative order must match. "A above B" is NOT similar to "A and B are both useless" unless both ideas make the same relative ordering claim.
 - Questions, doubts, or feasibility challenges are not similar to positive proposals. If one idea asks whether a use is possible and the other asserts that use as valuable, return `id: null`.

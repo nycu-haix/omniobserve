@@ -18,6 +18,7 @@ import { Button } from "./ui/Button";
 interface LostAtSeaItem {
 	id: string;
 	label: string;
+	description: string;
 	rank: number;
 	imageTitle: string;
 	imageBg: string;
@@ -49,6 +50,23 @@ const MIN_JITSI_HEIGHT = 220;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
+const ITEM_DESCRIPTIONS: Record<string, string> = {
+	sextant: "航海上用來測量天體或地平線角度的儀器。",
+	shaving_mirror: "小型鏡子，通常用來刮鬍子或整理儀容。",
+	water_container: "一桶可飲用的淡水，容量約 20L。",
+	mosquito_net: "掛在睡覺區域外的細網布，通常用來防蚊蟲。",
+	emergency_rations: "可長時間保存的軍用罐裝或包裝食品。",
+	sea_chart: "紙本海圖，標示太平洋海域與島嶼位置。",
+	floating_cushion: "可漂浮的方形坐墊，通常作為船上安全裝備。",
+	petrol: "汽油與機油混合的燃料，通常供小型引擎使用。",
+	receive_only_radio: "小型收音機，通常用來接收廣播。",
+	shark_repellent: "標示為可驅避鯊魚的罐裝或包裝用品。",
+	waterproof_sheet: "不透明、防水的塑膠布，面積約 2m²。",
+	rum: "酒精濃度約 80% 的蘭姆酒，容量約 1L。",
+	rope: "尼龍材質的繩子，長度約 5m。",
+	chocolate_bars: "兩盒一般巧克力棒。",
+	fishing_rod: "包含魚線、魚鉤等用品的釣魚工具組。"
+};
 
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
@@ -58,6 +76,7 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 	return {
 		id: item.id,
 		label: item.label,
+		description: item.description_zh || ITEM_DESCRIPTIONS[item.id] || "",
 		rank: index + 1,
 		imageTitle: item.image_title || item.label_en || item.label,
 		imageBg: item.image_bg || "#f8fafc",
@@ -107,6 +126,7 @@ function createRankedItems(itemIds: string[], taskItemsById: Record<string, Task
 				label: id,
 				label_zh: id,
 				label_en: id,
+				description_zh: "",
 				aliases: [],
 				image_title: id,
 				image_bg: "#f8fafc",
@@ -188,15 +208,19 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 			title={isRankConflict ? `與 Public 排序差 ${rankConflictAmount} 位` : undefined}
 			{...attributes}
 			{...listeners}
-			onDoubleClick={() => onPreview(item)}
 		>
-			<img
-				className="h-9 w-12 shrink-0 rounded-md border object-cover"
-				src={taskItemImageSrc(item.id)}
-				alt={item.imageTitle}
-				draggable={false}
-				onError={event => handleTaskItemImageError(event, item)}
-			/>
+			<button
+				type="button"
+				className="h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				aria-label={`放大查看 ${item.label}`}
+				onClick={event => {
+					event.stopPropagation();
+					onPreview(item);
+				}}
+				onPointerDown={event => event.stopPropagation()}
+			>
+				<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
+			</button>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			{isRankConflict && (
@@ -838,10 +862,11 @@ export default function MeetingRoom() {
 							alt={previewItem.imageTitle}
 							onError={event => handleTaskItemImageError(event, previewItem)}
 						/>
-						<div className="flex items-center justify-between gap-3">
+						<div className="flex items-start justify-between gap-3">
 							<div className="min-w-0">
 								<div className="truncate text-sm font-semibold">{previewItem.label}</div>
 								<div className="text-xs text-muted-foreground">{previewItem.imageTitle}</div>
+								{previewItem.description && <p className="mt-2 text-sm leading-6 text-foreground/80">{previewItem.description}</p>}
 							</div>
 							<Button type="button" variant="outline" onClick={() => setPreviewItem(null)}>
 								關閉

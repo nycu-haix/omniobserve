@@ -10,6 +10,7 @@ export interface TaskConfigItem {
 	label: string;
 	label_zh: string;
 	label_en: string;
+	description_zh?: string;
 	aliases: string[];
 	image_title: string;
 	image_bg: string;

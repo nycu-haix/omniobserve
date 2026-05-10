@@ -7,7 +7,7 @@ export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
 		id: "b1",
 		summary: "先確認大家對海上求生目標的理解一致",
 		aiSummary: "團隊目前同意先用海上求生優先順序來討論，不急著投票。共識是先釐清淡水、求救訊號、定位工具在不同情境下的重要性。",
-		transcript: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
+		transcript: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
 		transcriptLineId: "103",
 		expanded: true,
 		status: "ready"
@@ -15,20 +15,20 @@ export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
 	{
 		id: "b2",
 		summary: "淡水容器應該排前面，因為直接影響生存時間",
-		aiSummary: "淡水被視為最直接的生存限制。若無法保存飲用水，其他資源較難發揮作用，因此多數成員傾向把裝水容器放在高優先級。",
-		transcript: "裝水容器一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
+		aiSummary: "淡水被視為最直接的生存限制。若無法保存飲用水，其他資源較難發揮作用，因此多數成員傾向把 20L 飲用水放在高優先級。",
+		transcript: "20L 飲用水一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
 		transcriptLineId: "106",
 		expanded: false,
 		status: "ready"
 	},
 	{
 		id: "b3",
-		summary: "海圖和 VHF 無線電的排序需要看能不能定位救援",
-		aiSummary: "海圖能幫助判斷位置與洋流，VHF 無線電能提供求援或確認方向。兩者的排序取決於團隊假設：如果救援船距離不遠，通訊較重要；如果位置不明，海圖可能更需要一起討論。",
-		transcript: "如果我們知道救援船大概在哪，VHF 無線電可能比海圖重要；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
+		summary: "海圖和收音機的排序需要看能不能取得資訊",
+		aiSummary: "海圖能幫助判斷位置與洋流，電晶體收音機只能接收資訊、不能主動求援。兩者的排序取決於團隊假設：如果能收到救援相關資訊，收音機可能有價值；如果位置不明，海圖可能更需要一起討論。",
+		transcript: "如果我們知道救援船大概在哪，電晶體收音機可能能接收一些資訊；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
 		transcriptLineId: "108",
 		hasCue: true,
-		cueText: "另一位成員也提到海圖和 VHF 無線電要一起討論。",
+		cueText: "另一位成員也提到海圖和收音機要一起討論。",
 		expanded: false,
 		status: "ready"
 	},
@@ -47,7 +47,7 @@ MOCK_IDEA_BLOCKS.forEach((block, index) => {
 export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t1",
-		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
+		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
 		source: "public",
 		userId: "1",
 		displayName: "Otter",
@@ -57,7 +57,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t2",
-		text: "裝水容器一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
+		text: "20L 飲用水一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",
 		source: "public",
 		userId: "2",
 		displayName: "Fox",
@@ -65,7 +65,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t3",
-		text: "如果我們知道救援船大概在哪，VHF 無線電可能比海圖重要；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
+		text: "如果我們知道救援船大概在哪，電晶體收音機可能能接收一些資訊；但如果完全不知道方向，海圖也許可以先幫我們確認位置。",
 		source: "public",
 		userId: "3",
 		displayName: "Rabbit",
@@ -90,7 +90,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t6",
-		text: "個人想法：我認為釣魚竿在這個情境下比巧克力棒更重要，因為可以捕魚補充食物。",
+		text: "個人想法：我認為釣魚工具組在這個情境下比巧克力棒更重要，因為可以捕魚補充食物。",
 		source: "private",
 		userId: "1",
 		displayName: "Otter",
@@ -114,7 +114,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t9",
-		text: "我同意先把求救工具放前面，鏡子白天可用、VHF 則看距離和電力，兩個可能都要保留在高順位。",
+		text: "我同意先把求救工具放前面，鏡子白天可用，燃料也能做成明顯訊號，兩個可能都要保留在高順位。",
 		source: "public",
 		userId: "3",
 		displayName: "Rabbit",
@@ -138,7 +138,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t12",
-		text: "私人筆記：等等可以問大家是否把任務假設成原地等待救援。",
+		text: "私人筆記：等等可以問大家是否把任務假設成海上求生，而不是划向陸地。",
 		source: "private",
 		userId: "2",
 		displayName: "Fox",
@@ -175,7 +175,7 @@ MOCK_TRANSCRIPT_LINES.splice(
 	},
 	{
 		id: "103",
-		text: "悄悄話測試：VHF 可能太依賴距離，所以不一定比鏡子優先。",
+		text: "悄悄話測試：收音機只能接收不能發送，所以不一定比鏡子優先。",
 		source: "private",
 		origin: "history",
 		userId: "1",
@@ -249,7 +249,7 @@ export const MOCK_SIMILARITY_CUES: SimilarityCueData[] = [
 	{
 		id: "cue-1",
 		blockId: "b3",
-		blockSummary: "海圖和 VHF 無線電的排序需要看能不能定位救援"
+		blockSummary: "海圖和收音機的排序需要看能不能取得資訊"
 	},
 	{
 		id: "cue-2",
