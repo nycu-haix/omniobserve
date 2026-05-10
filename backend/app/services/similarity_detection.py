@@ -10,7 +10,7 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, Similarity, TaskItem
 from ..task_config import SIMILARITY_TASK_CONTEXT
-from .realtime import board_manager
+from .similarity_notifications import notify_similarity_cue
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
@@ -32,6 +32,32 @@ SIMILARITY_SYSTEM_PROMPT = f"""
 2. 輸出該想法的 `id` 以及具體的 `reason`（簡述兩者邏輯如何重疊）。
 3. 如果完全沒有相似的想法，`id` 請回傳 `null`，`reason` 回傳 "No similar ideas found"。
 4. **僅輸出 JSON 格式**，不要包含任何解釋文字。
+""".strip()
+
+
+SIMILARITY_SYSTEM_PROMPT = f"""
+# Role
+你是小組討論中的想法相似度判斷器。你要判斷新的 idea block 是否和既有候選 idea block 在結論或主張上相似，並進一步分類兩者的原因或意圖是否一致。
+
+# Task Context: 失事海上求生任務 (Lost at Sea)
+{SIMILARITY_TASK_CONTEXT}
+
+# Similarity Criteria
+1. 先判斷結論是否相似：雙方是否對同一工具、物品、策略或任務決策提出相近主張。
+2. 不要只因為文字相似就判定相似；必須確認兩者在討論任務中的實質結論相近。
+3. 如果有多個候選相似，選擇最明確、最相關的一個候選 id。
+
+# Same Reason Classification
+在已經判定結論相似時，另外輸出 `is_same_reason`：
+- `true`：雙方對工具或策略的使用目的、意圖或理由一致，例如同樣是為了求救、防護、飲食、導航或維持生存。
+- `false`：雙方結論或選擇相近，但使用目的、意圖或理由不同。
+
+# Output Requirements
+1. 只輸出 JSON，不要輸出 Markdown、註解或額外文字。
+2. 如果找到相似想法，輸出：
+   {{"id": 123, "reason": "簡述兩者結論如何相似，以及原因/意圖是否一致。", "is_same_reason": true}}
+3. 如果沒有相似想法，輸出：
+   {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
 """.strip()
 
 
@@ -130,6 +156,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
     candidate_ids = {candidate.id for candidate in candidates}
     selected_id = llm_result.get("id")
     reason = str(llm_result.get("reason") or "").strip()
+    is_same_reason = _coerce_bool(llm_result.get("is_same_reason"), default=True)
 
     if selected_id is None:
         await _clear_similarity_for_idea_block(idea_block, reason or "No similar ideas found", db)
@@ -146,14 +173,15 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
 
     selected_candidate = next((candidate for candidate in candidates if candidate.id == selected_id), None)
     logger.info(
-        "similarity_detection_debug_llm_selected idea_block_a_id=%s idea_block_b_id=%s b_user_id=%s reason=%s b_summary=%s",
+        "similarity_detection_debug_llm_selected idea_block_a_id=%s idea_block_b_id=%s b_user_id=%s is_same_reason=%s reason=%s b_summary=%s",
         idea_block.id,
         selected_id,
         selected_candidate.user_id if selected_candidate is not None else None,
+        is_same_reason,
         reason,
         selected_candidate.summary if selected_candidate is not None else None,
     )
-    await _replace_similarity_pair(idea_block, selected_id, reason, db)
+    await _replace_similarity_pair(idea_block, selected_id, reason, is_same_reason, db)
 
 
 async def _get_task_item_ids(idea_block_id: int, db: AsyncSession) -> list[int]:
@@ -252,14 +280,15 @@ Summary: {idea_block.summary}
     raw_content = completion.choices[0].message.content or "{}"
     parsed = _parse_llm_json_payload(raw_content)
     logger.info(
-        "similarity_detection_llm_response idea_block_id=%s response_chars=%s parsed_id=%s reason=%s",
+        "similarity_detection_llm_response idea_block_id=%s response_chars=%s parsed_id=%s is_same_reason=%s reason=%s",
         idea_block.id,
         len(raw_content),
         parsed.get("id") if isinstance(parsed, dict) else None,
+        parsed.get("is_same_reason") if isinstance(parsed, dict) else None,
         parsed.get("reason") if isinstance(parsed, dict) else None,
     )
     if not isinstance(parsed, dict):
-        return {"id": None, "reason": "No similar ideas found"}
+        return {"id": None, "reason": "No similar ideas found", "is_same_reason": False}
     return parsed
 
 
@@ -267,6 +296,7 @@ async def _replace_similarity_pair(
     idea_block: IdeaBlock,
     similar_idea_block_id: int,
     reason: str,
+    is_same_reason: bool,
     db: AsyncSession,
 ) -> None:
     similar_idea_block = await db.get(IdeaBlock, similar_idea_block_id)
@@ -283,6 +313,7 @@ async def _replace_similarity_pair(
         idea_block_id_1=idea_block.id,
         idea_block_id_2=similar_idea_block_id,
         reason=reason,
+        is_same_reason=is_same_reason,
     )
     db.add(similarity)
     idea_block.similarity_id = similar_idea_block_id
@@ -297,7 +328,7 @@ async def _replace_similarity_pair(
         (
             "similarity_detection_pair_created idea_block_id=%s idea_block_user_id=%s "
             "idea_block_similarity_id=%s similar_idea_block_id=%s similar_idea_block_user_id=%s "
-            "similar_idea_block_similarity_id=%s similarity_id=%s"
+            "similar_idea_block_similarity_id=%s similarity_id=%s is_same_reason=%s"
         ),
         idea_block.id,
         idea_block.user_id,
@@ -306,11 +337,15 @@ async def _replace_similarity_pair(
         similar_idea_block.user_id,
         similar_idea_block.similarity_id,
         similarity.id,
+        similarity.is_same_reason,
     )
     await db.commit()
     await db.refresh(idea_block)
     await db.refresh(similar_idea_block)
-    await _notify_similarity_refetch(idea_block, similar_idea_block)
+    await db.refresh(similarity)
+    similarity.idea_block_1 = idea_block
+    similarity.idea_block_2 = similar_idea_block
+    await notify_similarity_cue(similarity)
 
 
 async def _clear_similarity_for_idea_block(idea_block: IdeaBlock, reason: str, db: AsyncSession) -> None:
@@ -346,51 +381,6 @@ async def _delete_pairs_for_idea_block(idea_block_id: int, db: AsyncSession) -> 
     return int(result.rowcount or 0)
 
 
-async def _notify_similarity_refetch(idea_block: IdeaBlock, similar_idea_block: IdeaBlock) -> None:
-    targets: dict[str, str] = {
-        str(idea_block.user_id): str(idea_block.id),
-        str(similar_idea_block.user_id): str(similar_idea_block.id),
-    }
-    logger.info(
-        "similarity_detection_refetch_notify session_name=%s idea_block_id=%s similar_idea_block_id=%s targets=%s online_participants=%s",
-        idea_block.session_name,
-        idea_block.id,
-        similar_idea_block.id,
-        sorted(targets.keys()),
-        board_manager.get_participants(idea_block.session_name),
-    )
-    for participant_id, block_id in targets.items():
-        try:
-            target_connected = participant_id in board_manager.get_participants(idea_block.session_name)
-            sent = await board_manager.send_to(
-                idea_block.session_name,
-                participant_id,
-                {
-                    "type": "update_idea_block",
-                    "payload": {"id": block_id},
-                },
-            )
-            logger.info(
-                (
-                    "similarity_detection_refetch_notify_attempted session_name=%s participant_id=%s "
-                    "idea_block_id=%s target_connected=%s sent=%s"
-                ),
-                idea_block.session_name,
-                participant_id,
-                block_id,
-                target_connected,
-                sent,
-            )
-        except Exception as exc:
-            logger.warning(
-                "similarity_detection_refetch_notify_failed session_name=%s participant_id=%s error_type=%s error=%s",
-                idea_block.session_name,
-                participant_id,
-                exc.__class__.__name__,
-                exc,
-            )
-
-
 def _parse_llm_json_payload(raw_content: str) -> Any:
     text = raw_content.strip()
     if not text:
@@ -422,3 +412,15 @@ def _parse_llm_json_payload(raw_content: str) -> Any:
             continue
 
     return {}
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+    return default

@@ -5,10 +5,12 @@ class SimilarityCreate(BaseModel):
     idea_block_id_1: int
     idea_block_id_2: int
     reason: str
+    is_same_reason: bool = True
 
 
 class SimilarityUpdate(BaseModel):
-    reason: str
+    reason: str | None = None
+    is_same_reason: bool | None = None
 
 
 class IdeaBlockSummary(BaseModel):
@@ -23,6 +25,7 @@ class SimilarityResponse(BaseModel):
     idea_block_id_1: int
     idea_block_id_2: int
     reason: str
+    is_same_reason: bool
     idea_block_1: IdeaBlockSummary
     idea_block_2: IdeaBlockSummary
 

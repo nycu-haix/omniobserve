@@ -54,6 +54,7 @@ interface IdeaBlockResponse {
 	transcript_id?: number | null;
 	transcript: string | null;
 	similarity_id: number | null;
+	similarity_is_same_reason?: boolean | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
 }
@@ -288,6 +289,7 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		transcriptLineId,
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
+		similarityIsSameReason: item.similarity_is_same_reason ?? null,
 		isDeleted: item.is_deleted ?? false,
 		createdAtMs,
 		status: "ready"
@@ -472,6 +474,7 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 							expanded: block.expanded,
 							cueText: block.cueText,
 							hasCue: block.hasCue || nextBlock.hasCue,
+							similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
 							createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 						}
 					: block
@@ -722,7 +725,8 @@ export function PrivateBoard({
 					blocks: ideaBlockResponses.map(item => ({
 						id: item.id,
 						hasSimilarity: !!item.similarity_id,
-						similarity_id: item.similarity_id
+						similarity_id: item.similarity_id,
+						similarity_is_same_reason: item.similarity_is_same_reason
 					}))
 				});
 				const ideaBlocksFromDb = ideaBlockResponses.map(ideaBlockResponseToBlock);
@@ -817,7 +821,18 @@ export function PrivateBoard({
 
 			if (lastMessage.type === "similarity_cue") {
 				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
-				setIdeaBlocks(prev => prev.map(block => (block.id === lastMessage.payload.blockId ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary } : block)));
+				setIdeaBlocks(prev =>
+					prev.map(block =>
+						block.id === lastMessage.payload.blockId
+							? {
+									...block,
+									hasCue: true,
+									cueText: lastMessage.payload.blockSummary,
+									similarityIsSameReason: lastMessage.payload.isSameReason
+								}
+							: block
+					)
+				);
 			}
 
 			if (lastMessage.type === "public_chat_message") {
@@ -1026,6 +1041,7 @@ export function PrivateBoard({
 							expanded: block.expanded,
 							cueText: block.cueText,
 							hasCue: block.hasCue || savedBlock.hasCue,
+							similarityIsSameReason: savedBlock.similarityIsSameReason ?? block.similarityIsSameReason,
 							isDraft: false,
 							createdAtMs: block.createdAtMs ?? savedBlock.createdAtMs
 						}

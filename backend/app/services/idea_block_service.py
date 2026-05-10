@@ -10,6 +10,7 @@ from ..db import SessionLocal
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
 from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
 from .embedding_service import create_text_embedding
+from .idea_block_similarity_context import attach_similarity_reason_flags
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import replace_task_items_for_idea_block
 
@@ -36,6 +37,7 @@ async def get_idea_block(idea_block_id: int, db: AsyncSession) -> IdeaBlock:
     idea_block = result.scalar_one_or_none()
     if idea_block is None:
         raise HTTPException(status_code=404, detail="Idea block not found")
+    await attach_similarity_reason_flags(idea_block, db)
     return idea_block
 
 
@@ -58,6 +60,7 @@ async def get_scoped_idea_block(
     idea_block = result.scalar_one_or_none()
     if idea_block is None:
         raise HTTPException(status_code=404, detail="Idea block not found")
+    await attach_similarity_reason_flags(idea_block, db)
     return idea_block
 
 
@@ -77,7 +80,9 @@ async def list_idea_blocks(
         stmt = stmt.where(IdeaBlock.similarity_id == similarity_id)
     stmt = stmt.order_by(IdeaBlock.is_deleted.desc(), IdeaBlock.time_stamp.asc(), IdeaBlock.id.asc())
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    idea_blocks = list(result.scalars().all())
+    await attach_similarity_reason_flags(idea_blocks, db)
+    return idea_blocks
 
 
 async def update_idea_block(
