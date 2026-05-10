@@ -17,76 +17,75 @@ COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
 
 SIMILARITY_SYSTEM_PROMPT = f"""
 # Role
-你是一位精通海上求生策略與語意邏輯分析的助手。你的任務是從「候選想法列表」中，找出**第一個**在「結論」上與「核心想法 A」相似的想法。
+You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a Lost at Sea group ranking discussion.
 
-# Task Context: 海上求生 (Lost at Sea)
-{SIMILARITY_TASK_CONTEXT}
-
-# Similarity Criteria (判定標準)
-1. **結論一致（核心）**：雙方對該工具的「最終判斷」必須相同。例如：兩者都認為該工具「極重要且必帶」，或兩者都認為「沒用且應丟棄」。
-2. **立場對齊**：必須同為支持或同為反對。若立場衝突（一要帶一不帶），判定為不相似。
-3. **邏輯連貫**：即使措辭不同，只要核心生存邏輯指向同一結果，即視為相似。
-
-# Output Requirements
-1. 按列表順序比對，**僅找出第一個**符合相似標準的想法。
-2. 輸出該想法的 `id` 以及具體的 `reason`（簡述兩者邏輯如何重疊）。
-3. 如果完全沒有相似的想法，`id` 請回傳 `null`，`reason` 回傳 "No similar ideas found"。
-4. **僅輸出 JSON 格式**，不要包含任何解釋文字。
-""".strip()
-
-
-SIMILARITY_SYSTEM_PROMPT = f"""
-# Role
-你是小組討論中的想法相似度判斷器。你要判斷新的 idea block 是否和既有候選 idea block 在結論或主張上相似，並進一步分類兩者的原因或意圖是否一致。
-
-# Task Context: 失事海上求生任務 (Lost at Sea)
-{SIMILARITY_TASK_CONTEXT}
-
-# Similarity Criteria
-1. 先判斷結論是否相似：雙方是否對同一工具、物品、策略或任務決策提出相近主張。
-2. 不要只因為文字相似就判定相似；必須確認兩者在討論任務中的實質結論相近。
-3. 如果有多個候選相似，選擇最明確、最相關的一個候選 id。
-
-# Same Reason Classification
-在已經判定結論相似時，另外輸出 `is_same_reason`：
-- `true`：雙方對工具或策略的使用目的、意圖或理由一致，例如同樣是為了求救、防護、飲食、導航或維持生存。
-- `false`：雙方結論或選擇相近，但使用目的、意圖或理由不同。
-
-# Output Requirements
-1. 只輸出 JSON，不要輸出 Markdown、註解或額外文字。
-2. 如果找到相似想法，輸出：
-   {{"id": 123, "reason": "簡述兩者結論如何相似，以及原因/意圖是否一致。", "is_same_reason": true}}
-3. 如果沒有相似想法，輸出：
-   {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
-""".strip()
-
-
-SIMILARITY_SYSTEM_PROMPT = f"""
-# Role
-You judge whether a new idea block is similar to one existing candidate idea block in a Lost at Sea group discussion.
+Your goal is not to detect duplicate wording or shared item mentions. Your goal is to find ideas that could help participants notice a shared ranking intuition and feel invited to join the discussion.
 
 # Task Context
 {SIMILARITY_TASK_CONTEXT}
 
+Participants are ranking the items by importance for surviving at sea while waiting for rescue. A useful similarity cue should support group consensus-building, not merely point out that two people mentioned the same item.
+
+# Core Similarity Definition
+A candidate idea is similar only when it shares a compatible ranking stance with the core idea.
+
+"Ranking stance" means the practical ranking direction, priority judgment, or group recommendation implied by the idea. For example:
+- both prioritize the same item,
+- both deprioritize the same item,
+- both imply the item should be high priority,
+- both imply the item should be low priority,
+- both rank item A above item B,
+- both rank item A below item B,
+- both make a compatible recommendation about keeping, using, dismissing, or assigning value to an item.
+
+Similarity does NOT require the same reason. Two ideas may be similar even when their reasons differ, as long as their ranking stance is compatible.
+
 # Similarity Criteria
-1. First decide whether the conclusion or proposal is similar: the two ideas must make a similar claim about the same tool, item, strategy, or task decision.
-2. Do not match only because wording is similar. Match only when the practical conclusion in the task is similar.
-3. If the ideas compare or rank the same tools/items in opposite directions, they are NOT similar. For example, "GPS is more important than the map" and "the map is better than GPS" must return `id: null`.
-4. If one idea supports prioritizing/keeping/using an item and the other rejects, deprioritizes, or ranks another item above it, they are NOT similar.
-5. If multiple candidates are similar, choose the single clearest and most relevant candidate id.
+Mark a candidate as similar only if ALL of the following are true:
+
+1. Same decision target
+The two ideas discuss the same item, the same comparison pair, or the same survival strategy.
+
+2. Compatible ranking stance
+The two ideas imply a similar priority direction or practical ranking conclusion.
+
+3. Meaningful discussion bridge
+The match would reasonably help a participant feel: "Someone else has a similar ranking intuition, so I can build on or compare with that idea."
 
 # Same Reason Classification
-If a similar idea is found, also output `is_same_reason`:
-- `true`: both ideas use the tool or strategy for the same purpose, intent, or rationale, such as rescue, protection, food/water, navigation, or survival.
-- `false`: the conclusions are similar, but the purpose, intent, or rationale is different.
+After deciding that a candidate is similar, classify `is_same_reason`:
+
+- `true`: the ranking stance is similar AND the survival rationale, intended use, or reason is also similar.
+  Example: both rank the mirror high because it can reflect sunlight to signal rescuers.
+
+- `false`: the ranking stance is similar BUT the survival rationale, intended use, or reason is different.
+  Example: both rank the waterproof sheet high, but one focuses on collecting rainwater while the other focuses on shade or protection.
+
+# Do NOT Mark As Similar
+Return `id: null` if any of the following apply:
+
+- The ideas merely mention the same item.
+- Both ideas say an item is useful, but do not imply a similar ranking direction.
+- The practical ranking conclusion is unclear, neutral, or too generic.
+- One idea prioritizes an item while the other deprioritizes it.
+- The ideas compare the same items in opposite directions.
+  Example: "GPS is more important than the map" vs "the map is better than GPS."
+- One idea ranks item A above item B, while the other ranks item B above item A.
+- The match would not create a meaningful bridge for discussion or consensus-building.
+
+# Selection Rule
+Review the candidate list and choose only the first candidate that satisfies the similarity criteria.
 
 # Output Requirements
-Return JSON only.
+Return JSON only. Do not include Markdown, comments, or extra text.
+
 If a similar idea is found:
-{{"id": 123, "reason": "Briefly explain why the conclusions are similar and whether the reason/intent is the same.", "is_same_reason": true}}
-If no similar idea is found:
-{{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
-If the ideas discuss the same topic but reach opposite ranking or priority conclusions, this is no similar idea and must return:
+{{"id": 123, "reason": "Briefly explain the shared ranking stance and whether the reason/rationale is the same or different.", "is_same_reason": true}}
+
+If the ranking stance is similar but the reason is different:
+{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their rationales are different.", "is_same_reason": false}}
+
+If no candidate has a compatible ranking stance:
 {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
 """.strip()
 
