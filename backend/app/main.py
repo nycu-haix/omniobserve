@@ -171,6 +171,14 @@ async def startup() -> None:
                               AND column_name = 'similarity_reason'
                         ) THEN
                             DROP TABLE similarities CASCADE;
+                        ELSIF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'similarities'
+                              AND column_name = 'is_same_reason'
+                        ) THEN
+                            ALTER TABLE similarities ADD COLUMN is_same_reason boolean NOT NULL DEFAULT true;
                         END IF;
                     END IF;
                 END $$;

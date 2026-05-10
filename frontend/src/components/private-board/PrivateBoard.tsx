@@ -54,6 +54,7 @@ interface IdeaBlockResponse {
 	transcript_id?: number | null;
 	transcript: string | null;
 	similarity_id: number | null;
+	similarity_is_same_reason?: boolean | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
 }
@@ -288,6 +289,7 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		transcriptLineId,
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
 		hasCue: !!item.similarity_id,
+		similarityIsSameReason: item.similarity_is_same_reason ?? null,
 		isDeleted: item.is_deleted ?? false,
 		createdAtMs,
 		status: "ready"
@@ -472,6 +474,7 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 							expanded: block.expanded,
 							cueText: block.cueText,
 							hasCue: block.hasCue || nextBlock.hasCue,
+							similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
 							createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 						}
 					: block
@@ -715,7 +718,18 @@ export function PrivateBoard({
 					throw new Error("Failed to load idea blocks");
 				}
 
-				const ideaBlocksFromDb = ((await response.json()) as IdeaBlockResponse[]).map(ideaBlockResponseToBlock);
+				const ideaBlockResponses = (await response.json()) as IdeaBlockResponse[];
+				console.info("[private-board] loaded idea blocks", {
+					sessionId,
+					participantId,
+					blocks: ideaBlockResponses.map(item => ({
+						id: item.id,
+						hasSimilarity: !!item.similarity_id,
+						similarity_id: item.similarity_id,
+						similarity_is_same_reason: item.similarity_is_same_reason
+					}))
+				});
+				const ideaBlocksFromDb = ideaBlockResponses.map(ideaBlockResponseToBlock);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -782,6 +796,11 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "update_idea_block") {
+				console.info("[private-board] update_idea_block received; refreshing idea blocks", {
+					sessionId,
+					participantId,
+					ideaBlockId: lastMessage.payload.id
+				});
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
@@ -801,8 +820,27 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "similarity_cue") {
+				console.info("[private-board] similarity_cue received", {
+					sessionId,
+					participantId,
+					visiblePhase,
+					ideaBlockId: lastMessage.payload.blockId,
+					isSameReason: lastMessage.payload.isSameReason
+				});
 				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
-				setIdeaBlocks(prev => prev.map(block => (block.id === lastMessage.payload.blockId ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary } : block)));
+				setIdeaBlockRefreshKey(current => current + 1);
+				setIdeaBlocks(prev =>
+					prev.map(block =>
+						block.id === lastMessage.payload.blockId
+							? {
+									...block,
+									hasCue: true,
+									cueText: lastMessage.payload.blockSummary,
+									similarityIsSameReason: lastMessage.payload.isSameReason
+								}
+							: block
+					)
+				);
 			}
 
 			if (lastMessage.type === "public_chat_message") {
@@ -812,7 +850,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ideaBlocks, lastMessage, participantId]);
+	}, [ideaBlocks, lastMessage, participantId, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -1011,6 +1049,7 @@ export function PrivateBoard({
 							expanded: block.expanded,
 							cueText: block.cueText,
 							hasCue: block.hasCue || savedBlock.hasCue,
+							similarityIsSameReason: savedBlock.similarityIsSameReason ?? block.similarityIsSameReason,
 							isDraft: false,
 							createdAtMs: block.createdAtMs ?? savedBlock.createdAtMs
 						}

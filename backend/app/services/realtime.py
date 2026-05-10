@@ -52,11 +52,11 @@ class ConnectionManager:
             if not participants:
                 self.connections.pop(session_id, None)
 
-    async def send_to(self, session_id: str, participant_id: str, message: dict[str, Any]) -> None:
+    async def send_to(self, session_id: str, participant_id: str, message: dict[str, Any]) -> bool:
         websocket = self.connections.get(session_id, {}).get(participant_id)
         if websocket is None:
-            return
-        await self._send_json_safely(websocket, message)
+            return False
+        return await self._send_json_safely(websocket, message)
 
     async def broadcast(
         self,

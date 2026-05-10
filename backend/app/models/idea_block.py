@@ -85,6 +85,14 @@ class IdeaBlock(Base):
         return
 
     @property
+    def similarity_is_same_reason(self) -> bool | None:
+        return getattr(self, "_similarity_is_same_reason", None)
+
+    @similarity_is_same_reason.setter
+    def similarity_is_same_reason(self, value: bool | None) -> None:
+        self._similarity_is_same_reason = value
+
+    @property
     def created_at(self) -> datetime:
         return self.time_stamp
 

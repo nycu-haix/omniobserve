@@ -15,22 +15,26 @@ export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 
 	return (
 		<div className="fixed bottom-20 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
-			{cues.map(cue => (
-				<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
-					<div className="mb-3 flex items-start gap-2 text-sm">
-						<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
-						<span>有人也覺得「{cue.blockSummary}」</span>
+			{cues.map(cue => {
+				const message = (cue.isSameReason ?? true) ? "有人和你想法一樣，要不要試著發表？" : "有人和你有相似的想法但原因略有不同，要不要分享交流？";
+				return (
+					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
+						<div className="mb-3 flex items-start gap-2 text-sm">
+							<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+							<span>{message}</span>
+						</div>
+						{cue.blockSummary && <p className="mb-3 line-clamp-2 text-xs text-muted-foreground">{cue.blockSummary}</p>}
+						<div className="flex justify-end gap-2">
+							<Button size="sm" onClick={() => onJump(cue.blockId)}>
+								查看想法
+							</Button>
+							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
+								<X className="h-4 w-4" />
+							</Button>
+						</div>
 					</div>
-					<div className="flex justify-end gap-2">
-						<Button size="sm" onClick={() => onJump(cue.blockId)}>
-							跳至想法
-						</Button>
-						<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
-							<X className="h-4 w-4" />
-						</Button>
-					</div>
-				</div>
-			))}
+				);
+			})}
 		</div>
 	);
 }

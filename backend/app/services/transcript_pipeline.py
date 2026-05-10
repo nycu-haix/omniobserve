@@ -13,6 +13,7 @@ from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
+from .idea_block_similarity_context import attach_similarity_reason_flags
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import generate_and_save_task_items_for_idea_block
 
@@ -326,6 +327,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
                 "transcript_id": block.transcript_id,
                 "transcript": block.transcript,
                 "similarity_id": block.similarity_id,
+                "similarity_is_same_reason": block.similarity_is_same_reason,
                 "is_deleted": block.is_deleted,
             }
             for block in result.idea_blocks
@@ -352,6 +354,7 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
             "transcript_id": block.transcript_id,
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
+            "similarity_is_same_reason": block.similarity_is_same_reason,
         }
         for block in idea_blocks
     ]
@@ -363,7 +366,10 @@ async def get_idea_block_for_payload(idea_block_id: int, db: AsyncSession) -> Id
         .options(selectinload(IdeaBlock.main_transcript))
         .where(IdeaBlock.id == idea_block_id)
     )
-    return result.scalar_one_or_none()
+    idea_block = result.scalar_one_or_none()
+    if idea_block is not None:
+        await attach_similarity_reason_flags(idea_block, db)
+    return idea_block
 
 
 def _title_from_content(content: str) -> str:

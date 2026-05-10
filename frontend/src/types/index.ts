@@ -9,6 +9,7 @@ export interface IdeaBlock {
 	sourceTranscriptIds?: string[];
 	hasCue?: boolean;
 	cueText?: string;
+	similarityIsSameReason?: boolean | null;
 	expanded?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
@@ -33,6 +34,7 @@ export interface SimilarityCueData {
 	id: string;
 	blockId: string;
 	blockSummary: string;
+	isSameReason?: boolean;
 }
 
 export interface PublicChatMessage {
