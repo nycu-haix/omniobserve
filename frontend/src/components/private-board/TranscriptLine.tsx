@@ -1,5 +1,5 @@
 import { CornerDownRight } from "lucide-react";
-import { getDefaultParticipantName } from "../../lib/participantDefaults";
+import { formatParticipantDisplayName } from "../../lib/participantDefaults";
 import { cn } from "../../lib/utils";
 import type { TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
@@ -14,7 +14,7 @@ export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 	const isOwn = !!line.isOwn;
 	const isOwnPublic = line.source === "public" && line.isOwn;
 	const alignRight = isPrivate && isOwn;
-	const speakerName = line.displayName || (line.userId ? getDefaultParticipantName(line.userId) : undefined);
+	const speakerName = formatParticipantDisplayName(line.userId, line.displayName);
 
 	return (
 		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", alignRight ? "justify-end" : "justify-start")}>

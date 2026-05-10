@@ -977,6 +977,7 @@ export function PrivateBoard({
 					linkTranscriptLinesToBlocks(
 						appendTranscriptLine(prev, {
 							...transcriptLine,
+							displayName: transcriptLine.displayName ?? displayName,
 							isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId)
 						}),
 						ideaBlocks
@@ -986,7 +987,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ideaBlocks, lastAudioMessage, participantId]);
+	}, [displayName, ideaBlocks, lastAudioMessage, participantId]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {

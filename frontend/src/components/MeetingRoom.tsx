@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Keyboard, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
+import { AlertCircle, GripVertical, Info, Keyboard, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -44,7 +44,7 @@ interface RankingSnapshot {
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
 const MIN_PRIVATE_BOARD_WIDTH = 520;
-const MIN_MEETING_COLUMN_WIDTH = 520;
+const MIN_MEETING_COLUMN_WIDTH = 720;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
 const DEFAULT_JITSI_HEIGHT = 220;
 const MIN_JITSI_HEIGHT = 220;
@@ -831,16 +831,13 @@ export default function MeetingRoom() {
 			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_10px_var(--jitsi-height)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
-						<div className="flex min-w-0 flex-wrap items-center gap-3">
-							<button
-								type="button"
-								className="text-left text-base font-semibold transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-								aria-expanded={isTaskDetailOpen}
-								onClick={() => setIsTaskDetailOpen(current => !current)}
-							>
-								{taskTitle}
-							</button>
+						<div className="grid min-w-0 gap-1">
+							<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
 						</div>
+						<Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" aria-expanded={isTaskDetailOpen} onClick={() => setIsTaskDetailOpen(current => !current)}>
+							<Info className="h-4 w-4" />
+							{isTaskDetailOpen ? "收合說明" : "任務說明"}
+						</Button>
 					</header>
 					{isTaskDetailOpen && taskDetail && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{taskDetail}</p>}
 					<div className={cn("grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:overflow-hidden lg:pr-0", currentPhase === "group" && "lg:grid-cols-2")}>

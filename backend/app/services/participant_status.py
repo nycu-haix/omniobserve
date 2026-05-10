@@ -57,3 +57,9 @@ def get_participant_presence(session_name: str, participant_ids: list[str]) -> l
             }
         )
     return participants
+
+
+def get_participant_display_name(session_name: str, participant_id: str) -> str | None:
+    status = _participant_statuses.get(session_name, {}).get(participant_id, {})
+    display_name = status.get("display_name")
+    return display_name if isinstance(display_name, str) and display_name.strip() else None

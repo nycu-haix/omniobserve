@@ -19,6 +19,7 @@ from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import (
+    get_participant_display_name,
     get_participant_presence,
     mark_audio_disconnected,
     update_audio_status,
@@ -345,6 +346,7 @@ async def broadcast_public_transcript_line(
     text: str,
     transcript_segment_id: str | int | None = None,
 ) -> None:
+    display_name = get_participant_display_name(session_id, participant_id)
     await board_manager.broadcast(
         session_id,
         {
@@ -356,6 +358,7 @@ async def broadcast_public_transcript_line(
                 "source": "public",
                 "origin": "live",
                 "userId": participant_id,
+                "displayName": display_name,
                 "timestampMs": _now_ms(),
                 "text": text,
             },
