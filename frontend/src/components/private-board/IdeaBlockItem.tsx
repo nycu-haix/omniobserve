@@ -39,6 +39,12 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
+	const similarityReasonLabel =
+		block.similarityIsSameReason == null
+			? null
+			: block.similarityIsSameReason
+				? "Same reason"
+				: "Different reason";
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -287,9 +293,16 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			{block.expanded && !isGenerating && (
 				<div className={cn("ml-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
 					{shouldShowCue && (
-						<Badge className="w-fit" variant="secondary">
-							Similarity
-						</Badge>
+						<div className="flex flex-wrap gap-1.5">
+							<Badge className="w-fit" variant="secondary">
+								Similarity
+							</Badge>
+							{similarityReasonLabel && (
+								<Badge className="w-fit" variant={block.similarityIsSameReason ? "default" : "outline"}>
+									{similarityReasonLabel}
+								</Badge>
+							)}
+						</div>
 					)}
 
 					<textarea
