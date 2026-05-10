@@ -5,6 +5,7 @@ class TaskItemConfig(TypedDict):
     id: str
     label_zh: str
     label_en: str
+    description_zh: str
     aliases: list[str]
     image_title: str
     image_bg: str
@@ -15,14 +16,13 @@ class TaskItemConfig(TypedDict):
 TASK_ID = "lost-at-sea"
 TASK_TITLE = "Lost at Sea"
 
-TOPIC_DESCRIPTION = """你和幾位朋友租了一艘遊艇，準備橫越大西洋，進行一次難得的海上旅程。由於你們都沒有足夠的航海經驗，因此船上有一位經驗豐富的船長，以及兩位船員協助航行。
+TOPIC_DESCRIPTION = """你們搭乘一艘私人遊艇，在南太平洋上漂流。因為一場原因不明的火災，遊艇和船上大部分物品都被燒毀，遊艇正在慢慢下沉。
 
-不幸的是，在航行到大西洋中央時，船上的廚房突然發生嚴重火災。船長與船員在試圖滅火的過程中失蹤，遊艇也受到嚴重損壞，正在慢慢下沉。
+由於重要的導航設備被破壞，而且大家在滅火時分心，你們無法確定目前位置。你們目前最好的估計是：距離最近的陸地約 1,600 公里，而且大約位在該陸地的南南西方。
 
-火災也破壞了重要的導航與通訊設備，因此你們無法準確知道目前的位置。你們只能大致估計：自己距離最近的陸地還有數百英里。
+在遊艇完全沉沒前，你們成功救出一艘可用的橡皮救生艇和船槳，救生艇足以載下所有人和下列 15 項物品。所有人生還者口袋裡的東西合計只有：一包香菸、幾盒火柴，以及五張 1 美元紙鈔。
 
-在遊艇完全沉沒前，你們成功救出一艘橡皮救生艇、一盒火柴，以及下列 15 項物品。這些物品都沒有受損，可以正常使用。
-這些物品不能連上網路，也不能直接呼叫救援；請根據它們在海上等待救援時的實際用途排序。
+下列 15 項物品都沒有受損，可以正常使用。這些物品不能連上網路，也不能直接呼叫救援；請根據它們在海上等待救援時的實際用途排序。
 
 你們的任務是：**依照這些物品對「等待救援並存活下來」的重要性進行排序。**
 
@@ -30,159 +30,148 @@ TOPIC_DESCRIPTION = """你和幾位朋友租了一艘遊艇，準備橫越大西
 
 TASK_ITEMS: list[TaskItemConfig] = [
     {
-        "id": "mosquito_net",
-        "label_zh": "蚊帳",
-        "label_en": "mosquito net",
-        "aliases": ["mosquito net"],
-        "image_title": "Mosquito Net",
-        "image_bg": "#e0f2fe",
-        "image_fg": "#0369a1",
-        "image_mark": "NET",
-    },
-    {
-        "id": "petrol",
-        "label_zh": "一罐汽油",
-        "label_en": "petrol, gasoline",
-        "aliases": ["petrol", "gasoline"],
-        "image_title": "Petrol",
-        "image_bg": "#fee2e2",
-        "image_fg": "#b91c1c",
-        "image_mark": "FUEL",
-    },
-    {
-        "id": "water_container",
-        "label_zh": "裝水容器",
-        "label_en": "water container",
-        "aliases": ["water container"],
-        "image_title": "Water Container",
-        "image_bg": "#dbeafe",
-        "image_fg": "#1d4ed8",
-        "image_mark": "H2O",
+        "id": "sextant",
+        "label_zh": "六分儀",
+        "label_en": "sextant",
+        "description_zh": "用太陽或星星測量角度的航海儀器，需要搭配其他資料才能推算位置。",
+        "aliases": [
+            "六分儀",
+            "sextant",
+        ],
+        "image_title": "Sextant",
+        "image_bg": "#fef3c7",
+        "image_fg": "#b45309",
+        "image_mark": "SEXT",
     },
     {
         "id": "shaving_mirror",
         "label_zh": "刮鬍鏡／小鏡子",
         "label_en": "shaving mirror, small mirror",
-        "aliases": ["shaving mirror", "small mirror"],
+        "description_zh": "小型鏡子，除了整理儀容，也可以反射陽光形成遠距離閃光。",
+        "aliases": ["刮鬍鏡", "小鏡子", "鏡子", "shaving mirror", "small mirror", "mirror"],
         "image_title": "Shaving Mirror",
         "image_bg": "#f1f5f9",
         "image_fg": "#475569",
         "image_mark": "MIR",
     },
     {
-        "id": "offline_gps_receiver",
-        "label_zh": "離線 GPS 定位器",
-        "label_en": "offline GPS receiver, shows coordinates once, no communication",
-        "aliases": [
-            "離線 GPS 定位器",
-            "離線定位器",
-            "定位器",
-            "經緯度",
-            "六分儀",
-            "offline GPS receiver",
-            "GPS receiver",
-            "coordinates display",
-            "sextant",
-        ],
-        "image_title": "Offline GPS",
-        "image_bg": "#fef3c7",
-        "image_fg": "#b45309",
-        "image_mark": "GPS",
+        "id": "water_container",
+        "label_zh": "20L 飲用水",
+        "label_en": "20L drinking water",
+        "description_zh": "一桶可直接飲用的淡水，容量大約等於 10 多瓶大瓶礦泉水。",
+        "aliases": ["飲用水", "淡水", "水", "water", "drinking water", "five-gallon can of water"],
+        "image_title": "Drinking Water",
+        "image_bg": "#dbeafe",
+        "image_fg": "#1d4ed8",
+        "image_mark": "H2O",
+    },
+    {
+        "id": "mosquito_net",
+        "label_zh": "蚊帳",
+        "label_en": "mosquito netting",
+        "description_zh": "細網布，原本用來防蚊，也可能被拿來過濾、遮蔽或固定物品。",
+        "aliases": ["蚊帳", "mosquito net", "mosquito netting"],
+        "image_title": "Mosquito Net",
+        "image_bg": "#e0f2fe",
+        "image_fg": "#0369a1",
+        "image_mark": "NET",
     },
     {
         "id": "emergency_rations",
-        "label_zh": "緊急糧食",
-        "label_en": "emergency rations",
-        "aliases": ["emergency rations"],
-        "image_title": "Emergency Rations",
+        "label_zh": "一箱緊急口糧",
+        "label_en": "one case of U.S. Army C rations",
+        "description_zh": "美軍舊式罐裝野戰口糧，重點是可保存、可直接補充熱量。",
+        "aliases": ["一箱緊急口糧", "一箱 C 口糧", "美軍 C 口糧", "軍用口糧", "口糧", "緊急糧食", "C rations", "Army C rations", "emergency rations"],
+        "image_title": "C Rations",
         "image_bg": "#ffedd5",
         "image_fg": "#c2410c",
         "image_mark": "FOOD",
     },
     {
-        "id": "atlantic_paper_map",
-        "label_zh": "大西洋紙本地圖",
-        "label_en": "Atlantic paper map, does not show current location",
-        "aliases": [
-            "大西洋地圖",
-            "紙本地圖",
-            "海圖",
-            "地圖",
-            "Atlantic paper map",
-            "paper map",
-            "sea chart",
-            "map",
-        ],
-        "image_title": "Paper Map",
+        "id": "sea_chart",
+        "label_zh": "太平洋地圖",
+        "label_en": "maps of the Pacific Ocean",
+        "description_zh": "紙本海圖，標示太平洋海域、島嶼與航行資訊，但不會自動顯示目前位置。",
+        "aliases": ["太平洋地圖", "紙本地圖", "海圖", "地圖", "Pacific maps", "maps of the Pacific Ocean", "sea chart", "map"],
+        "image_title": "Pacific Map",
         "image_bg": "#ccfbf1",
         "image_fg": "#0f766e",
         "image_mark": "MAP",
     },
     {
         "id": "floating_cushion",
-        "label_zh": "可漂浮的坐墊",
-        "label_en": "floating cushion",
-        "aliases": ["floating cushion"],
+        "label_zh": "救生坐墊",
+        "label_en": "seat cushion, flotation device",
+        "description_zh": "可漂浮的方形坐墊，通常可丟給落水者或當作額外浮力。",
+        "aliases": ["救生坐墊", "漂浮坐墊", "可漂浮的坐墊", "seat cushion", "floating cushion", "flotation device"],
         "image_title": "Floating Cushion",
         "image_bg": "#fce7f3",
         "image_fg": "#be185d",
         "image_mark": "FLOAT",
     },
     {
-        "id": "rope",
-        "label_zh": "繩子",
-        "label_en": "rope",
-        "aliases": ["rope"],
-        "image_title": "Rope",
-        "image_bg": "#f5f5f4",
-        "image_fg": "#78716c",
-        "image_mark": "ROPE",
+        "id": "petrol",
+        "label_zh": "8L 油氣混合燃料",
+        "label_en": "8L oil-gas mix",
+        "description_zh": "汽油與機油混合燃料，易燃，通常用於小型引擎或製造火焰訊號。",
+        "aliases": ["油氣混合燃料", "燃料", "汽油", "油", "oil-gas mixture", "oil gas mixture", "petrol", "gasoline", "fuel"],
+        "image_title": "Oil-Gas Mixture",
+        "image_bg": "#fee2e2",
+        "image_fg": "#b91c1c",
+        "image_mark": "FUEL",
     },
     {
-        "id": "chocolate_bars",
-        "label_zh": "巧克力棒",
-        "label_en": "chocolate bars",
-        "aliases": ["chocolate bars"],
-        "image_title": "Chocolate Bars",
-        "image_bg": "#ede9fe",
-        "image_fg": "#6d28d9",
-        "image_mark": "CHOC",
+        "id": "receive_only_radio",
+        "label_zh": "電晶體收音機",
+        "label_en": "transistor radio, receive-only",
+        "description_zh": "小型收音機，只能接收廣播或訊號，不能主動發送求救訊息。",
+        "aliases": [
+            "電晶體收音機",
+            "小型電晶體收音機",
+            "小型收音機",
+            "收音機",
+            "只能接收不能發送",
+            "無線電",
+            "receive-only radio",
+            "radio receiver",
+            "transistor radio",
+            "small transistor radio",
+        ],
+        "image_title": "Radio Receiver",
+        "image_bg": "#d1fae5",
+        "image_fg": "#047857",
+        "image_mark": "RADIO",
+    },
+    {
+        "id": "shark_repellent",
+        "label_zh": "防鯊劑",
+        "label_en": "shark repellent",
+        "description_zh": "用來降低鯊魚靠近風險的驅避用品，通常在有人落水時才會派上用場。",
+        "aliases": ["防鯊劑", "防鯊噴劑", "驅鯊劑", "shark repellent", "shark repellent spray"],
+        "image_title": "Shark Repellent",
+        "image_bg": "#e5e7eb",
+        "image_fg": "#374151",
+        "image_mark": "SHARK",
     },
     {
         "id": "waterproof_sheet",
-        "label_zh": "防水塑膠布",
-        "label_en": "waterproof sheet, tarpaulin",
-        "aliases": ["waterproof sheet", "tarpaulin"],
-        "image_title": "Waterproof Sheet",
+        "label_zh": "2m² 不透明塑膠布",
+        "label_en": "2m² opaque plastic sheet",
+        "description_zh": "一片不透明防水塑膠布，可遮陽、擋浪，也可能用來收集雨水。",
+        "aliases": ["不透明塑膠布", "塑膠布", "防水塑膠布", "opaque plastic", "plastic sheeting", "waterproof sheet", "tarpaulin"],
+        "image_title": "Opaque Plastic",
         "image_bg": "#dcfce7",
         "image_fg": "#15803d",
         "image_mark": "SHEET",
     },
     {
-        "id": "fishing_rod",
-        "label_zh": "釣魚竿",
-        "label_en": "fishing rod",
-        "aliases": ["fishing rod"],
-        "image_title": "Fishing Rod",
-        "image_bg": "#e0f2fe",
-        "image_fg": "#075985",
-        "image_mark": "ROD",
-    },
-    {
-        "id": "shark_repellent",
-        "label_zh": "防鯊噴劑",
-        "label_en": "shark repellent spray",
-        "aliases": ["防鯊噴劑", "驅鯊劑", "shark repellent", "shark repellent spray"],
-        "image_title": "Shark Spray",
-        "image_bg": "#e5e7eb",
-        "image_fg": "#374151",
-        "image_mark": "SPRAY",
-    },
-    {
         "id": "rum",
-        "label_zh": "蘭姆酒",
-        "label_en": "rum",
+        "label_zh": "1L 80% 蘭姆酒",
+        "label_en": "1L 80% Puerto Rican rum",
+        "description_zh": "高酒精濃度蘭姆酒，可作消毒或點火用途；直接飲用可能讓身體更缺水。",
         "aliases": [
+            "波多黎各蘭姆酒",
+            "80% 蘭姆酒",
             "蘭姆酒",
             "蘭姆",
             "酒",
@@ -192,30 +181,45 @@ TASK_ITEMS: list[TaskItemConfig] = [
             "high-proof alcohol",
             "disinfectant alcohol",
             "rum",
+            "160-proof Puerto Rican rum",
         ],
-        "image_title": "Rum",
+        "image_title": "Puerto Rican Rum",
         "image_bg": "#fef9c3",
         "image_fg": "#a16207",
         "image_mark": "RUM",
     },
     {
-        "id": "receive_only_radio",
-        "label_zh": "小型收音機",
-        "label_en": "receive-only radio, cannot transmit",
-        "aliases": [
-            "小型收音機",
-            "收音機",
-            "無線電",
-            "VHF 無線電",
-            "receive-only radio",
-            "radio receiver",
-            "transistor radio",
-            "VHF radio",
-        ],
-        "image_title": "Radio Receiver",
-        "image_bg": "#d1fae5",
-        "image_fg": "#047857",
-        "image_mark": "RADIO",
+        "id": "rope",
+        "label_zh": "5m 尼龍繩",
+        "label_en": "5m nylon rope",
+        "description_zh": "一段尼龍繩，可用來綁住物品、固定救生艇或連接臨時裝置。",
+        "aliases": ["尼龍繩", "繩子", "rope", "nylon rope", "fifteen feet of nylon rope"],
+        "image_title": "Nylon Rope",
+        "image_bg": "#f5f5f4",
+        "image_fg": "#78716c",
+        "image_mark": "ROPE",
+    },
+    {
+        "id": "chocolate_bars",
+        "label_zh": "兩盒巧克力棒",
+        "label_en": "two boxes of chocolate bars",
+        "description_zh": "高熱量食物，體積小、容易分配，但數量有限。",
+        "aliases": ["巧克力棒", "巧克力", "chocolate bars", "two boxes of chocolate bars"],
+        "image_title": "Chocolate Bars",
+        "image_bg": "#ede9fe",
+        "image_fg": "#6d28d9",
+        "image_mark": "CHOC",
+    },
+    {
+        "id": "fishing_rod",
+        "label_zh": "釣魚工具組",
+        "label_en": "fishing kit",
+        "description_zh": "包含魚線、魚鉤等簡易釣具，可能用來取得食物，但需要時間與運氣。",
+        "aliases": ["釣魚工具組", "釣具", "釣魚竿", "fishing kit", "fishing rod"],
+        "image_title": "Fishing Kit",
+        "image_bg": "#e0f2fe",
+        "image_fg": "#075985",
+        "image_mark": "FISH",
     },
 ]
 
@@ -257,10 +261,11 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 """
 
 TASK_TOPIC_DETAIL = (
-    "你和幾位朋友租了一艘遊艇，準備橫越大西洋。船上火災使遊艇受損下沉，導航與通訊設備也失效；"
-    "你們只能帶著橡皮救生艇、一盒火柴，以及 15 項可用物品在海上等待救援。"
+    "你們搭乘私人遊艇在南太平洋上漂流。原因不明的火災使遊艇受損下沉，導航設備也被破壞；"
+    "你們的位置不明，只能估計距離最近陸地約 1,600 公里。"
+    "你們有橡皮救生艇、船槳、火柴、香菸、五張 1 美元紙鈔，以及 15 項可用物品。"
     "這些物品不能連上網路，也不能直接呼叫救援。"
-    "請根據物品對存活與等待救援的重要程度排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。"
+    "請根據物品對存活的重要程度排序，將最重要的物品排在第 1 名，最不重要的物品排在第 15 名。"
 )
 
 SIMILARITY_TASK_CONTEXT = (
@@ -291,6 +296,7 @@ def serialize_task_config() -> dict[str, Any]:
                 "label": item["label_zh"],
                 "label_zh": item["label_zh"],
                 "label_en": item["label_en"],
+                "description_zh": item["description_zh"],
                 "aliases": list(item["aliases"]),
                 "image_title": item["image_title"],
                 "image_bg": item["image_bg"],

@@ -78,7 +78,7 @@ Return `id: null` if any of the following apply:
 - The practical ranking conclusion is unclear, neutral, or too generic.
 - One idea prioritizes an item while the other deprioritizes it.
 - The ideas compare the same items in opposite directions.
-  Example: "GPS is more important than the map" vs "the map is better than GPS."
+  Example: "the sextant is more important than the map" vs "the map is better than the sextant."
 - One idea ranks item A above item B, while the other ranks item B above item A.
 - The match would not create a meaningful bridge for discussion or consensus-building.
 

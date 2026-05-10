@@ -18,6 +18,7 @@ import { Button } from "./ui/Button";
 interface LostAtSeaItem {
 	id: string;
 	label: string;
+	description: string;
 	rank: number;
 	imageTitle: string;
 	imageBg: string;
@@ -49,6 +50,23 @@ const MIN_JITSI_HEIGHT = 220;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
+const ITEM_DESCRIPTIONS: Record<string, string> = {
+	sextant: "用太陽或星星測量角度的航海儀器，需要搭配其他資料才能推算位置。",
+	shaving_mirror: "小型鏡子，除了整理儀容，也可以反射陽光形成遠距離閃光。",
+	water_container: "一桶可直接飲用的淡水，容量大約等於 10 多瓶大瓶礦泉水。",
+	mosquito_net: "細網布，原本用來防蚊，也可能被拿來過濾、遮蔽或固定物品。",
+	emergency_rations: "美軍舊式罐裝野戰口糧，重點是可保存、可直接補充熱量。",
+	sea_chart: "紙本海圖，標示太平洋海域、島嶼與航行資訊，但不會自動顯示目前位置。",
+	floating_cushion: "可漂浮的方形坐墊，通常可丟給落水者或當作額外浮力。",
+	petrol: "汽油與機油混合燃料，易燃，通常用於小型引擎或製造火焰訊號。",
+	receive_only_radio: "小型收音機，只能接收廣播或訊號，不能主動發送求救訊息。",
+	shark_repellent: "用來降低鯊魚靠近風險的驅避用品，通常在有人落水時才會派上用場。",
+	waterproof_sheet: "一片不透明防水塑膠布，可遮陽、擋浪，也可能用來收集雨水。",
+	rum: "高酒精濃度蘭姆酒，可作消毒或點火用途；直接飲用可能讓身體更缺水。",
+	rope: "一段尼龍繩，可用來綁住物品、固定救生艇或連接臨時裝置。",
+	chocolate_bars: "高熱量食物，體積小、容易分配，但數量有限。",
+	fishing_rod: "包含魚線、魚鉤等簡易釣具，可能用來取得食物，但需要時間與運氣。"
+};
 
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
@@ -58,6 +76,7 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 	return {
 		id: item.id,
 		label: item.label,
+		description: item.description_zh || ITEM_DESCRIPTIONS[item.id] || "",
 		rank: index + 1,
 		imageTitle: item.image_title || item.label_en || item.label,
 		imageBg: item.image_bg || "#f8fafc",
@@ -107,6 +126,7 @@ function createRankedItems(itemIds: string[], taskItemsById: Record<string, Task
 				label: id,
 				label_zh: id,
 				label_en: id,
+				description_zh: "",
 				aliases: [],
 				image_title: id,
 				image_bg: "#f8fafc",
@@ -188,15 +208,19 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 			title={isRankConflict ? `與 Public 排序差 ${rankConflictAmount} 位` : undefined}
 			{...attributes}
 			{...listeners}
-			onDoubleClick={() => onPreview(item)}
 		>
-			<img
-				className="h-9 w-12 shrink-0 rounded-md border object-cover"
-				src={taskItemImageSrc(item.id)}
-				alt={item.imageTitle}
-				draggable={false}
-				onError={event => handleTaskItemImageError(event, item)}
-			/>
+			<button
+				type="button"
+				className="h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				aria-label={`放大查看 ${item.label}`}
+				onClick={event => {
+					event.stopPropagation();
+					onPreview(item);
+				}}
+				onPointerDown={event => event.stopPropagation()}
+			>
+				<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
+			</button>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			{isRankConflict && (
@@ -838,10 +862,11 @@ export default function MeetingRoom() {
 							alt={previewItem.imageTitle}
 							onError={event => handleTaskItemImageError(event, previewItem)}
 						/>
-						<div className="flex items-center justify-between gap-3">
+						<div className="flex items-start justify-between gap-3">
 							<div className="min-w-0">
 								<div className="truncate text-sm font-semibold">{previewItem.label}</div>
 								<div className="text-xs text-muted-foreground">{previewItem.imageTitle}</div>
+								{previewItem.description && <p className="mt-2 text-sm leading-6 text-foreground/80">{previewItem.description}</p>}
 							</div>
 							<Button type="button" variant="outline" onClick={() => setPreviewItem(null)}>
 								關閉
