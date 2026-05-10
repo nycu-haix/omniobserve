@@ -42,7 +42,7 @@ TASK_ITEMS: list[TaskItemConfig] = [
     {"id": "waterproof_sheet", "label_zh": "防水塑膠布", "label_en": "waterproof sheet, tarpaulin", "aliases": ["waterproof sheet", "tarpaulin"], "image_title": "Waterproof Sheet", "image_bg": "#dcfce7", "image_fg": "#15803d", "image_mark": "SHEET"},
     {"id": "fishing_rod", "label_zh": "釣魚竿", "label_en": "fishing rod", "aliases": ["fishing rod"], "image_title": "Fishing Rod", "image_bg": "#e0f2fe", "image_fg": "#075985", "image_mark": "ROD"},
     {"id": "shark_repellent", "label_zh": "防鯊噴劑", "label_en": "shark repellent spray", "aliases": ["防鯊噴劑", "驅鯊劑", "shark repellent", "shark repellent spray"], "image_title": "Shark Spray", "image_bg": "#e5e7eb", "image_fg": "#374151", "image_mark": "SPRAY"},
-    {"id": "medical_alcohol", "label_zh": "高濃度消毒酒精", "label_en": "high-proof medical alcohol, not for drinking", "aliases": ["消毒酒精", "高濃度酒精", "蘭姆酒", "medical alcohol", "high-proof alcohol", "disinfectant alcohol", "rum"], "image_title": "Alcohol", "image_bg": "#fef9c3", "image_fg": "#a16207", "image_mark": "ALC"},
+    {"id": "rum", "label_zh": "蘭姆酒", "label_en": "rum", "aliases": ["蘭姆酒", "蘭姆", "酒", "消毒酒精", "高濃度酒精", "medical alcohol", "high-proof alcohol", "disinfectant alcohol", "rum"], "image_title": "Rum", "image_bg": "#fef9c3", "image_fg": "#a16207", "image_mark": "RUM"},
     {"id": "receive_only_radio", "label_zh": "小型收音機", "label_en": "receive-only radio, cannot transmit", "aliases": ["小型收音機", "收音機", "無線電", "VHF 無線電", "receive-only radio", "radio receiver", "transistor radio", "VHF radio"], "image_title": "Radio Receiver", "image_bg": "#d1fae5", "image_fg": "#047857", "image_mark": "RADIO"},
 ]
 
