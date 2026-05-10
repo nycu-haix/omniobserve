@@ -14,6 +14,7 @@ import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
+import { ShortcutKey } from "./ui/ShortcutKey";
 
 interface LostAtSeaItem {
 	id: string;
@@ -108,6 +109,23 @@ function clampJitsiHeight(height: number) {
 	const availableHeight = window.innerHeight - 32 - 24 - 24 - 56;
 	const maxHeight = Math.max(MIN_JITSI_HEIGHT, availableHeight - MIN_RANKING_HEIGHT);
 	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+	if (!(target instanceof HTMLElement)) {
+		return false;
+	}
+
+	const editableElement = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']");
+	if (!editableElement) {
+		return false;
+	}
+
+	if (editableElement instanceof HTMLInputElement) {
+		return editableElement.type !== "button" && editableElement.type !== "checkbox" && editableElement.type !== "radio" && editableElement.type !== "submit";
+	}
+
+	return true;
 }
 
 function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): string[] {
@@ -423,19 +441,44 @@ export default function MeetingRoom() {
 		}
 	};
 
-	const handleMic = async (mode: MicMode) => {
-		const shouldRetryCurrentMode = mode !== "off" && micMode === mode && hasAudioConnectionError;
-		const nextMode = shouldRetryCurrentMode ? mode : mode === "off" ? "off" : micMode === mode ? "off" : mode;
+	const handleMic = useCallback(
+		async (mode: MicMode) => {
+			const shouldRetryCurrentMode = mode !== "off" && micMode === mode && hasAudioConnectionError;
+			const nextMode = shouldRetryCurrentMode ? mode : mode === "off" ? "off" : micMode === mode ? "off" : mode;
 
-		setMicMode(nextMode);
+			setMicMode(nextMode);
 
-		if (nextMode === "off") {
-			stopAudioStream();
-			return;
-		}
+			if (nextMode === "off") {
+				stopAudioStream();
+				return;
+			}
 
-		await startAudioStream(nextMode);
-	};
+			await startAudioStream(nextMode);
+		},
+		[hasAudioConnectionError, micMode, startAudioStream, stopAudioStream]
+	);
+
+	useEffect(() => {
+		const handleMicShortcutKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) {
+				return;
+			}
+
+			if (event.code === "Space") {
+				event.preventDefault();
+				void handleMic("public");
+				return;
+			}
+
+			if (event.code === "KeyW") {
+				event.preventDefault();
+				void handleMic("private");
+			}
+		};
+
+		window.addEventListener("keydown", handleMicShortcutKeyDown);
+		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
+	}, [handleMic]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -811,15 +854,17 @@ export default function MeetingRoom() {
 						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
 							<Button
 								variant={micMode === "public" ? "destructive" : "outline"}
-								className={cn(micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
+								className={cn("gap-2", micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
 								onClick={() => void handleMic("public")}
 							>
 								<Mic className="h-4 w-4" />
 								公開麥克風
+								<ShortcutKey label="Space" />
 							</Button>
 							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
+								<ShortcutKey label="W" />
 							</Button>
 							<Button className="bg-background/90" variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
 								<MicOff className="h-4 w-4" />
@@ -847,15 +892,17 @@ export default function MeetingRoom() {
 					<div className="flex flex-wrap items-center justify-center gap-2">
 						<Button
 							variant={micMode === "public" ? "destructive" : "outline"}
-							className={cn(micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
+							className={cn("gap-2", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
 							onClick={() => void handleMic("public")}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
+							<ShortcutKey label="Space" />
 						</Button>
 						<Button className="hidden" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
+							<ShortcutKey label="W" />
 						</Button>
 						<Button variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
 							<MicOff className="h-4 w-4" />

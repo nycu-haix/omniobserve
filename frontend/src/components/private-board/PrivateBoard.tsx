@@ -7,6 +7,7 @@ import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
+import { ShortcutKey } from "../ui/ShortcutKey";
 import { IdeaBlockItem } from "./IdeaBlockItem";
 import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
@@ -121,6 +122,23 @@ const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+	if (!(target instanceof HTMLElement)) {
+		return false;
+	}
+
+	const editableElement = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']");
+	if (!editableElement) {
+		return false;
+	}
+
+	if (editableElement instanceof HTMLInputElement) {
+		return editableElement.type !== "button" && editableElement.type !== "checkbox" && editableElement.type !== "radio" && editableElement.type !== "submit";
+	}
+
+	return true;
 }
 
 function isBoardMessage(message: object | null): message is BoardMessage {
@@ -629,6 +647,7 @@ export function PrivateBoard({
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
@@ -644,6 +663,53 @@ export function PrivateBoard({
 		"public-chat": true
 	});
 	const isSavingManualIdea = manualIdeaPendingCount > 0;
+
+	const focusActiveComposer = useCallback(() => {
+		if (canShowIdeaBlocks && visibleActiveTab === "ideablock") {
+			manualIdeaTextareaRef.current?.focus();
+			return true;
+		}
+
+		if (visibleActiveTab === "public-chat") {
+			publicChatTextareaRef.current?.focus();
+			return true;
+		}
+
+		return false;
+	}, [canShowIdeaBlocks, visibleActiveTab]);
+
+	useEffect(() => {
+		const handleComposerShortcutKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented || event.repeat || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) {
+				return;
+			}
+
+			if (event.code === "Digit1") {
+				event.preventDefault();
+				setActiveTab("transcript");
+				return;
+			}
+
+			if (event.code === "Digit2" && canShowIdeaBlocks) {
+				event.preventDefault();
+				setActiveTab("ideablock");
+				return;
+			}
+
+			if (event.code === "Digit3") {
+				event.preventDefault();
+				setActiveTab("public-chat");
+				return;
+			}
+
+			if (event.key === "Enter" && focusActiveComposer()) {
+				event.preventDefault();
+			}
+		};
+
+		window.addEventListener("keydown", handleComposerShortcutKeyDown);
+		return () => window.removeEventListener("keydown", handleComposerShortcutKeyDown);
+	}, [canShowIdeaBlocks, focusActiveComposer]);
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -1201,6 +1267,7 @@ export function PrivateBoard({
 			<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
 				<Radio className="h-4 w-4" />
 				<span className="text-sm">悄悄話</span>
+				<ShortcutKey label="W" />
 			</Button>
 		</div>
 	);
@@ -1308,6 +1375,10 @@ export function PrivateBoard({
 										onKeyDown={event => {
 											if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 												event.preventDefault();
+												if (!manualIdeaText.trim()) {
+													event.currentTarget.blur();
+													return;
+												}
 												void addManualIdeaBlock();
 											}
 										}}
@@ -1322,6 +1393,7 @@ export function PrivateBoard({
 								<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
 									<Radio className="h-4 w-4" />
 									<span className="text-sm">悄悄話</span>
+									<ShortcutKey label="W" />
 								</Button>
 							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
@@ -1333,6 +1405,7 @@ export function PrivateBoard({
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<PublicChatComposer
+								ref={publicChatTextareaRef}
 								messageText={publicChatText}
 								error={publicChatError}
 								isConnected={isConnected}

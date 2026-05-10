@@ -1,5 +1,5 @@
 import { Send } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import { forwardRef, useLayoutEffect, useRef } from "react";
 import { cn } from "../../lib/utils";
 import type { PublicChatMessage } from "../../types";
 import { Button } from "../ui/Button";
@@ -13,6 +13,8 @@ interface PublicChatPanelProps {
 	onMessageTextChange: (value: string) => void;
 	onSend: () => void;
 }
+
+type PublicChatComposerProps = Omit<PublicChatPanelProps, "messages">;
 
 export function PublicChatMessages({ messages }: { messages: PublicChatMessage[] }) {
 	return (
@@ -33,11 +35,24 @@ export function PublicChatMessages({ messages }: { messages: PublicChatMessage[]
 	);
 }
 
-export function PublicChatComposer({ messageText, error, isConnected, isSending, onMessageTextChange, onSend }: Omit<PublicChatPanelProps, "messages">) {
-	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+export const PublicChatComposer = forwardRef<HTMLTextAreaElement, PublicChatComposerProps>(function PublicChatComposer(
+	{ messageText, error, isConnected, isSending, onMessageTextChange, onSend },
+	ref
+) {
+	const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const setTextareaRef = (node: HTMLTextAreaElement | null) => {
+		localTextareaRef.current = node;
+		if (typeof ref === "function") {
+			ref(node);
+			return;
+		}
+		if (ref) {
+			ref.current = node;
+		}
+	};
 
 	useLayoutEffect(() => {
-		const textarea = textareaRef.current;
+		const textarea = localTextareaRef.current;
 		if (!textarea) {
 			return;
 		}
@@ -51,7 +66,7 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 			<div className="flex items-end gap-2">
 				<div className="relative flex-1">
 					<textarea
-						ref={textareaRef}
+						ref={setTextareaRef}
 						aria-label="Public chat input"
 						className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						placeholder="傳送公開訊息"
@@ -61,8 +76,12 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 						onKeyDown={event => {
 							if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 								event.preventDefault();
+								if (!messageText.trim()) {
+									event.currentTarget.blur();
+									return;
+								}
 								onSend();
-								window.requestAnimationFrame(() => textareaRef.current?.focus());
+								window.requestAnimationFrame(() => localTextareaRef.current?.focus());
 							}
 						}}
 						disabled={!isConnected}
@@ -76,4 +95,4 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 			{error && <p className="text-xs text-destructive">{error}</p>}
 		</div>
 	);
-}
+});
