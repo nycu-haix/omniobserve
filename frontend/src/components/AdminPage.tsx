@@ -1,4 +1,4 @@
-import { Activity, AlertCircle, Check, ClipboardList, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import { Activity, AlertCircle, Check, ClipboardList, Copy, Download, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
@@ -422,6 +422,7 @@ export function AdminPage() {
 		return clampAdminRightSidebarWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH, DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH);
 	});
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | null>(null);
+	const [rankingsCopied, setRankingsCopied] = useState(false);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const adminLayoutStyle = {
@@ -709,7 +710,7 @@ export function AdminPage() {
 	const publicRankingSnapshot =
 		adminRankingState?.public_ranking ?? boardState?.public_ranking ?? (boardState?.ranking?.items ? { revision: boardState.revision, items: boardState.ranking.items } : null);
 	const publicRankingItems = publicRankingSnapshot ? normalizeRankingItemIds(publicRankingSnapshot.items, defaultRankingItemIds) : [];
-	const privateRankingMap = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
+	const privateRankingMap: Record<string, RankingSnapshot> = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
 	const privateRankingEntries = Object.entries(privateRankingMap)
 		.filter(([participantId]) => !isAdminParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
@@ -722,6 +723,51 @@ export function AdminPage() {
 			rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
 		};
 	});
+
+	const generateRankingsExport = () => {
+		const maxLength = Math.max(publicRankingItems.length, ...privateRankingEntries.map(([, r]) => normalizeRankingItemIds(r.items, defaultRankingItemIds).length));
+		if (maxLength === 0) return null;
+
+		const privateOrderedItemsByUser = privateRankingEntries.map(([, ranking]) => normalizeRankingItemIds(ranking.items, defaultRankingItemIds));
+
+		const headers = ["排名", "公共排序", ...privateRankingEntries.map(([participantId]) => `User ${participantId}`)];
+
+		const rows = Array.from({ length: maxLength }, (_, index) => {
+			const rank = String(index + 1);
+			const publicItemId = publicRankingItems[index];
+			const publicLabel = publicItemId ? (rankingLabels[publicItemId] ?? publicItemId) : "-";
+			const privateLabels = privateOrderedItemsByUser.map(items => {
+				const itemId = items[index];
+				return itemId ? (rankingLabels[itemId] ?? itemId) : "-";
+			});
+			return [rank, publicLabel, ...privateLabels];
+		});
+
+		return [headers, ...rows].map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n");
+	};
+
+	const copyRankings = async () => {
+		const text = generateRankingsExport();
+		if (!text) return;
+		await navigator.clipboard.writeText(text);
+		setRankingsCopied(true);
+		window.setTimeout(() => setRankingsCopied(false), 2000);
+	};
+
+	const downloadRankings = () => {
+		const text = generateRankingsExport();
+		if (!text) return;
+		const blob = new Blob(["\uFEFF", text], { type: "text/csv;charset=utf-8" });
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = `${roomName}-rankings-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.csv`;
+		document.body.appendChild(anchor);
+		anchor.click();
+		document.body.removeChild(anchor);
+		URL.revokeObjectURL(url);
+	};
+
 	const isExperimentalCondition = cueCondition === "experimental";
 	const isSimilarityCueActive = isExperimentalCondition && currentPhase === "group";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
@@ -1181,9 +1227,23 @@ export function AdminPage() {
 					onKeyDown={handleRightSidebarResizeKeyDown}
 				/>
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
-					<header className="mb-3 flex items-center gap-2">
-						<ClipboardList className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-						<h2 className="text-sm font-semibold">Ranking state</h2>
+					<header className="mb-3 flex items-center justify-between gap-3">
+						<div className="flex items-center gap-2">
+							<ClipboardList className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Ranking state</h2>
+						</div>
+						{publicRankingSnapshot && (
+							<div className="flex shrink-0 items-center gap-1.5">
+								<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={() => void copyRankings()} aria-label="複製排序到剪貼簿">
+									{rankingsCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+									{rankingsCopied ? "已複製" : "複製"}
+								</Button>
+								<Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={downloadRankings} aria-label="下載排序 CSV 檔">
+									<Download className="h-3.5 w-3.5" aria-hidden="true" />
+									下載
+								</Button>
+							</div>
+						)}
 					</header>
 					{publicRankingSnapshot ? (
 						<div className="overflow-x-auto rounded-lg border bg-background">
