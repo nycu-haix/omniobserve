@@ -62,13 +62,14 @@ export function PublicChatComposer({ messageText, error, isConnected, isSending,
 							if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
 								event.preventDefault();
 								onSend();
+								window.requestAnimationFrame(() => textareaRef.current?.focus());
 							}
 						}}
-						disabled={!isConnected || isSending}
+						disabled={!isConnected}
 					/>
 					{!messageText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 				</div>
-				<Button className="h-11 w-11 shrink-0 p-0" onClick={onSend} disabled={!messageText.trim() || !isConnected || isSending} title="傳送公開訊息">
+				<Button className="h-11 w-11 shrink-0 p-0" onClick={onSend} disabled={!messageText.trim() || !isConnected} title={isSending ? "傳送中" : "傳送公開訊息"}>
 					<Send className="h-4 w-4" />
 				</Button>
 			</div>

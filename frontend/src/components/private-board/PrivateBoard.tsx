@@ -619,13 +619,14 @@ export function PrivateBoard({
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
-	const [isSavingManualIdea, setIsSavingManualIdea] = useState(false);
+	const [manualIdeaPendingCount, setManualIdeaPendingCount] = useState(0);
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
@@ -639,6 +640,7 @@ export function PrivateBoard({
 		ideablock: true,
 		"public-chat": true
 	});
+	const isSavingManualIdea = manualIdeaPendingCount > 0;
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -1102,15 +1104,17 @@ export function PrivateBoard({
 
 	const addManualIdeaBlock = async () => {
 		const normalizedContent = manualIdeaText.trim();
-		if (!normalizedContent || isSavingManualIdea) {
+		if (!normalizedContent) {
 			return;
 		}
 
 		const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
 		const localBlockId = `manual-${Date.now()}`;
 
-		setIsSavingManualIdea(true);
+		setManualIdeaText("");
+		setManualIdeaPendingCount(current => current + 1);
 		setManualIdeaError(null);
+		window.requestAnimationFrame(() => manualIdeaTextareaRef.current?.focus());
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 				const newBlock: IdeaBlock = {
@@ -1124,7 +1128,6 @@ export function PrivateBoard({
 				};
 				setIdeaBlocks(prev => sortIdeaBlocks([...prev, newBlock]));
 				setHighlightedBlockId(newBlock.id);
-				setManualIdeaText("");
 				return;
 			}
 
@@ -1145,17 +1148,16 @@ export function PrivateBoard({
 			setIdeaBlocks(prev => sortIdeaBlocks([...prev.filter(block => block.id !== savedBlock.id), savedBlock]));
 			setHighlightedBlockId(savedBlock.id);
 			setIdeaBlockRefreshKey(current => current + 1);
-			setManualIdeaText("");
 		} catch (error) {
 			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");
 		} finally {
-			setIsSavingManualIdea(false);
+			setManualIdeaPendingCount(current => Math.max(0, current - 1));
 		}
 	};
 
 	const sendPublicChatMessage = () => {
 		const normalizedMessage = publicChatText.trim();
-		if (!normalizedMessage || isSendingPublicChat) {
+		if (!normalizedMessage) {
 			return;
 		}
 
@@ -1272,6 +1274,7 @@ export function PrivateBoard({
 							<div className="flex items-end gap-2">
 								<div className="relative flex-1">
 									<textarea
+										ref={manualIdeaTextareaRef}
 										aria-label="Manual idea block input"
 										className="block h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 										placeholder="手動輸入 idea block"
@@ -1286,11 +1289,10 @@ export function PrivateBoard({
 												void addManualIdeaBlock();
 											}
 										}}
-										disabled={isSavingManualIdea}
 									/>
 									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 								</div>
-								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim() || isSavingManualIdea}>
+								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim()}>
 									{isSavingManualIdea ? "儲存中" : "新增"}
 								</Button>
 							</div>
