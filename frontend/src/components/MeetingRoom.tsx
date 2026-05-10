@@ -2,8 +2,8 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { AlertCircle, GripVertical, Keyboard, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -276,7 +276,8 @@ function LostAtSeaRankingPanel({
 	onDragCancel,
 	onDragEnd,
 	onPreviewItem,
-	getRankDelta
+	getRankDelta,
+	scrollContainerRef
 }: {
 	title: string;
 	status: string;
@@ -287,6 +288,7 @@ function LostAtSeaRankingPanel({
 	onDragEnd: (event: DragEndEvent) => void;
 	onPreviewItem: (item: LostAtSeaItem) => void;
 	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
+	scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
 	return (
 		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
@@ -296,7 +298,7 @@ function LostAtSeaRankingPanel({
 			</header>
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-					<div className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
+					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
 							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} onPreview={onPreviewItem} />
 						))}
@@ -322,6 +324,7 @@ export default function MeetingRoom() {
 	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
+	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -332,8 +335,11 @@ export default function MeetingRoom() {
 	});
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
+	const [rankingScrollScope, setRankingScrollScope] = useState<RankingScope>("private");
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
+	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
+	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const isParticipantIdValid = isValidParticipantId(participantId);
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
@@ -350,6 +356,7 @@ export default function MeetingRoom() {
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
 	const shouldHighlightRankConflict = currentPhase === "group";
+	const activeRankingScrollScope = currentPhase === "group" ? rankingScrollScope : "private";
 	const meetingLayoutStyle = {
 		"--private-board-width": `${privateBoardWidth}px`,
 		"--jitsi-height": `${jitsiHeight}px`
@@ -479,6 +486,54 @@ export default function MeetingRoom() {
 		window.addEventListener("keydown", handleMicShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
 	}, [handleMic]);
+
+	useEffect(() => {
+		const handleRankingScrollKeyDown = (event: KeyboardEvent) => {
+			if (
+				event.defaultPrevented ||
+				event.metaKey ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.shiftKey ||
+				(event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+			) {
+				return;
+			}
+
+			const activeElement = document.activeElement;
+			if (activeElement && activeElement !== document.body && activeElement !== document.documentElement) {
+				return;
+			}
+
+			if (event.key === "ArrowLeft") {
+				if (currentPhase === "group") {
+					event.preventDefault();
+					setRankingScrollScope("public");
+				}
+				return;
+			}
+
+			if (event.key === "ArrowRight") {
+				event.preventDefault();
+				setRankingScrollScope("private");
+				return;
+			}
+
+			const scrollContainer = activeRankingScrollScope === "public" ? publicRankingScrollRef.current : privateRankingScrollRef.current;
+			if (!scrollContainer) {
+				return;
+			}
+
+			event.preventDefault();
+			scrollContainer.scrollBy({
+				top: event.key === "ArrowDown" ? 72 : -72,
+				behavior: "smooth"
+			});
+		};
+
+		window.addEventListener("keydown", handleRankingScrollKeyDown);
+		return () => window.removeEventListener("keydown", handleRankingScrollKeyDown);
+	}, [activeRankingScrollScope, currentPhase]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -801,6 +856,7 @@ export default function MeetingRoom() {
 								onDragCancel={() => handleRankingDragCancel("public")}
 								onDragEnd={event => handleRankingDragEnd("public", event)}
 								onPreviewItem={setPreviewItem}
+								scrollContainerRef={publicRankingScrollRef}
 							/>
 						)}
 						<LostAtSeaRankingPanel
@@ -814,6 +870,7 @@ export default function MeetingRoom() {
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							onPreviewItem={setPreviewItem}
+							scrollContainerRef={privateRankingScrollRef}
 							getRankDelta={item => {
 								if (!shouldHighlightRankConflict) {
 									return undefined;
@@ -914,6 +971,47 @@ export default function MeetingRoom() {
 							<title>{audioError}</title>
 						</AlertCircle>
 					)}
+					<div className="absolute bottom-0 right-0 hidden xl:block">
+						<Button
+							type="button"
+							variant="ghost"
+							size="sm"
+							className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+							aria-expanded={isShortcutHelpOpen}
+							onClick={() => setIsShortcutHelpOpen(current => !current)}
+						>
+							<Keyboard className="h-3.5 w-3.5" />
+							快捷鍵
+						</Button>
+						{isShortcutHelpOpen && (
+							<div className="absolute bottom-full right-0 z-30 mb-1 grid w-44 gap-1 rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-md">
+								<div className="flex items-center justify-between gap-3">
+									<span>公開發言</span>
+									<ShortcutKey label="Space" />
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<span>悄悄話</span>
+									<ShortcutKey label="W" />
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<span>切換分頁</span>
+									<ShortcutKey label="1/2/3" />
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<span>輸入</span>
+									<ShortcutKey label="Enter" />
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<span>滾動排序</span>
+									<ShortcutKey label="↑/↓" />
+								</div>
+								<div className="flex items-center justify-between gap-3">
+									<span>切換排序欄</span>
+									<ShortcutKey label="←/→" />
+								</div>
+							</div>
+						)}
+					</div>
 				</div>
 			</section>
 
