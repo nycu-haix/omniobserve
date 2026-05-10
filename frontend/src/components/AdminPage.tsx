@@ -93,6 +93,7 @@ interface LatestParticipantTranscript {
 }
 
 type SessionPhase = "private" | "group";
+type CueCondition = "experimental" | "control";
 
 const MAX_EVENTS = 80;
 const API_REFRESH_INTERVAL_MS = 5000;
@@ -123,6 +124,10 @@ function clampAdminRightSidebarWidth(width: number, leftSidebarWidth: number) {
 
 function normalizeSessionPhase(value: unknown): SessionPhase | null {
 	return value === "private" || value === "group" ? value : null;
+}
+
+function normalizeCueCondition(value: unknown): CueCondition | null {
+	return value === "experimental" || value === "control" ? value : null;
 }
 
 function durationSecondsFromMinutes(value: string) {
@@ -397,6 +402,7 @@ export function AdminPage() {
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [privateDurationMinutes, setPrivateDurationMinutes] = useState("5");
 	const [groupDurationMinutes, setGroupDurationMinutes] = useState("15");
@@ -480,6 +486,10 @@ export function AdminPage() {
 			setTimerEndTime(message.end_time_ms);
 		} else if (typeof message.timer_end_time_ms === "number") {
 			setTimerEndTime(message.timer_end_time_ms);
+		}
+		const nextCueCondition = normalizeCueCondition(message.cue_condition) ?? normalizeCueCondition(message.condition);
+		if (nextCueCondition) {
+			setCueCondition(nextCueCondition);
 		}
 
 		if (isBoardStateMessage(message)) {
@@ -675,6 +685,10 @@ export function AdminPage() {
 	const clearPhaseTimer = () => {
 		sendAdminMessage({ type: "switch_phase", phase: currentPhase, duration_s: 0 });
 	};
+	const setSessionCueCondition = (condition: CueCondition) => {
+		sendAdminMessage({ type: "set_cue_condition", condition });
+		setCueCondition(condition);
+	};
 	const toggleCueBlockSelection = (blockId: number) => {
 		setManualCueError(null);
 		setSelectedCueBlockIds(current => {
@@ -700,6 +714,8 @@ export function AdminPage() {
 			rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
 		};
 	});
+	const isExperimentalCondition = cueCondition === "experimental";
+	const isSimilarityCueActive = isExperimentalCondition && currentPhase === "group";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -728,7 +744,7 @@ export function AdminPage() {
 		.sort((a, b) => b.id - a.id)
 		.slice(0, 6);
 	const createManualCue = async () => {
-		if (selectedCueBlocks.length !== 2 || isCreatingManualCue) {
+		if (selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition) {
 			return;
 		}
 
@@ -908,6 +924,30 @@ export function AdminPage() {
 
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
 					<header className="mb-3 flex items-center gap-2">
+						<Lightbulb className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+						<h2 className="text-sm font-semibold">Cue Condition</h2>
+					</header>
+					<div className="grid gap-3">
+						<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+							<div className="min-w-0">
+								<div className="font-medium">{isExperimentalCondition ? "實驗組" : "對照組"}</div>
+								<div className="text-xs text-muted-foreground">{isSimilarityCueActive ? "Similarity cue on" : "Similarity cue off"}</div>
+							</div>
+							<Badge variant={isExperimentalCondition ? "secondary" : "outline"}>{isExperimentalCondition ? "cue on" : "cue off"}</Badge>
+						</div>
+						<div className="grid grid-cols-2 gap-2">
+							<Button type="button" variant={isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("experimental")}>
+								實驗組
+							</Button>
+							<Button type="button" variant={!isExperimentalCondition ? "default" : "outline"} onClick={() => setSessionCueCondition("control")}>
+								對照組
+							</Button>
+						</div>
+					</div>
+				</section>
+
+				<section className="rounded-lg border bg-card p-4 text-card-foreground">
+					<header className="mb-3 flex items-center gap-2">
 						<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 						<h2 className="text-sm font-semibold">Presence</h2>
 					</header>
@@ -1012,7 +1052,11 @@ export function AdminPage() {
 								<span>Manual cue</span>
 							</div>
 							<p className="mt-1 truncate text-xs text-muted-foreground">
-								{selectedCueBlocks.length > 0 ? selectedCueBlocks.map(block => `#${block.id} user ${block.user_id}`).join(" + ") : "Select 2 idea blocks to cue together"}
+								{!isExperimentalCondition
+									? "Control condition: similarity cues are disabled"
+									: selectedCueBlocks.length > 0
+										? selectedCueBlocks.map(block => `#${block.id} user ${block.user_id}`).join(" + ")
+										: "Select 2 idea blocks to cue together"}
 							</p>
 						</div>
 						<div className="flex shrink-0 items-center gap-2">
@@ -1022,7 +1066,7 @@ export function AdminPage() {
 									Clear
 								</Button>
 							)}
-							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={selectedCueBlocks.length !== 2 || isCreatingManualCue}>
+							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition}>
 								<Link2 className="h-3.5 w-3.5" aria-hidden="true" />
 								{isCreatingManualCue ? "Sending" : "Send cue"}
 							</Button>
@@ -1079,7 +1123,7 @@ export function AdminPage() {
 													variant={isSelectedForCue ? "secondary" : "outline"}
 													className="gap-1"
 													onClick={() => toggleCueBlockSelection(block.id)}
-													disabled={isCreatingManualCue}
+													disabled={isCreatingManualCue || !isExperimentalCondition}
 												>
 													{isSelectedForCue && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
 													{isSelectedForCue ? "Selected" : "Select"}

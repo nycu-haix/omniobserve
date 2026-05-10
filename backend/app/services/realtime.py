@@ -124,6 +124,7 @@ board_blocks: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
 cue_responses: dict[str, list[dict[str, Any]]] = defaultdict(list)
 session_phases: dict[str, str] = defaultdict(lambda: "private")
 session_timers: dict[str, dict[str, Any]] = defaultdict(lambda: {"end_time_ms": 0, "duration_s": 0})
+session_cue_conditions: dict[str, str] = defaultdict(lambda: "experimental")
 
 
 def _now_ms() -> int:
@@ -135,12 +136,23 @@ def _normalize_session_phase(value: Any) -> str:
     return phase if phase in {"private", "group"} else "private"
 
 
+def _normalize_cue_condition(value: Any) -> str:
+    condition = str(value or "experimental").lower()
+    return condition if condition in {"experimental", "control"} else "experimental"
+
+
+def is_similarity_cue_enabled(session_id: str) -> bool:
+    return session_cue_conditions[session_id] == "experimental"
+
+
 def _phase_state_message(session_id: str) -> dict[str, Any]:
     timer = session_timers[session_id]
     return {
         "current_phase": session_phases[session_id],
         "timer_end_time_ms": timer["end_time_ms"],
         "duration_s": timer["duration_s"],
+        "cue_condition": session_cue_conditions[session_id],
+        "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
     }
 
 
@@ -308,6 +320,8 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "private_blocks": private_blocks,
         "current_phase": session_phases[session_id],
         "timer_end_time_ms": session_timers[session_id]["end_time_ms"],
+        "cue_condition": session_cue_conditions[session_id],
+        "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
     }
 
 
@@ -602,11 +616,26 @@ async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin
                     "phase": new_phase,
                     "end_time_ms": session_timers[session_id]["end_time_ms"],
                     "duration_s": session_timers[session_id]["duration_s"],
+                    "cue_condition": session_cue_conditions[session_id],
+                    "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
                     "timestamp_ms": _now_ms(),
                 }
                 await admin_manager.broadcast(session_id, phase_changed_msg)
                 await board_manager.broadcast(session_id, phase_changed_msg)
                 await cue_manager.broadcast(session_id, phase_changed_msg)
+            elif message_type == "set_cue_condition":
+                next_condition = _normalize_cue_condition(payload.get("condition"))
+                session_cue_conditions[session_id] = next_condition
+                cue_condition_msg = {
+                    "type": "cue_condition_changed",
+                    "condition": next_condition,
+                    "cue_condition": next_condition,
+                    "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
+                    "timestamp_ms": _now_ms(),
+                }
+                await admin_manager.broadcast(session_id, cue_condition_msg)
+                await board_manager.broadcast(session_id, cue_condition_msg)
+                await cue_manager.broadcast(session_id, cue_condition_msg)
     except WebSocketDisconnect:
         pass
     except RuntimeError as exc:

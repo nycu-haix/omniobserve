@@ -32,8 +32,8 @@ export function TranscriptLine({ line, onJumpToBlock }: TranscriptLineProps) {
 						{line.time && <span className="whitespace-nowrap text-xs text-muted-foreground">{line.time}</span>}
 					</div>
 				</div>
-				{line.source === "private" && line.linkedBlockId && (
-					<Button className={cn("shrink-0", alignRight ? "self-end" : "self-start")} variant="ghost" size="sm" onClick={() => onJumpToBlock?.(line.linkedBlockId as string)}>
+				{line.source === "private" && line.linkedBlockId && onJumpToBlock && (
+					<Button className={cn("shrink-0", alignRight ? "self-end" : "self-start")} variant="ghost" size="sm" onClick={() => onJumpToBlock(line.linkedBlockId as string)}>
 						<CornerDownRight className="h-4 w-4" />
 						跳至想法
 					</Button>

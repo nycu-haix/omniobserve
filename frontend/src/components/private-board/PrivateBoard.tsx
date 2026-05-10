@@ -34,9 +34,11 @@ type BoardMessage =
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
-	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number };
+	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number; cue_condition?: CueCondition }
+	| { type: "cue_condition_changed"; cue_condition?: CueCondition; condition?: CueCondition };
 
 type SessionPhase = "private" | "group";
+type CueCondition = "experimental" | "control";
 
 interface TranscriptResponse {
 	id: number;
@@ -133,7 +135,8 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
-		message.type === "board_state"
+		message.type === "board_state" ||
+		message.type === "cue_condition_changed"
 	);
 }
 
@@ -555,7 +558,7 @@ function TranscriptLines({
 }: {
 	lines: TranscriptLineType[];
 	emptyText: string;
-	onJumpToBlock: (blockId: string) => void;
+	onJumpToBlock?: (blockId: string) => void;
 	onTranscriptRef: (lineId: string, node: HTMLDivElement | null) => void;
 	highlightedTranscriptId: string | null;
 }) {
@@ -602,9 +605,12 @@ export function PrivateBoard({
 }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState<number>(0);
 	const visiblePhase = controlledPhase ?? currentPhase;
 	const visibleTimerEndTime = controlledTimerEndTime ?? timerEndTime;
+	const canShowIdeaBlocks = cueCondition === "experimental";
+	const visibleActiveTab = !canShowIdeaBlocks && activeTab === "ideablock" ? "transcript" : activeTab;
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
 	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
@@ -770,6 +776,16 @@ export function PrivateBoard({
 			const timer = window.setTimeout(() => {
 				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
 				if (typeof lastMessage.timer_end_time_ms === "number") setTimerEndTime(lastMessage.timer_end_time_ms);
+				if (lastMessage.cue_condition) setCueCondition(lastMessage.cue_condition);
+			}, 0);
+			return () => window.clearTimeout(timer);
+		}
+
+		if (lastMessage.type === "cue_condition_changed") {
+			const timer = window.setTimeout(() => {
+				const nextCondition = lastMessage.cue_condition ?? lastMessage.condition;
+				if (nextCondition) setCueCondition(nextCondition);
+				if (nextCondition === "control") setCues([]);
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}
@@ -784,7 +800,7 @@ export function PrivateBoard({
 		}
 		lastProcessedBoardMessageRef.current = lastMessage;
 
-		if (lastMessage.type === "phase_changed" || lastMessage.type === "board_state") {
+		if (lastMessage.type === "phase_changed" || lastMessage.type === "board_state" || lastMessage.type === "cue_condition_changed") {
 			return;
 		}
 
@@ -824,6 +840,9 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "similarity_cue") {
+				if (cueCondition !== "experimental") {
+					return;
+				}
 				console.info("[private-board] similarity_cue received", {
 					sessionId,
 					participantId,
@@ -854,7 +873,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastMessage, participantId, sessionId, visiblePhase]);
+	}, [cueCondition, lastMessage, participantId, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -941,9 +960,12 @@ export function PrivateBoard({
 
 		const timer = window.setTimeout(() => setHighlightedTranscriptId(null), 1500);
 		return () => window.clearTimeout(timer);
-	}, [highlightedTranscriptId, activeTab]);
+	}, [highlightedTranscriptId, visibleActiveTab]);
 
 	const jumpToBlock = (blockId: string) => {
+		if (!canShowIdeaBlocks) {
+			return;
+		}
 		setActiveTab("ideablock");
 		setHighlightedBlockId(blockId);
 	};
@@ -964,17 +986,17 @@ export function PrivateBoard({
 	};
 
 	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
-		shouldAutoScrollRef.current[activeTab] = isNearScrollBottom(event.currentTarget);
+		shouldAutoScrollRef.current[visibleActiveTab] = isNearScrollBottom(event.currentTarget);
 	};
 
 	useLayoutEffect(() => {
 		const viewport = scrollViewportRef.current;
-		if (!viewport || !shouldAutoScrollRef.current[activeTab]) {
+		if (!viewport || !shouldAutoScrollRef.current[visibleActiveTab]) {
 			return;
 		}
 
 		viewport.scrollTop = viewport.scrollHeight;
-	}, [activeTab, ideaBlocks, publicChatMessages, transcriptLines]);
+	}, [visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
@@ -1165,37 +1187,39 @@ export function PrivateBoard({
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex rounded-lg bg-muted p-1">
 						<Button
-							aria-pressed={activeTab === "transcript"}
+							aria-pressed={visibleActiveTab === "transcript"}
 							className={cn(
 								"transition-all active:translate-y-px active:scale-[0.98]",
-								activeTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+								visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 							)}
-							variant={activeTab === "transcript" ? "default" : "ghost"}
+							variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
 							onClick={() => setActiveTab("transcript")}
 						>
 							逐字稿
 						</Button>
+						{canShowIdeaBlocks && (
+							<Button
+								aria-pressed={activeTab === "ideablock"}
+								className={cn(
+									"transition-all active:translate-y-px active:scale-[0.98]",
+									activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+								)}
+								variant={activeTab === "ideablock" ? "default" : "ghost"}
+								onClick={() => setActiveTab("ideablock")}
+							>
+								Idea Blocks
+							</Button>
+						)}
 						<Button
-							aria-pressed={activeTab === "ideablock"}
+							aria-pressed={visibleActiveTab === "public-chat"}
 							className={cn(
 								"transition-all active:translate-y-px active:scale-[0.98]",
-								activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+								visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 							)}
-							variant={activeTab === "ideablock" ? "default" : "ghost"}
-							onClick={() => setActiveTab("ideablock")}
-						>
-							Idea Blocks
-						</Button>
-						<Button
-							aria-pressed={activeTab === "public-chat"}
-							className={cn(
-								"transition-all active:translate-y-px active:scale-[0.98]",
-								activeTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
-							)}
-							variant={activeTab === "public-chat" ? "default" : "ghost"}
+							variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
 							onClick={() => setActiveTab("public-chat")}
 						>
-							公開訊息
+							聊天室
 						</Button>
 					</div>
 					<div className="flex items-center gap-3">
@@ -1206,7 +1230,7 @@ export function PrivateBoard({
 				</header>
 
 				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
-					{activeTab === "ideablock" && (
+					{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
 						<div className="grid gap-2 pb-3">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
@@ -1230,13 +1254,19 @@ export function PrivateBoard({
 							))}
 						</div>
 					)}
-					{activeTab === "transcript" && (
-						<TranscriptLines lines={transcriptLines} emptyText="尚無逐字稿" onJumpToBlock={jumpToBlock} onTranscriptRef={setTranscriptRef} highlightedTranscriptId={highlightedTranscriptId} />
+					{visibleActiveTab === "transcript" && (
+						<TranscriptLines
+							lines={transcriptLines}
+							emptyText="尚無逐字稿"
+							onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+							onTranscriptRef={setTranscriptRef}
+							highlightedTranscriptId={highlightedTranscriptId}
+						/>
 					)}
-					{activeTab === "public-chat" && <PublicChatMessages messages={publicChatMessages} />}
+					{visibleActiveTab === "public-chat" && <PublicChatMessages messages={publicChatMessages} />}
 				</ScrollArea>
 
-				{activeTab === "ideablock" && (
+				{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<div className="flex items-end gap-2">
@@ -1274,8 +1304,8 @@ export function PrivateBoard({
 						</div>
 					</footer>
 				)}
-				{activeTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
-				{activeTab === "public-chat" && (
+				{visibleActiveTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
+				{visibleActiveTab === "public-chat" && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<PublicChatComposer
@@ -1295,7 +1325,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{visiblePhase === "group" && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
+			{canShowIdeaBlocks && visiblePhase === "group" && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
 		</>
 	);
 }

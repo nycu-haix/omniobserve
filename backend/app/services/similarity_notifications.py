@@ -2,7 +2,7 @@ import time
 
 from ..config import logger
 from ..models import IdeaBlock, Similarity
-from .realtime import board_manager
+from .realtime import board_manager, is_similarity_cue_enabled
 
 
 async def notify_similarity_cue(similarity: Similarity) -> None:
@@ -53,6 +53,17 @@ async def send_similarity_cue(
     similarity_id: int,
     is_same_reason: bool,
 ) -> None:
+    if not is_similarity_cue_enabled(session_name):
+        logger.info(
+            "similarity_cue_suppressed session_name=%s participant_id=%s own_block_id=%s other_block_id=%s similarity_id=%s",
+            session_name,
+            participant_id,
+            own_block.id,
+            other_block.id,
+            similarity_id,
+        )
+        return
+
     update_sent = await board_manager.send_to(
         session_name,
         participant_id,
