@@ -41,6 +41,7 @@ A candidate idea is similar only when it shares a compatible ranking stance with
 Similarity does NOT require the same reason. Two ideas may be similar even when their reasons differ, as long as their ranking stance is compatible.
 
 Generic positive or negative evaluations are not enough. Phrases like "good", "useful", "valuable", "important", "helpful for survival", or "helpful for rescue" do NOT establish similarity unless the idea also gives a concrete ranking signal, comparison, or survival use.
+Do not infer a strong ranking stance from weak wording alone. Words like "useful", "important", or "valuable" are not enough unless the idea clearly implies a priority level, rank movement, or comparison.
 
 # Similarity Criteria
 Mark a candidate as similar only if ALL of the following are true:
@@ -65,9 +66,19 @@ After deciding that a candidate is similar, classify `is_same_reason`:
 
 - `true`: the ranking stance is similar AND the survival rationale, intended use, or reason is also similar.
   Example: both rank the mirror high because it can reflect sunlight to signal rescuers.
+  Use `true` when the main shared rationale is the same, even if one idea adds extra supporting reasons.
+  Compare the primary shared rationale, not the full set of all reasons.
+  Also use `true` when one idea is more detailed, but its main rationale overlaps with the other.
 
 - `false`: the ranking stance is similar BUT the survival rationale, intended use, or reason is different.
   Example: both rank the waterproof sheet high, but one focuses on collecting rainwater while the other focuses on shade or protection.
+  Use `false` only when the primary rationale is genuinely different.
+  Use `false` only when the similar ranking stance comes from different survival mechanisms or intended uses.
+
+Examples:
+- "Mosquito net is useless because there are no mosquitoes" and "Mosquito net is useless because there are no mosquitoes and it may entangle me" => `is_same_reason: true`
+- "Waterproof sheet should rank high because it collects rainwater" and "Waterproof sheet should rank high because it provides shade" => `is_same_reason: false`
+- "Rum should rank high because it disinfects wounds" and "Rum should rank high because it provides calories" => `is_same_reason: false`
 
 # Do NOT Mark As Similar
 Return `id: null` if any of the following apply:
@@ -80,6 +91,8 @@ Return `id: null` if any of the following apply:
 - The ideas compare the same items in opposite directions.
   Example: "GPS is more important than the map" vs "the map is better than GPS."
 - One idea ranks item A above item B, while the other ranks item B above item A.
+- For relative comparisons, the relative order must match. "A above B" is NOT similar to "A and B are both useless" unless both ideas make the same relative ordering claim.
+- Questions, doubts, or feasibility challenges are not similar to positive proposals. If one idea asks whether a use is possible and the other asserts that use as valuable, return `id: null`.
 - The match would not create a meaningful bridge for discussion or consensus-building.
 
 # Selection Rule
@@ -89,10 +102,10 @@ Review the candidate list and choose only the first candidate that satisfies the
 Return JSON only. Do not include Markdown, comments, or extra text.
 
 If a similar idea is found:
-{{"id": 123, "reason": "Briefly explain the shared ranking stance and whether the reason/rationale is the same or different.", "is_same_reason": true}}
+{{"id": 123, "reason": "Briefly explain the shared ranking stance, then compare the primary rationale.", "is_same_reason": true}}
 
 If the ranking stance is similar but the reason is different:
-{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their rationales are different.", "is_same_reason": false}}
+{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their primary rationales are different.", "is_same_reason": false}}
 
 If no candidate has a compatible ranking stance:
 {{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}

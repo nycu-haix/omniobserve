@@ -9,7 +9,7 @@ interface SimilarityCueProps {
 	onDismiss: (cueId: string) => void;
 }
 
-const CUE_AUTO_DISMISS_MS = 500;
+const CUE_AUTO_DISMISS_MS = 5000;
 
 export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
