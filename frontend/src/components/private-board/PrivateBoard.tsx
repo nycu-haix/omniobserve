@@ -622,7 +622,6 @@ export function PrivateBoard({
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -977,16 +976,6 @@ export function PrivateBoard({
 		viewport.scrollTop = viewport.scrollHeight;
 	}, [activeTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
-	useLayoutEffect(() => {
-		const textarea = manualIdeaTextareaRef.current;
-		if (!textarea) {
-			return;
-		}
-
-		textarea.style.height = "44px";
-		textarea.style.height = `${Math.max(44, textarea.scrollHeight)}px`;
-	}, [manualIdeaText]);
-
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
 	};
@@ -1253,9 +1242,8 @@ export function PrivateBoard({
 							<div className="flex items-end gap-2">
 								<div className="relative flex-1">
 									<textarea
-										ref={manualIdeaTextareaRef}
 										aria-label="Manual idea block input"
-										className="block min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+										className="block h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-3 py-2.5 pr-24 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 										placeholder="手動輸入 idea block"
 										value={manualIdeaText}
 										onChange={event => {
