@@ -286,6 +286,7 @@ async def _replace_similarity_pair(
     )
     db.add(similarity)
     idea_block.similarity_id = similar_idea_block_id
+    similar_idea_block.similarity_id = idea_block.id
     await db.flush()
     logger.info(
         "similarity_detection_pair_deleted idea_block_id=%s deleted_count=%s",
@@ -293,12 +294,22 @@ async def _replace_similarity_pair(
         deleted_count,
     )
     logger.info(
-        "similarity_detection_pair_created idea_block_id=%s similar_idea_block_id=%s similarity_id=%s",
+        (
+            "similarity_detection_pair_created idea_block_id=%s idea_block_user_id=%s "
+            "idea_block_similarity_id=%s similar_idea_block_id=%s similar_idea_block_user_id=%s "
+            "similar_idea_block_similarity_id=%s similarity_id=%s"
+        ),
         idea_block.id,
+        idea_block.user_id,
+        idea_block.similarity_id,
         similar_idea_block_id,
+        similar_idea_block.user_id,
+        similar_idea_block.similarity_id,
         similarity.id,
     )
     await db.commit()
+    await db.refresh(idea_block)
+    await db.refresh(similar_idea_block)
     await _notify_similarity_refetch(idea_block, similar_idea_block)
 
 
@@ -351,7 +362,7 @@ async def _notify_similarity_refetch(idea_block: IdeaBlock, similar_idea_block: 
     for participant_id, block_id in targets.items():
         try:
             target_connected = participant_id in board_manager.get_participants(idea_block.session_name)
-            await board_manager.send_to(
+            sent = await board_manager.send_to(
                 idea_block.session_name,
                 participant_id,
                 {
@@ -360,11 +371,15 @@ async def _notify_similarity_refetch(idea_block: IdeaBlock, similar_idea_block: 
                 },
             )
             logger.info(
-                "similarity_detection_refetch_notify_attempted session_name=%s participant_id=%s idea_block_id=%s target_connected=%s",
+                (
+                    "similarity_detection_refetch_notify_attempted session_name=%s participant_id=%s "
+                    "idea_block_id=%s target_connected=%s sent=%s"
+                ),
                 idea_block.session_name,
                 participant_id,
                 block_id,
                 target_connected,
+                sent,
             )
         except Exception as exc:
             logger.warning(

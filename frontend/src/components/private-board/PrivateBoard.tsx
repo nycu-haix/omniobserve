@@ -564,7 +564,17 @@ export function PrivateBoard({
 					throw new Error("Failed to load idea blocks");
 				}
 
-				const ideaBlocksFromDb = ((await response.json()) as IdeaBlockResponse[]).map(ideaBlockResponseToBlock);
+				const ideaBlockResponses = (await response.json()) as IdeaBlockResponse[];
+				console.info("[private-board] loaded idea blocks", {
+					sessionId,
+					participantId,
+					blocks: ideaBlockResponses.map(item => ({
+						id: item.id,
+						hasSimilarity: !!item.similarity_id,
+						similarity_id: item.similarity_id
+					}))
+				});
+				const ideaBlocksFromDb = ideaBlockResponses.map(ideaBlockResponseToBlock);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -625,6 +635,11 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "update_idea_block") {
+				console.info("[private-board] update_idea_block received; refreshing idea blocks", {
+					sessionId,
+					participantId,
+					ideaBlockId: lastMessage.payload.id
+				});
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
@@ -650,7 +665,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ideaBlocks, lastMessage, participantId]);
+	}, [ideaBlocks, lastMessage, participantId, sessionId]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
