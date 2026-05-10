@@ -1,5 +1,5 @@
 import { Activity, Check, ClipboardList, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
@@ -97,8 +97,29 @@ type SessionPhase = "private" | "group";
 const MAX_EVENTS = 80;
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
+const DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH = 320;
+const DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH = 360;
+const MIN_ADMIN_LEFT_SIDEBAR_WIDTH = 280;
+const MIN_ADMIN_RIGHT_SIDEBAR_WIDTH = 320;
+const MIN_ADMIN_CENTER_COLUMN_WIDTH = 520;
+const ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "omni.admin.leftSidebarWidth";
+const ADMIN_RIGHT_SIDEBAR_WIDTH_STORAGE_KEY = "omni.admin.rightSidebarWidth";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MANUAL_CUE_REASON_PREFIX = "Manual cue from admin:";
+
+function getAdminAvailableLayoutWidth() {
+	return window.innerWidth - 32 - 32;
+}
+
+function clampAdminLeftSidebarWidth(width: number, rightSidebarWidth: number) {
+	const maxWidth = Math.max(MIN_ADMIN_LEFT_SIDEBAR_WIDTH, getAdminAvailableLayoutWidth() - rightSidebarWidth - MIN_ADMIN_CENTER_COLUMN_WIDTH);
+	return Math.min(Math.max(width, MIN_ADMIN_LEFT_SIDEBAR_WIDTH), maxWidth);
+}
+
+function clampAdminRightSidebarWidth(width: number, leftSidebarWidth: number) {
+	const maxWidth = Math.max(MIN_ADMIN_RIGHT_SIDEBAR_WIDTH, getAdminAvailableLayoutWidth() - leftSidebarWidth - MIN_ADMIN_CENTER_COLUMN_WIDTH);
+	return Math.min(Math.max(width, MIN_ADMIN_RIGHT_SIDEBAR_WIDTH), maxWidth);
+}
 
 function normalizeSessionPhase(value: unknown): SessionPhase | null {
 	return value === "private" || value === "group" ? value : null;
@@ -379,8 +400,21 @@ export function AdminPage() {
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [privateDurationMinutes, setPrivateDurationMinutes] = useState("5");
 	const [groupDurationMinutes, setGroupDurationMinutes] = useState("15");
+	const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => {
+		const storedWidth = Number(window.localStorage.getItem(ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY));
+		return clampAdminLeftSidebarWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH, DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH);
+	});
+	const [rightSidebarWidth, setRightSidebarWidth] = useState(() => {
+		const storedWidth = Number(window.localStorage.getItem(ADMIN_RIGHT_SIDEBAR_WIDTH_STORAGE_KEY));
+		return clampAdminRightSidebarWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH, DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH);
+	});
+	const [resizeCursor, setResizeCursor] = useState<"col-resize" | null>(null);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const adminLayoutStyle = {
+		"--admin-left-sidebar-width": `${leftSidebarWidth}px`,
+		"--admin-right-sidebar-width": `${rightSidebarWidth}px`
+	} as CSSProperties;
 
 	const loadAdminApiData = useCallback(async () => {
 		setIsApiLoading(true);
@@ -533,8 +567,108 @@ export function AdminPage() {
 		return () => abortController.abort();
 	}, []);
 
+	useEffect(() => {
+		const handleResize = () => {
+			setLeftSidebarWidth(currentLeft => {
+				const nextLeft = clampAdminLeftSidebarWidth(currentLeft, rightSidebarWidth);
+				setRightSidebarWidth(currentRight => clampAdminRightSidebarWidth(currentRight, nextLeft));
+				return nextLeft;
+			});
+		};
+
+		handleResize();
+		window.addEventListener("resize", handleResize);
+		return () => window.removeEventListener("resize", handleResize);
+	}, [rightSidebarWidth]);
+
+	useEffect(() => {
+		window.localStorage.setItem(ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY, String(leftSidebarWidth));
+	}, [leftSidebarWidth]);
+
+	useEffect(() => {
+		window.localStorage.setItem(ADMIN_RIGHT_SIDEBAR_WIDTH_STORAGE_KEY, String(rightSidebarWidth));
+	}, [rightSidebarWidth]);
+
 	const { isConnected: adminConnected, lastMessage: adminLastMessage, sendMessage: sendAdminMessage } = useAdminRealtimeSocket("admin", roomName, recordEvent);
 	const { isConnected: boardConnected, lastMessage: boardLastMessage } = useAdminRealtimeSocket("board", roomName, recordEvent);
+	const handleLeftSidebarResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
+		const startX = event.clientX;
+		const startWidth = leftSidebarWidth;
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			setLeftSidebarWidth(clampAdminLeftSidebarWidth(startWidth + (moveEvent.clientX - startX), rightSidebarWidth));
+		};
+
+		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			setResizeCursor(null);
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		setResizeCursor("col-resize");
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+	const handleRightSidebarResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
+		const startX = event.clientX;
+		const startWidth = rightSidebarWidth;
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			setRightSidebarWidth(clampAdminRightSidebarWidth(startWidth - (moveEvent.clientX - startX), leftSidebarWidth));
+		};
+
+		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			setResizeCursor(null);
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		setResizeCursor("col-resize");
+		document.body.style.cursor = "col-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+	const handleLeftSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowRight" ? 1 : -1;
+		setLeftSidebarWidth(current => clampAdminLeftSidebarWidth(current + direction * 24, rightSidebarWidth));
+	};
+	const handleRightSidebarResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowLeft" ? 1 : -1;
+		setRightSidebarWidth(current => clampAdminRightSidebarWidth(current + direction * 24, leftSidebarWidth));
+	};
 	const startPhase = (phase: SessionPhase, minutesValue: string) => {
 		sendAdminMessage({ type: "switch_phase", phase, duration_s: durationSecondsFromMinutes(minutesValue) });
 	};
@@ -675,8 +809,23 @@ export function AdminPage() {
 	};
 
 	return (
-		<main className="grid min-h-screen grid-cols-1 gap-4 bg-muted/40 p-4 text-foreground xl:grid-cols-[320px_minmax(0,1fr)_360px]">
-			<aside className="flex min-h-0 flex-col gap-4">
+		<main
+			className="grid min-h-screen grid-cols-1 gap-4 bg-muted/40 p-4 text-foreground xl:grid-cols-[var(--admin-left-sidebar-width)_minmax(0,1fr)_var(--admin-right-sidebar-width)]"
+			style={adminLayoutStyle}
+		>
+			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
+			<aside className="relative flex min-h-0 min-w-[var(--admin-left-sidebar-width)] flex-col gap-4">
+				<button
+					type="button"
+					className="absolute -right-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+					aria-label="調整左側 Admin 欄寬"
+					aria-orientation="vertical"
+					aria-valuemin={MIN_ADMIN_LEFT_SIDEBAR_WIDTH}
+					aria-valuenow={leftSidebarWidth}
+					role="separator"
+					onPointerDown={handleLeftSidebarResizeStart}
+					onKeyDown={handleLeftSidebarResizeKeyDown}
+				/>
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
 					<div className="mb-4 flex items-start justify-between gap-3">
 						<div className="min-w-0">
@@ -950,7 +1099,18 @@ export function AdminPage() {
 				</ScrollArea>
 			</section>
 
-			<aside className="flex min-h-0 flex-col gap-4">
+			<aside className="relative flex min-h-0 min-w-[var(--admin-right-sidebar-width)] flex-col gap-4">
+				<button
+					type="button"
+					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+					aria-label="調整右側 Admin 欄寬"
+					aria-orientation="vertical"
+					aria-valuemin={MIN_ADMIN_RIGHT_SIDEBAR_WIDTH}
+					aria-valuenow={rightSidebarWidth}
+					role="separator"
+					onPointerDown={handleRightSidebarResizeStart}
+					onKeyDown={handleRightSidebarResizeKeyDown}
+				/>
 				<section className="rounded-lg border bg-card p-4 text-card-foreground">
 					<header className="mb-3 flex items-center gap-2">
 						<ClipboardList className="h-4 w-4 text-muted-foreground" aria-hidden="true" />

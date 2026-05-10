@@ -41,7 +41,7 @@ interface RankingSnapshot {
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
-const MIN_PRIVATE_BOARD_WIDTH = 360;
+const MIN_PRIVATE_BOARD_WIDTH = 520;
 const MIN_MEETING_COLUMN_WIDTH = 520;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
 const DEFAULT_JITSI_HEIGHT = 120;
@@ -829,7 +829,7 @@ export default function MeetingRoom() {
 				</div>
 			)}
 
-			<aside className="relative min-h-0">
+			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
 				<button
 					type="button"
 					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
