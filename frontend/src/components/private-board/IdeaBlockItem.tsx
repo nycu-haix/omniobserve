@@ -1,5 +1,5 @@
 import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -28,6 +28,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const [isDeleting, setIsDeleting] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+	const aiSummaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const isGenerating = block.status === "generating";
 	const Chevron = block.expanded ? ChevronDown : ChevronRight;
@@ -36,7 +37,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const titleChanged = draftTitle.trim() !== savedTitle.trim();
 	const titleTooLong = draftTitle.trim().length > 10;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving;
-	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
+	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
 	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
@@ -54,6 +55,16 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 		return () => window.clearTimeout(timer);
 	}, [block.aiSummary, block.summary, block.transcript, block.id]);
+
+	useLayoutEffect(() => {
+		const textarea = aiSummaryTextareaRef.current;
+		if (!textarea || !block.expanded || isGenerating) {
+			return;
+		}
+
+		textarea.style.height = "auto";
+		textarea.style.height = `${textarea.scrollHeight}px`;
+	}, [block.expanded, draftAiSummary, isGenerating]);
 
 	const cancelAiSummaryEditing = () => {
 		setDraftAiSummary(savedAiSummary);
@@ -176,9 +187,10 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			{isEditingTitle ? (
 				<input
 					className={cn(
-						"min-w-0 rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
+						"min-w-12 max-w-full justify-self-start rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
 						titleTooLong && "border-destructive focus:border-destructive"
 					)}
+					style={{ width: `${Math.max(4, Math.min(draftTitle.length + 1, 24))}ch` }}
 					value={draftTitle}
 					onClick={event => event.stopPropagation()}
 					onChange={event => setDraftTitle(event.target.value)}
@@ -196,7 +208,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					autoFocus
 				/>
 			) : (
-				<span className="min-w-0 max-w-full overflow-hidden break-words text-sm leading-6">{isGenerating ? "正在生成..." : rowLabel}</span>
+				<span className="block w-fit min-w-0 max-w-full justify-self-start whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? "正在生成..." : rowLabel}</span>
 			)}
 			{!isGenerating && (
 				<div className="relative flex flex-shrink-0 items-center gap-2">
@@ -301,8 +313,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					)}
 
 					<textarea
+						ref={aiSummaryTextareaRef}
 						rows={1}
-						className="min-h-11 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						className="min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						value={draftAiSummary}
 						onChange={event => setDraftAiSummary(event.target.value)}
 					/>
