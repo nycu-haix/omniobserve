@@ -10,7 +10,10 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import TaskItem
 from ..schemas import ApiError
-from ..task_config import RANKING_ITEM_DISPLAY_NAMES, RANKING_ITEMS
+from ..task_config import RANKING_ITEMS, TASK_CONFIG
+
+
+TASK_ITEM_CONFIGS_BY_ID = {item["id"]: item for item in TASK_CONFIG["items"]}
 
 
 async def build_task_item_ids_with_llm(text: str) -> list[int]:
@@ -37,13 +40,18 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
         for index, item in enumerate(RANKING_ITEMS, start=1)
     )
     system_prompt = (
-        "You are a survival-task assistant. The predefined item list uses 1-based ids:\n"
+        "You classify user text for the Lost at Sea ranking task.\n"
+        "Use only this exact TASK_ITEMS list. The number at the start of each line is the "
+        "1-based task_item_id that must be returned:\n"
         f"{item_lines}\n\n"
-        "Given the user input, decide which list items are being discussed. "
+        "Given the user input, decide which TASK_ITEMS are being discussed. "
         "The input may be in Mandarin Chinese, English, or mixed language. "
-        "Match against the item id, Chinese display name, and English aliases. "
+        "Match against config_id, Chinese label, English label, and aliases. "
         "Return every matching item mentioned or clearly referred to in the input; "
         "do not limit the answer to only the most important or most recent item. "
+        "If the user says medical alcohol, high-proof alcohol, disinfectant alcohol, "
+        "or alcohol for disinfection, map it to the current TASK_ITEMS entry for rum. "
+        "Do not invent items, do not return zero-based indices, and do not return config_id strings. "
         'Return only JSON in this exact shape: {"task_item_ids":[...]} . '
         'If unrelated, return {"task_item_ids":[]}.'
     )
@@ -173,8 +181,12 @@ def _normalize_task_item_ids(values: list[Any]) -> list[int]:
 
 
 def _format_ranking_item_line(index: int, item_id: str) -> str:
-    chinese_name, english_aliases = RANKING_ITEM_DISPLAY_NAMES[item_id]
-    return f"{index}. {item_id} - {chinese_name} ({english_aliases})"
+    item = TASK_ITEM_CONFIGS_BY_ID[item_id]
+    aliases = ", ".join(dict.fromkeys([item["label_en"], *item["aliases"]]))
+    return (
+        f'{index}. task_item_id={index}; config_id="{item_id}"; '
+        f'zh="{item["label_zh"]}"; en="{item["label_en"]}"; aliases="{aliases}"'
+    )
 
 
 def _build_mock_task_item_ids() -> list[int] | None:
