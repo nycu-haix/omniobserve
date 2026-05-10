@@ -40,6 +40,8 @@ A candidate idea is similar only when it shares a compatible ranking stance with
 
 Similarity does NOT require the same reason. Two ideas may be similar even when their reasons differ, as long as their ranking stance is compatible.
 
+Generic positive or negative evaluations are not enough. Phrases like "good", "useful", "valuable", "important", "helpful for survival", or "helpful for rescue" do NOT establish similarity unless the idea also gives a concrete ranking signal, comparison, or survival use.
+
 # Similarity Criteria
 Mark a candidate as similar only if ALL of the following are true:
 
@@ -49,7 +51,13 @@ The two ideas discuss the same item, the same comparison pair, or the same survi
 2. Compatible ranking stance
 The two ideas imply a similar priority direction or practical ranking conclusion.
 
-3. Meaningful discussion bridge
+3. Concrete evidence
+At least one of the following must be present:
+- an explicit rank, rank range, priority level, or order,
+- a direct comparison between items,
+- a concrete survival/rescue use that explains why the item should move up or down in the ranking.
+
+4. Meaningful discussion bridge
 The match would reasonably help a participant feel: "Someone else has a similar ranking intuition, so I can build on or compare with that idea."
 
 # Same Reason Classification
@@ -66,6 +74,7 @@ Return `id: null` if any of the following apply:
 
 - The ideas merely mention the same item.
 - Both ideas say an item is useful, but do not imply a similar ranking direction.
+- Both ideas only use generic praise or importance words, such as "good", "great", "valuable", "important", "useful", "helpful for survival", or "helpful for rescue".
 - The practical ranking conclusion is unclear, neutral, or too generic.
 - One idea prioritizes an item while the other deprioritizes it.
 - The ideas compare the same items in opposite directions.
