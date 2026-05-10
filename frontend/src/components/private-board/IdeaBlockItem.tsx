@@ -39,12 +39,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
-	const similarityReasonLabel =
-		block.similarityIsSameReason == null
-			? null
-			: block.similarityIsSameReason
-				? "Same reason"
-				: "Different reason";
+	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -291,7 +286,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>}
 
 			{block.expanded && !isGenerating && (
-				<div className={cn("ml-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
+				<div className={cn("ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
 					{shouldShowCue && (
 						<div className="flex flex-wrap gap-1.5">
 							<Badge className="w-fit" variant="secondary">
@@ -306,7 +301,8 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					)}
 
 					<textarea
-						className="min-h-28 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						rows={1}
+						className="min-h-11 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						value={draftAiSummary}
 						onChange={event => setDraftAiSummary(event.target.value)}
 					/>
