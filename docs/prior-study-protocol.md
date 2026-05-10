@@ -78,7 +78,7 @@ Subject: Invitation to participate in an online collaboration study
 
 您好，
 
-我們正在進行一項關於線上協作討論系統的使用者研究，想邀請您參與一次約 60 到 90 分鐘的實驗。
+我們是顏羽君教授 HAIX Lab 的研究團隊，正在進行一項關於線上協作討論系統的使用者研究，想邀請您參與一次約 60 到 90 分鐘的實驗。
 
 在研究中，您會和另外兩位參與者一起完成一個小組決策任務。流程包含個人思考、小組線上討論，以及實驗後的簡短訪談。過程中我們會記錄系統操作資料、討論內容與訪談錄音。資料只會用於學術研究分析，並會以匿名方式整理。
 
@@ -88,11 +88,10 @@ Subject: Invitation to participate in an online collaboration study
 2. 願意在實驗中進行個人思考與小組討論。
 3. 實驗前請不要搜尋或查詢任務相關答案。
 
-實驗時間：約 60 到 90 分鐘  
-實驗地點：[填入地點]  
-研究團隊：[填入研究團隊名稱]
+實驗長度：約 60 到 90 分鐘  
+研究團隊：顏羽君教授 HAIX Lab 研究團隊
 
-若您願意參與，請回覆您方便的時段。謝謝！
+若您願意參與，請回覆確認，我們將另行提供實驗時間、地點及系統連結。謝謝！
 
 ## 4. Experiment Timeline
 
@@ -126,9 +125,9 @@ If the team has fewer researchers, the admin can also observe one participant. T
 
 ## 6. Opening Script
 
-Lead facilitator reads this before participants move into separate rooms.
+Each participant goes directly to their assigned room upon arrival. The researcher in each room reads this individually.
 
-> 大家好，謝謝你們今天來參與我們的使用者研究。
+> 你好，謝謝你今天來參與我們的使用者研究。
 >
 > 今天的研究會請你們使用一個線上協作討論系統，和另外兩位參與者一起完成一個小組決策任務。整個流程包含三個部分：第一，個人思考；第二，小組討論；第三，簡短訪談。
 >
@@ -138,13 +137,13 @@ Lead facilitator reads this before participants move into separate rooms.
 >
 > 在實驗過程中，請不要使用 Google、ChatGPT、搜尋引擎或其他外部資料查詢任務答案，因為我們想觀察的是你們如何根據自己的判斷進行討論。
 
-## 7. Room Transition Script
+## 7. Individual Room Script
 
-> 接下來我們會請三位參與者分別到不同教室。你們會透過系統中的語音和文字功能和另外兩位參與者討論。
+> 今天每位參與者都會在自己的教室裡進行實驗，你們會透過系統中的語音和文字功能和其他參與者討論。
 >
-> 分開教室的原因是，我們想模擬線上討論情境，讓大家主要透過系統進行互動，而不是依靠現場眼神或肢體動作。
+> 這樣安排的原因是，我們想模擬線上討論情境，讓大家主要透過系統進行互動，而不是依靠現場眼神或肢體動作。
 >
-> 每間教室會有一位研究者協助設備設定。研究者會觀察你和系統互動的情況，方便之後訪談時詢問你的使用經驗。研究者不會把你的個人想法直接分享給其他參與者。
+> 我會在這裡協助你設備設定，也會觀察你和系統互動的情況，方便之後訪談時詢問你的使用經驗。我不會把你的個人想法直接分享給其他參與者。
 
 ## 8. Interface Familiarization
 
@@ -175,21 +174,21 @@ Before continuing, confirm each participant can:
 - Recognize which mic state is active.
 - Drag or update ranking items.
 
-## 9. Practice Task
+## 9. Interface Walkthrough
 
-Use a simple unrelated task. Do not use Lost at Sea yet.
+The interface loads the actual task content (Lost at Sea) from the start; there is no separate practice topic. The researcher walks the participant through each feature area one by one and confirms familiarity before proceeding.
 
-Example:
+Suggested walkthrough order:
 
-> 假設你明天要去無人島一天，只能帶三樣東西。請先用個人想法記錄功能說出或寫下一個理由，再用公開麥克風向大家說一句話。
+1. **Task area**: Ask the participant to read the task description and item list on screen, and confirm they can see all content.
+2. **Private thought recording**: Ask the participant to try typing or speaking a thought using the private input feature, and confirm they understand it is private and not visible to others.
+3. **Public mic**: Ask the participant to check the mic status indicator, try switching it, and say a sentence — confirm they understand public speech is heard by other participants.
+4. **Group chat**: Ask the participant to try sending a text message in the group chat, and confirm they can find the input field.
+5. **Ranking interface**: Ask the participant to try dragging or updating one item’s rank, and confirm the ranking interaction works for them.
 
-The practice should confirm:
+After the walkthrough, the researcher says:
 
-- Participants understand private vs public input.
-- Participants can speak publicly.
-- Participants can record private thoughts.
-- Participants can use the ranking interface.
-- Participants understand that private thoughts are not automatically shared.
+> 好，你已經知道每個區塊怎麼用了。接下來我會說明今天的正式任務內容。
 
 ## 10. Task Briefing: Lost at Sea
 
@@ -284,13 +283,13 @@ The confederate should:
 
 The confederate role must be explained during debrief, and participants must be allowed to withdraw their data afterward.
 
-## 13. Final Submission
+## 13. End of Discussion
 
 ### 13.1 Script
 
-> 時間到。請你們現在提交一份小組最終排序。
->
-> 這份排序應該代表你們小組最後共同決定的結果。如果沒有完全同意，也請選出目前最能代表小組共識的版本。
+> 時間到，小組討論到此結束。
+
+The researcher captures the current state of the group ranking directly from the interface. No submission action is required from participants.
 
 ### 13.2 Data to Capture
 
