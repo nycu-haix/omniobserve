@@ -635,6 +635,7 @@ export function PrivateBoard({
 	const lastProcessedBoardMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
+	const lastVisibleActiveTabRef = useRef<BoardTab>(visibleActiveTab);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
 		transcript: true,
 		ideablock: true,
@@ -993,6 +994,17 @@ export function PrivateBoard({
 
 	useLayoutEffect(() => {
 		const viewport = scrollViewportRef.current;
+		const didEnterTranscript = lastVisibleActiveTabRef.current !== "transcript" && visibleActiveTab === "transcript";
+		lastVisibleActiveTabRef.current = visibleActiveTab;
+
+		if (didEnterTranscript) {
+			shouldAutoScrollRef.current.transcript = true;
+			if (viewport) {
+				viewport.scrollTop = viewport.scrollHeight;
+			}
+			return;
+		}
+
 		if (!viewport || !shouldAutoScrollRef.current[visibleActiveTab]) {
 			return;
 		}
