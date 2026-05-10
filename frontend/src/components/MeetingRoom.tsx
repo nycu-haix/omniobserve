@@ -157,6 +157,13 @@ function isPhaseChangedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
 }
 
+function isJoinRejectedMessage(message: object | null): message is {
+	type: "join_rejected";
+	message?: string;
+} {
+	return !!message && "type" in message && message.type === "join_rejected";
+}
+
 function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSeaItem; rankDelta?: number; onPreview: (item: LostAtSeaItem) => void }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
@@ -281,6 +288,7 @@ export default function MeetingRoom() {
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId);
+	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = micMode !== "off" && !!audioError;
@@ -650,6 +658,23 @@ export default function MeetingRoom() {
 					<p className="text-sm leading-6 text-muted-foreground">
 						目前 URL 的 <span className="font-mono text-foreground">id</span> 是「{participantId}」，但 Participant ID 必須是整數。請回首頁重新產生會議連結。
 					</p>
+					<Button type="button" onClick={() => window.location.assign(window.location.pathname)}>
+						回到設定首頁
+					</Button>
+				</section>
+			</main>
+		);
+	}
+
+	if (joinRejectedMessage) {
+		return (
+			<main className="grid min-h-screen place-items-center bg-background p-4 text-foreground">
+				<section className="grid max-w-md gap-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+					<div className="flex items-center gap-3">
+						<AlertCircle className="h-5 w-5 text-destructive" aria-hidden="true" />
+						<h1 className="text-lg font-semibold">不能進入這個 session</h1>
+					</div>
+					<p className="text-sm leading-6 text-muted-foreground">{joinRejectedMessage}</p>
 					<Button type="button" onClick={() => window.location.assign(window.location.pathname)}>
 						回到設定首頁
 					</Button>

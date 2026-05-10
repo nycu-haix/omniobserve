@@ -25,6 +25,9 @@ from .transcripts import save_ws_transcript_segment
 
 DEFAULT_RANKING_ITEMS = RANKING_ITEMS
 DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
+DUPLICATE_CONNECTION_CLOSE_CODE = 1008
+DUPLICATE_PARTICIPANT_MESSAGE = "這個 participant ID 已經在此 session 中，不能重複進入。"
+DUPLICATE_ADMIN_MESSAGE = "這個 admin 已經在此 session 中，不能重複進入。"
 
 
 class ConnectionManager:
@@ -32,13 +35,40 @@ class ConnectionManager:
         self.connections: dict[str, dict[str, WebSocket]] = defaultdict(dict)
         self._lock = asyncio.Lock()
 
-    async def connect(self, session_id: str, participant_id: str, websocket: WebSocket) -> None:
+    async def connect(
+        self,
+        session_id: str,
+        participant_id: str,
+        websocket: WebSocket,
+        *,
+        reject_duplicate: bool = True,
+        duplicate_message: str = DUPLICATE_PARTICIPANT_MESSAGE,
+        duplicate_error_code: str = "DUPLICATE_PARTICIPANT",
+    ) -> bool:
         await websocket.accept()
         async with self._lock:
             previous = self.connections[session_id].get(participant_id)
             if previous and previous.client_state == WebSocketState.CONNECTED:
+                if reject_duplicate:
+                    await self._send_json_safely(
+                        websocket,
+                        {
+                            "type": "join_rejected",
+                            "error_code": duplicate_error_code,
+                            "message": duplicate_message,
+                            "session_name": session_id,
+                            "participant_id": participant_id,
+                        },
+                    )
+                    await self._close_safely(
+                        websocket,
+                        code=DUPLICATE_CONNECTION_CLOSE_CODE,
+                        reason=duplicate_message,
+                    )
+                    return False
                 await self._close_safely(previous, code=1000)
             self.connections[session_id][participant_id] = websocket
+            return True
 
     async def disconnect(self, session_id: str, participant_id: str, websocket: WebSocket | None = None) -> None:
         async with self._lock:
@@ -92,9 +122,9 @@ class ConnectionManager:
             logger.warning("Failed to send WebSocket payload: %s", exc)
             return False
 
-    async def _close_safely(self, websocket: WebSocket, *, code: int) -> None:
+    async def _close_safely(self, websocket: WebSocket, *, code: int, reason: str | None = None) -> None:
         try:
-            await websocket.close(code=code)
+            await websocket.close(code=code, reason=reason or "")
         except Exception:
             return
 
@@ -351,7 +381,14 @@ def _apply_ranking_move(items: list[str], item_id: str, to_index: int) -> list[s
 
 
 async def handle_board_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
-    await board_manager.connect(session_id, participant_id, websocket)
+    connected = await board_manager.connect(session_id, participant_id, websocket)
+    if not connected:
+        logger.info(
+            "board ws duplicate rejected session_id=%s participant_id=%s",
+            session_id,
+            participant_id,
+        )
+        return
     logger.info(
         "board ws connected session_id=%s participant_id=%s participants=%s",
         session_id,
@@ -558,7 +595,20 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
 
 
 async def handle_admin_websocket(websocket: WebSocket, *, session_id: str, admin_id: str) -> None:
-    await admin_manager.connect(session_id, admin_id, websocket)
+    connected = await admin_manager.connect(
+        session_id,
+        admin_id,
+        websocket,
+        duplicate_message=DUPLICATE_ADMIN_MESSAGE,
+        duplicate_error_code="DUPLICATE_ADMIN",
+    )
+    if not connected:
+        logger.info(
+            "admin ws duplicate rejected session_id=%s admin_id=%s",
+            session_id,
+            admin_id,
+        )
+        return
     logger.info(
         "admin ws connected session_id=%s admin_id=%s admins=%s",
         session_id,
@@ -695,7 +745,14 @@ async def _handle_board_block_message(
 
 
 async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
-    await cue_manager.connect(session_id, participant_id, websocket)
+    connected = await cue_manager.connect(session_id, participant_id, websocket)
+    if not connected:
+        logger.info(
+            "cue ws duplicate rejected session_id=%s participant_id=%s",
+            session_id,
+            participant_id,
+        )
+        return
     await cue_manager.send_to(
         session_id,
         participant_id,
@@ -741,7 +798,14 @@ async def handle_cue_websocket(websocket: WebSocket, *, session_id: str, partici
 
 
 async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
-    await presence_manager.connect(session_id, participant_id, websocket)
+    connected = await presence_manager.connect(session_id, participant_id, websocket)
+    if not connected:
+        logger.info(
+            "presence ws duplicate rejected session_id=%s participant_id=%s",
+            session_id,
+            participant_id,
+        )
+        return
     await presence_manager.send_to(
         session_id,
         participant_id,
@@ -811,7 +875,14 @@ async def handle_presence_websocket(websocket: WebSocket, *, session_id: str, pa
 
 
 async def handle_audio_websocket(websocket: WebSocket, *, session_id: str, participant_id: str) -> None:
-    await audio_manager.connect(session_id, participant_id, websocket)
+    connected = await audio_manager.connect(session_id, participant_id, websocket)
+    if not connected:
+        logger.info(
+            "audio ws duplicate rejected session_id=%s participant_id=%s",
+            session_id,
+            participant_id,
+        )
+        return
     state = AudioConnectionState(websocket=websocket)
     audio_connections[session_id][participant_id] = state
     transcript_segments = []

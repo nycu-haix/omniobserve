@@ -1,4 +1,4 @@
-import { Activity, Check, ClipboardList, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import { Activity, AlertCircle, Check, ClipboardList, FileText, Lightbulb, Link2, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { cn } from "../lib/utils";
@@ -206,6 +206,10 @@ function isBoardStateMessage(message: RealtimeMessage | null): message is BoardS
 	return message?.type === "board_state";
 }
 
+function isJoinRejectedMessage(message: RealtimeMessage | null): message is RealtimeMessage & { type: "join_rejected"; message?: string } {
+	return message?.type === "join_rejected";
+}
+
 function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 	return (
 		typeof value === "object" &&
@@ -303,8 +307,11 @@ function useAdminRealtimeSocket(source: "admin" | "board", sessionId: string, on
 				onEventRef.current(source, parsedMessage);
 			};
 
-			socket.onclose = () => {
+			socket.onclose = event => {
 				setIsConnected(false);
+				if (event.code === 1008) {
+					return;
+				}
 				if (!disposed && retryCountRef.current < 5) {
 					retryCountRef.current += 1;
 					retryTimerRef.current = window.setTimeout(connect, 3000);
@@ -601,6 +608,7 @@ export function AdminPage() {
 
 	const { isConnected: adminConnected, lastMessage: adminLastMessage, sendMessage: sendAdminMessage } = useAdminRealtimeSocket("admin", roomName, recordEvent);
 	const { isConnected: boardConnected, lastMessage: boardLastMessage } = useAdminRealtimeSocket("board", roomName, recordEvent);
+	const joinRejectedMessage = (isJoinRejectedMessage(adminLastMessage) ? adminLastMessage.message : null) || (isJoinRejectedMessage(boardLastMessage) ? boardLastMessage.message : null);
 	const handleLeftSidebarResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
 		const resizeHandle = event.currentTarget;
@@ -823,6 +831,23 @@ export function AdminPage() {
 			setUndoingManualCueId(null);
 		}
 	};
+
+	if (joinRejectedMessage) {
+		return (
+			<main className="grid min-h-screen place-items-center bg-muted/40 p-4 text-foreground">
+				<section className="grid max-w-md gap-4 rounded-lg border bg-card p-6 text-card-foreground shadow-sm">
+					<div className="flex items-center gap-3">
+						<AlertCircle className="h-5 w-5 text-destructive" aria-hidden="true" />
+						<h1 className="text-lg font-semibold">不能進入這個 session</h1>
+					</div>
+					<p className="text-sm leading-6 text-muted-foreground">{joinRejectedMessage}</p>
+					<Button type="button" onClick={() => window.location.assign("/")}>
+						回到首頁
+					</Button>
+				</section>
+			</main>
+		);
+	}
 
 	return (
 		<main

@@ -66,6 +66,9 @@ export function useWebSocket(
 					wasClean: event.wasClean
 				});
 				setIsConnected(false);
+				if (event.code === 1008) {
+					return;
+				}
 				if (!disposed && retryCountRef.current < 5) {
 					retryCountRef.current += 1;
 					console.info("[board-ws] reconnect scheduled", { retry: retryCountRef.current });
