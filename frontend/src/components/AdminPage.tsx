@@ -1,6 +1,7 @@
 import { AlertCircle, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { formatParticipantDisplayName } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import type { ParticipantPresence } from "../services/presence";
@@ -667,6 +668,20 @@ export function AdminPage() {
 	const [rankingsCopied, setRankingsCopied] = useState(false);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const participantNameById = useMemo(() => {
+		const nextParticipantNameById = new Map<string, string>();
+		participants.forEach(participant => {
+			nextParticipantNameById.set(participant.id, formatParticipantDisplayName(participant.id, participant.display_name) ?? participant.id);
+		});
+		return nextParticipantNameById;
+	}, [participants]);
+	const getParticipantLabel = useCallback(
+		(participantId: string | number | null | undefined) => {
+			const normalizedParticipantId = participantId == null ? "" : String(participantId);
+			return participantNameById.get(normalizedParticipantId) ?? formatParticipantDisplayName(normalizedParticipantId) ?? normalizedParticipantId;
+		},
+		[participantNameById]
+	);
 	const adminLayoutStyle = {
 		"--admin-left-sidebar-width": `${leftSidebarWidth}px`,
 		"--admin-right-sidebar-width": `${rightSidebarWidth}px`
@@ -1004,7 +1019,7 @@ export function AdminPage() {
 		const items = normalizeRankingItemIds(ranking.items, defaultRankingItemIds);
 		return {
 			key: `private-${participantId}`,
-			label: `User ${participantId}`,
+			label: getParticipantLabel(participantId),
 			revision: ranking.revision,
 			rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
 		};
@@ -1016,7 +1031,7 @@ export function AdminPage() {
 
 		const privateOrderedItemsByUser = privateRankingEntries.map(([, ranking]) => normalizeRankingItemIds(ranking.items, defaultRankingItemIds));
 
-		const headers = ["排名", "公共排序", ...privateRankingEntries.map(([participantId]) => `User ${participantId}`)];
+		const headers = ["排名", "公共排序", ...privateRankingEntries.map(([participantId]) => getParticipantLabel(participantId))];
 
 		const rows = Array.from({ length: maxLength }, (_, index) => {
 			const rank = String(index + 1);
@@ -1327,18 +1342,18 @@ export function AdminPage() {
 						{participants.length > 0 ? (
 							<div className="grid gap-2">
 								{participants.map(participant => (
-									<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm">
+									<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm" title={`Participant ID ${participant.id}`}>
 										{(() => {
 											const latestTranscript = latestTranscripts[participant.id];
 											return (
 												<>
 													<div className="flex items-center justify-between gap-3">
-														<span className="min-w-0 truncate font-medium">{participant.display_name || participant.id}</span>
+														<span className="min-w-0 truncate font-medium">{getParticipantLabel(participant.id)}</span>
 														<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
 													</div>
 													<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
 														<span className="truncate">ID {participant.id}</span>
-														<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "off"}</span>
+														<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "mic off"}</span>
 													</div>
 													{latestTranscript && (
 														<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
@@ -1419,7 +1434,7 @@ export function AdminPage() {
 						</Button>
 						{participantFilterOptions.map(userId => (
 							<Button key={userId} type="button" size="sm" variant={selectedUserId === userId ? "secondary" : "outline"} onClick={() => setSelectedUserId(userId)}>
-								User {userId}
+								{getParticipantLabel(userId)}
 							</Button>
 						))}
 					</div>
@@ -1433,7 +1448,7 @@ export function AdminPage() {
 								{!isExperimentalCondition
 									? "Control condition: similarity cues are disabled"
 									: selectedCueBlocks.length > 0
-										? selectedCueBlocks.map(block => `#${block.id} user ${block.user_id}`).join(" + ")
+										? selectedCueBlocks.map(block => `#${block.id} ${getParticipantLabel(block.user_id)}`).join(" + ")
 										: "Select 2 idea blocks to cue together"}
 							</p>
 						</div>
@@ -1490,7 +1505,9 @@ export function AdminPage() {
 									<article key={block.id} className={cn("rounded-lg border bg-background p-3 transition-colors", isSelectedForCue && "border-primary bg-primary/5")}>
 										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 											<div className="flex min-w-0 items-center gap-2">
-												<Badge variant="outline">user {block.user_id}</Badge>
+												<Badge variant="outline" title={`Participant ID ${block.user_id}`}>
+													{getParticipantLabel(block.user_id)}
+												</Badge>
 												<span className="truncate text-sm font-medium">idea block #{block.id}</span>
 											</div>
 											<div className="flex items-center gap-2">
@@ -1682,7 +1699,9 @@ export function AdminPage() {
 											<article key={item.id} className="rounded-lg border bg-background p-3 text-sm">
 												<div className="mb-2 flex flex-wrap items-center justify-between gap-2">
 													<div className="flex items-center gap-2">
-														<Badge variant="outline">user {item.user_id}</Badge>
+														<Badge variant="outline" title={`Participant ID ${item.user_id}`}>
+															{getParticipantLabel(item.user_id)}
+														</Badge>
 														<span className="font-medium">#{item.id}</span>
 													</div>
 													<span className="text-xs text-muted-foreground">{formatApiTime(item.time_stamp)}</span>

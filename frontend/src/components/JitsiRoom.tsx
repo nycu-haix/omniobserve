@@ -1,7 +1,7 @@
 import { JitsiMeeting } from "@jitsi/react-sdk";
 import type IJitsiMeetExternalApi from "@jitsi/react-sdk/lib/types/IJitsiMeetExternalApi";
 import { Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
@@ -14,6 +14,16 @@ interface JitsiRoomProps {
 }
 
 export type JitsiConnectionStatus = "loading" | "connected" | "closed" | "unavailable";
+
+const JITSI_AUDIO_SYNC_RECHECK_DELAY_MS = 250;
+const JITSI_AUDIO_JOIN_RECHECK_DELAY_MS = 1000;
+
+type JitsiEventListener = (...args: unknown[]) => void;
+
+interface JitsiAudioMuteStatusEvent {
+	muted?: boolean;
+	isMuted?: boolean;
+}
 
 function parseJitsiDomain(meetingDomain?: string): string | null {
 	if (!meetingDomain) {
@@ -45,24 +55,68 @@ function renderJitsiError(title: string, message: string) {
 	);
 }
 
-async function setJitsiAudioMuted(api: IJitsiMeetExternalApi | null, muted: boolean) {
-	if (!api) {
-		return;
-	}
-
-	const currentlyMuted = await api.isAudioMuted();
-	if (currentlyMuted !== muted) {
-		api.executeCommand("toggleAudio");
-	}
+function wait(milliseconds: number): Promise<void> {
+	return new Promise(resolve => window.setTimeout(resolve, milliseconds));
 }
 
 export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
+	const desiredAudioMutedRef = useRef(micMode !== "public");
+	const audioSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
+	const jitsiListenersRef = useRef<{ api: IJitsiMeetExternalApi; listeners: [string, JitsiEventListener][] } | null>(null);
 	const [readyMeetingKey, setReadyMeetingKey] = useState<string | null>(null);
 	const domain = parseJitsiDomain(meetingDomain);
 	const normalizedRoomName = roomName?.trim();
 	const meetingKey = domain && normalizedRoomName ? `${domain}/${normalizedRoomName}` : null;
 	const isReady = readyMeetingKey === meetingKey;
+
+	const syncJitsiAudioMuted = useCallback((reason: string) => {
+		audioSyncQueueRef.current = audioSyncQueueRef.current
+			.catch(() => undefined)
+			.then(async () => {
+				const api = apiRef.current;
+				if (!api) {
+					return;
+				}
+
+				try {
+					const targetMuted = desiredAudioMutedRef.current;
+					const currentlyMuted = await api.isAudioMuted();
+
+					if (apiRef.current !== api) {
+						return;
+					}
+
+					if (currentlyMuted !== targetMuted) {
+						console.info("[jitsi] correcting audio mute state", { reason, targetMuted, currentlyMuted });
+						api.executeCommand("toggleAudio");
+						await wait(JITSI_AUDIO_SYNC_RECHECK_DELAY_MS);
+					}
+
+					const verifiedMuted = await api.isAudioMuted();
+					const latestTargetMuted = desiredAudioMutedRef.current;
+
+					if (apiRef.current === api && verifiedMuted !== latestTargetMuted) {
+						console.info("[jitsi] retrying audio mute correction", { reason, latestTargetMuted, verifiedMuted });
+						api.executeCommand("toggleAudio");
+					}
+				} catch (error) {
+					console.warn("[jitsi] failed to sync audio mute state", { reason, error });
+				}
+			});
+	}, []);
+
+	const detachJitsiListeners = useCallback(() => {
+		const listenerRegistration = jitsiListenersRef.current;
+		if (!listenerRegistration) {
+			return;
+		}
+
+		listenerRegistration.listeners.forEach(([eventName, listener]) => {
+			listenerRegistration.api.off(eventName, listener);
+		});
+		jitsiListenersRef.current = null;
+	}, []);
 
 	useEffect(() => {
 		onStatusChange?.(domain && normalizedRoomName ? "loading" : "unavailable");
@@ -73,8 +127,11 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 	}, [domain, normalizedRoomName, onStatusChange]);
 
 	useEffect(() => {
-		void setJitsiAudioMuted(apiRef.current, micMode !== "public");
-	}, [micMode]);
+		desiredAudioMutedRef.current = micMode !== "public";
+		syncJitsiAudioMuted("micMode");
+	}, [micMode, syncJitsiAudioMuted]);
+
+	useEffect(() => detachJitsiListeners, [detachJitsiListeners]);
 
 	if (!domain) {
 		return renderJitsiError("Jitsi Unavailable", "Set VITE_JITSI_BASE_URL to show Jitsi");
@@ -123,13 +180,35 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					DISABLE_JOIN_LEAVE_NOTIFICATIONS: true
 				}}
 				onApiReady={api => {
+					detachJitsiListeners();
 					apiRef.current = api;
+					desiredAudioMutedRef.current = micMode !== "public";
+
+					const handleVideoConferenceJoined = () => {
+						syncJitsiAudioMuted("videoConferenceJoined");
+						window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
+					};
+					const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
+						const reportedMuted = typeof event.muted === "boolean" ? event.muted : event.isMuted;
+						if (reportedMuted === false && desiredAudioMutedRef.current) {
+							syncJitsiAudioMuted("audioMuteStatusChanged");
+						}
+					};
+					const listeners: [string, JitsiEventListener][] = [
+						["videoConferenceJoined", handleVideoConferenceJoined],
+						["audioMuteStatusChanged", handleAudioMuteStatusChanged as JitsiEventListener]
+					];
+
+					listeners.forEach(([eventName, listener]) => api.on(eventName, listener));
+					jitsiListenersRef.current = { api, listeners };
+
 					setReadyMeetingKey(meetingKey);
 					onStatusChange?.("connected");
-					void setJitsiAudioMuted(api, micMode !== "public");
+					syncJitsiAudioMuted("apiReady");
 					onApiReady?.(api);
 				}}
 				onReadyToClose={() => {
+					detachJitsiListeners();
 					apiRef.current = null;
 					setReadyMeetingKey(null);
 					onStatusChange?.("closed");

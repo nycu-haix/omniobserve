@@ -5,7 +5,7 @@ function getWsBaseUrl() {
 	return (import.meta.env.VITE_WS_BASE_URL as string | undefined) || `${protocol}://${window.location.host}`;
 }
 
-export function usePresenceWebSocket(sessionId: string, participantId?: string) {
+export function usePresenceWebSocket(sessionId: string, participantId?: string, displayName?: string) {
 	const [isConnected, setIsConnected] = useState(false);
 	const retryCountRef = useRef(0);
 	const retryTimerRef = useRef<number | null>(null);
@@ -29,7 +29,8 @@ export function usePresenceWebSocket(sessionId: string, participantId?: string) 
 				socket.send(
 					JSON.stringify({
 						type: "join",
-						participant_id: participantId
+						participant_id: participantId,
+						displayName
 					})
 				);
 			};
@@ -57,7 +58,7 @@ export function usePresenceWebSocket(sessionId: string, participantId?: string) 
 			socketRef.current?.close();
 			socketRef.current = null;
 		};
-	}, [participantId, sessionId]);
+	}, [displayName, participantId, sessionId]);
 
 	return { isConnected };
 }

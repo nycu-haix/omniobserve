@@ -22,6 +22,7 @@ from .participant_status import (
     get_participant_display_name,
     get_participant_presence,
     mark_audio_disconnected,
+    update_participant_metadata,
     update_audio_status,
 )
 from .ranking_move_service import create_ranking_move
@@ -550,6 +551,25 @@ async def handle_board_websocket(
             message_type = payload.get("type")
 
             if message_type == "join":
+                display_name = (
+                    str(
+                        payload.get("displayName")
+                        or payload.get("display_name")
+                        or payload.get("name")
+                        or ""
+                    ).strip()
+                    or None
+                )
+                client_id = (
+                    str(payload.get("clientId") or payload.get("client_id") or "").strip()
+                    or None
+                )
+                update_participant_metadata(
+                    session_id,
+                    participant_id,
+                    display_name=display_name,
+                    client_id=client_id,
+                )
                 logger.info(
                     "board ws join session_id=%s participant_id=%s",
                     session_id,
@@ -560,6 +580,7 @@ async def handle_board_websocket(
                     participant_id,
                     _board_state_message(session_id, participant_id),
                 )
+                await broadcast_presence_state(session_id)
                 continue
 
             if message_type == "ping":
@@ -754,6 +775,7 @@ async def handle_board_websocket(
             participant_id,
             board_manager.get_participants(session_id),
         )
+        await broadcast_presence_state(session_id)
 
 
 async def handle_admin_websocket(
@@ -1081,6 +1103,25 @@ async def handle_presence_websocket(
                     session_id, participant_id, {"type": "pong"}
                 )
             elif message_type == "join":
+                display_name = (
+                    str(
+                        payload.get("displayName")
+                        or payload.get("display_name")
+                        or payload.get("name")
+                        or ""
+                    ).strip()
+                    or None
+                )
+                client_id = (
+                    str(payload.get("clientId") or payload.get("client_id") or "").strip()
+                    or None
+                )
+                update_participant_metadata(
+                    session_id,
+                    participant_id,
+                    display_name=display_name,
+                    client_id=client_id,
+                )
                 await presence_manager.send_to(
                     session_id,
                     participant_id,
@@ -1088,6 +1129,7 @@ async def handle_presence_websocket(
                         **_presence_state_message(session_id),
                     },
                 )
+                await broadcast_presence_state(session_id)
             elif message_type == "activity":
                 await presence_manager.broadcast(
                     session_id,
@@ -1268,12 +1310,29 @@ async def handle_audio_websocket(
                         _normalize_int(payload.get("sample_rate"), 16000) or 16000
                     )
                     state.mic_mode = str(payload.get("mic_mode") or "private")
+                    display_name = (
+                        str(
+                            payload.get("displayName")
+                            or payload.get("display_name")
+                            or payload.get("name")
+                            or ""
+                        ).strip()
+                        or None
+                    )
+                    client_id = (
+                        str(
+                            payload.get("clientId") or payload.get("client_id") or ""
+                        ).strip()
+                        or None
+                    )
                     update_audio_status(
                         session_id,
                         participant_id,
                         mic_mode=state.mic_mode,
                         audio_connected=True,
                         is_speaking=state.is_speaking,
+                        display_name=display_name,
+                        client_id=client_id,
                     )
                     await broadcast_presence_state(session_id)
                     logger.info(

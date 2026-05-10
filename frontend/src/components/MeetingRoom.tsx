@@ -344,7 +344,7 @@ export default function MeetingRoom() {
 	const isParticipantIdValid = isValidParticipantId(participantId);
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
-	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId);
+	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
 	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));

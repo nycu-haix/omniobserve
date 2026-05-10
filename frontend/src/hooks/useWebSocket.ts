@@ -8,7 +8,8 @@ interface WebSocketMessage {
 
 export function useWebSocket(
 	sessionId: string,
-	participantId?: string
+	participantId?: string,
+	displayName?: string
 ): {
 	sendMessage: (msg: object) => void;
 	lastMessage: object | null;
@@ -41,7 +42,8 @@ export function useWebSocket(
 				setIsConnected(true);
 				const joinMessage = {
 					type: "join",
-					participant_id: participantId
+					participant_id: participantId,
+					displayName
 				};
 				console.info("[board-ws] open", { sessionId, participantId });
 				console.info("[board-ws] send", joinMessage);
@@ -92,7 +94,7 @@ export function useWebSocket(
 			socketRef.current?.close();
 			socketRef.current = null;
 		};
-	}, [participantId, sessionId]);
+	}, [displayName, participantId, sessionId]);
 
 	const sendMessage = useCallback((msg: object) => {
 		if (socketRef.current?.readyState === WebSocket.OPEN) {

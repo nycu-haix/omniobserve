@@ -30,6 +30,26 @@ def update_audio_status(
     }
 
 
+def update_participant_metadata(
+    session_name: str,
+    participant_id: str,
+    *,
+    display_name: str | None = None,
+    client_id: str | None = None,
+) -> None:
+    session_statuses = _participant_statuses.setdefault(session_name, {})
+    current = session_statuses.get(participant_id, {})
+    session_statuses[participant_id] = {
+        **current,
+        "id": participant_id,
+        "display_name": display_name
+        if display_name is not None
+        else current.get("display_name"),
+        "client_id": client_id if client_id is not None else current.get("client_id"),
+        "updated_at": to_iso_z(utc_now()),
+    }
+
+
 def mark_audio_disconnected(session_name: str, participant_id: str) -> None:
     update_audio_status(
         session_name,
