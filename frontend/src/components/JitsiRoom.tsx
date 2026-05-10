@@ -114,6 +114,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 				}}
 				interfaceConfigOverwrite={{
 					TOOLBAR_BUTTONS: [],
+					VIDEO_LAYOUT_FIT: "nocrop",
 					SHOW_JITSI_WATERMARK: false,
 					SHOW_WATERMARK_FOR_GUESTS: false,
 					SHOW_BRAND_WATERMARK: false,

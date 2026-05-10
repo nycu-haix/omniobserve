@@ -39,12 +39,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim().slice(0, 10) || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
-	const similarityReasonLabel =
-		block.similarityIsSameReason == null
-			? null
-			: block.similarityIsSameReason
-				? "Same reason"
-				: "Different reason";
+	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
