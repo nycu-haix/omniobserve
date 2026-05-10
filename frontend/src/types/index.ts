@@ -35,5 +35,17 @@ export interface SimilarityCueData {
 	blockSummary: string;
 }
 
+export interface PublicChatMessage {
+	id: string;
+	sessionName?: string;
+	userId?: string;
+	displayName?: string;
+	message: string;
+	time?: string;
+	timestampMs?: number;
+	isOwn?: boolean;
+	isDeleted?: boolean;
+}
+
 export type MicMode = "public" | "private" | "off";
-export type BoardTab = "transcript" | "ideablock";
+export type BoardTab = "transcript" | "ideablock" | "public-chat";

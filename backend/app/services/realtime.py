@@ -12,11 +12,14 @@ from starlette.websockets import WebSocketState
 from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
+from ..schemas import ChatMessageCreate
 from ..task_config import RANKING_ITEMS
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
+from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import mark_audio_disconnected, update_audio_status
+from .ranking_move_service import create_ranking_move
 from .transcripts import save_ws_transcript_segment
 
 
@@ -205,6 +208,26 @@ def _normalize_int(value: Any, default: int) -> int:
     return parsed if parsed >= 0 else default
 
 
+def _normalize_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    parsed = _normalize_int(value, -1)
+    return parsed if parsed >= 0 else None
+
+
+def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
+    timestamp_ms = int(chat_message.time_stamp.timestamp() * 1000) if chat_message.time_stamp else _now_ms()
+    return {
+        "id": str(chat_message.id),
+        "sessionName": chat_message.session_name,
+        "userId": str(chat_message.user_id),
+        "displayName": chat_message.display_name,
+        "message": chat_message.message,
+        "timestampMs": timestamp_ms,
+        "isDeleted": chat_message.is_deleted,
+    }
+
+
 def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
     current_items = state.get("items")
     if not isinstance(current_items, list):
@@ -361,6 +384,7 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                 item_id = str(payload.get("itemId", ""))
                 to_index = _normalize_int(payload.get("toIndex"), 0)
                 base_revision = payload.get("baseRevision")
+                normalized_base_revision = _normalize_optional_int(base_revision)
                 logger.info(
                     "ranking_move received session_id=%s participant_id=%s scope=%s item_id=%s to_index=%s base_revision=%s",
                     session_id,
@@ -372,8 +396,10 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                 )
                 async with session_locks[session_id]:
                     state = _get_ranking_state(session_id, participant_id, scope)
+                    previous_items = list(state["items"])
+                    from_index = previous_items.index(item_id) if item_id in previous_items else None
                     try:
-                        state["items"] = _apply_ranking_move(list(state["items"]), item_id, to_index)
+                        next_items = _apply_ranking_move(previous_items, item_id, to_index)
                     except ValueError as exc:
                         logger.warning(
                             "ranking_move rejected session_id=%s participant_id=%s scope=%s reason=%s",
@@ -388,7 +414,41 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                             {"type": "ranking_error", "scope": scope, "reason": str(exc), "current": _ranking_payload(state)},
                         )
                         continue
-                    state["revision"] += 1
+                    next_revision = state["revision"] + 1
+                    final_to_index = next_items.index(item_id)
+                    async with SessionLocal() as db:
+                        try:
+                            await create_ranking_move(
+                                session_name=session_id,
+                                participant_id=participant_id,
+                                scope=scope,
+                                item_id=item_id,
+                                from_index=from_index,
+                                to_index=final_to_index,
+                                base_revision=normalized_base_revision,
+                                revision=next_revision,
+                                previous_items=previous_items,
+                                items=next_items,
+                                db=db,
+                            )
+                        except Exception as exc:
+                            await db.rollback()
+                            logger.warning(
+                                "ranking_move_persist_failed session_id=%s participant_id=%s scope=%s item_id=%s reason=%s",
+                                session_id,
+                                participant_id,
+                                scope,
+                                item_id,
+                                exc,
+                            )
+                            await board_manager.send_to(
+                                session_id,
+                                participant_id,
+                                {"type": "ranking_error", "scope": scope, "reason": "failed to save ranking move", "current": _ranking_payload(state)},
+                            )
+                            continue
+                    state["items"] = next_items
+                    state["revision"] = next_revision
                     logger.info(
                         "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s",
                         session_id,
@@ -410,6 +470,59 @@ async def handle_board_websocket(websocket: WebSocket, *, session_id: str, parti
                     else:
                         await board_manager.broadcast(session_id, message)
                     await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
+                continue
+
+            if message_type == "public_chat_send":
+                message_text = str(payload.get("message") or "").strip()
+                if not message_text:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "public_chat_error", "reason": "message cannot be empty"},
+                    )
+                    continue
+                if len(message_text) > 2000:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "public_chat_error", "reason": "message is too long"},
+                    )
+                    continue
+
+                display_name = str(payload.get("displayName") or "").strip() or None
+                async with SessionLocal() as db:
+                    try:
+                        saved_message = await create_chat_message(
+                            ChatMessageCreate(
+                                session_name=session_id,
+                                user_id=_normalize_int(participant_id, 0),
+                                display_name=display_name,
+                                message=message_text,
+                            ),
+                            db,
+                        )
+                    except Exception as exc:
+                        await db.rollback()
+                        logger.warning(
+                            "public_chat_send failed session_id=%s participant_id=%s reason=%s",
+                            session_id,
+                            participant_id,
+                            exc,
+                        )
+                        await board_manager.send_to(
+                            session_id,
+                            participant_id,
+                            {"type": "public_chat_error", "reason": "failed to save message"},
+                        )
+                        continue
+
+                await board_manager.broadcast(
+                    session_id,
+                    {
+                        "type": "public_chat_message",
+                        "payload": _chat_message_payload(saved_message),
+                    },
+                )
                 continue
 
             if message_type in {"block_publish", "block_discard", "block_edit"}:

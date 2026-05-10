@@ -12,6 +12,7 @@ from .board import (
     TaskConfigResponse,
     TopicDescriptionResponse,
 )
+from .chat_message import ChatMessageCreate, ChatMessageCreateRequest, ChatMessageResponse
 from .errors import ApiError, ErrorResponse
 from .idea_block import (
     IdeaBlockCreate,
@@ -24,6 +25,7 @@ from .idea_block import (
     IdeaBlockUpdate,
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
+from .ranking_move import RankingMoveResponse
 from .similarity import (
     SimilarityCreate,
     SimilarityResponse,
@@ -35,6 +37,9 @@ from .transcript import TranscriptCreate, TranscriptCreateRequest, TranscriptRes
 
 __all__ = [
     "ApiError",
+    "ChatMessageCreate",
+    "ChatMessageCreateRequest",
+    "ChatMessageResponse",
     "ErrorResponse",
     "FrontendBoardBlockCreateRequest",
     "FrontendBoardBlockCreateResponse",
@@ -55,6 +60,7 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
+    "RankingMoveResponse",
     "SimilarityCreate",
     "SimilarityResponse",
     "SimilarityUpdate",

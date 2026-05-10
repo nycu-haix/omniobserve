@@ -4,10 +4,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, MicMode, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
+import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
 
@@ -19,6 +20,8 @@ interface PrivateBoardProps {
 	isConnected: boolean;
 	micMode: MicMode;
 	onMicModeChange: (mode: MicMode) => void | Promise<void>;
+	onSendBoardMessage: (message: object) => void;
+	displayName: string;
 	currentPhase?: SessionPhase;
 	timerEndTime?: number;
 }
@@ -28,6 +31,8 @@ type BoardMessage =
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityCueData }
+	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
+	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
 	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number };
 
@@ -51,6 +56,26 @@ interface IdeaBlockResponse {
 	similarity_id: number | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
+}
+
+interface ChatMessageResponse {
+	id: number;
+	session_name: string;
+	user_id: number;
+	display_name?: string | null;
+	message: string;
+	time_stamp: string;
+	is_deleted?: boolean;
+}
+
+interface PublicChatMessagePayload {
+	id: string;
+	sessionName?: string;
+	userId?: string;
+	displayName?: string | null;
+	message: string;
+	timestampMs?: number;
+	isDeleted?: boolean;
 }
 
 interface AudioIdeaBlocksUpdateMessage {
@@ -95,11 +120,20 @@ function isNearScrollBottom(element: HTMLElement): boolean {
 }
 
 function isBoardMessage(message: object | null): message is BoardMessage {
-	if (!message || !("type" in message) || !("payload" in message)) {
+	if (!message || !("type" in message)) {
 		return false;
 	}
 
-	return message.type === "new_idea_block" || message.type === "update_idea_block" || message.type === "new_transcript_line" || message.type === "similarity_cue" || message.type === "phase_changed" || message.type === "board_state";
+	return (
+		message.type === "new_idea_block" ||
+		message.type === "update_idea_block" ||
+		message.type === "new_transcript_line" ||
+		message.type === "similarity_cue" ||
+		message.type === "public_chat_message" ||
+		message.type === "public_chat_error" ||
+		message.type === "phase_changed" ||
+		message.type === "board_state"
+	);
 }
 
 function isAudioTranscriptMessage(message: object | null): message is AudioTranscriptMessage {
@@ -154,6 +188,11 @@ function buildIdeaBlockDetailUrl(sessionId: string, participantId: string, ideaB
 	return `${buildIdeaBlocksUrl(sessionId, participantId)}/${encodeURIComponent(ideaBlockId)}`;
 }
 
+function buildChatMessagesUrl(sessionId: string): string {
+	const encodedSessionId = encodeURIComponent(sessionId);
+	return apiUrl(`/api/sessions/${encodedSessionId}/chat-messages`);
+}
+
 async function getResponseErrorMessage(response: Response, fallback: string): Promise<string> {
 	try {
 		const payload = (await response.json()) as { detail?: unknown; message?: unknown };
@@ -189,6 +228,36 @@ function transcriptResponseToLine(item: TranscriptResponse, participantId: strin
 	};
 }
 
+function chatMessageResponseToMessage(item: ChatMessageResponse, participantId: string): PublicChatMessage {
+	const timestampMs = Date.parse(item.time_stamp);
+	return {
+		id: String(item.id),
+		sessionName: item.session_name,
+		userId: String(item.user_id),
+		displayName: item.display_name ?? undefined,
+		message: item.message,
+		time: formatTranscriptTime(item.time_stamp),
+		timestampMs: Number.isNaN(timestampMs) ? undefined : timestampMs,
+		isOwn: isOwnTranscriptUser(item.user_id, participantId),
+		isDeleted: item.is_deleted ?? false
+	};
+}
+
+function publicChatPayloadToMessage(payload: PublicChatMessagePayload, participantId: string): PublicChatMessage {
+	const timestampMs = payload.timestampMs ?? Date.now();
+	return {
+		id: payload.id,
+		sessionName: payload.sessionName,
+		userId: payload.userId,
+		displayName: payload.displayName ?? undefined,
+		message: payload.message,
+		time: formatTranscriptTime(timestampMs),
+		timestampMs,
+		isOwn: isOwnTranscriptUser(payload.userId, participantId),
+		isDeleted: payload.isDeleted ?? false
+	};
+}
+
 async function fetchTranscriptHistory(url: string, signal: AbortSignal): Promise<TranscriptResponse[]> {
 	const response = await fetch(url, { signal });
 	if (!response.ok) {
@@ -196,6 +265,15 @@ async function fetchTranscriptHistory(url: string, signal: AbortSignal): Promise
 		return [];
 	}
 	return (await response.json()) as TranscriptResponse[];
+}
+
+async function fetchChatMessageHistory(url: string, signal: AbortSignal): Promise<ChatMessageResponse[]> {
+	const response = await fetch(url, { signal });
+	if (!response.ok) {
+		console.warn("[private-board] failed chat history response", response.status, url);
+		return [];
+	}
+	return (await response.json()) as ChatMessageResponse[];
 }
 
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
@@ -325,6 +403,48 @@ function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: Transc
 
 function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
 	return [...lines].sort((left, right) => {
+		const leftTime = left.timestampMs ?? Number(left.id);
+		const rightTime = right.timestampMs ?? Number(right.id);
+
+		if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+			return leftTime - rightTime;
+		}
+
+		return left.id.localeCompare(right.id, undefined, { numeric: true });
+	});
+}
+
+function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicChatMessage): PublicChatMessage[] {
+	const normalizedMessage = message.message.trim();
+	if (!normalizedMessage) {
+		return messages;
+	}
+
+	const existingMessage = messages.find(item => item.id === message.id);
+	if (!existingMessage) {
+		return sortPublicChatMessages([...messages, { ...message, message: normalizedMessage }]);
+	}
+
+	return sortPublicChatMessages(
+		messages.map(item =>
+			item.id === existingMessage.id
+				? {
+						...item,
+						...message,
+						message: normalizedMessage,
+						timestampMs: message.timestampMs ?? item.timestampMs
+					}
+				: item
+		)
+	);
+}
+
+function mergePublicChatMessages(baseMessages: PublicChatMessage[], nextMessages: PublicChatMessage[]): PublicChatMessage[] {
+	return nextMessages.reduce((messages, message) => appendPublicChatMessage(messages, message), baseMessages);
+}
+
+function sortPublicChatMessages(messages: PublicChatMessage[]): PublicChatMessage[] {
+	return [...messages].sort((left, right) => {
 		const leftTime = left.timestampMs ?? Number(left.id);
 		const rightTime = right.timestampMs ?? Number(right.id);
 
@@ -472,6 +592,8 @@ export function PrivateBoard({
 	isConnected,
 	micMode,
 	onMicModeChange,
+	onSendBoardMessage,
+	displayName,
 	currentPhase: controlledPhase,
 	timerEndTime: controlledTimerEndTime
 }: PrivateBoardProps) {
@@ -482,12 +604,16 @@ export function PrivateBoard({
 	const visibleTimerEndTime = controlledTimerEndTime ?? timerEndTime;
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
+	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
 	const [isSavingManualIdea, setIsSavingManualIdea] = useState(false);
+	const [publicChatText, setPublicChatText] = useState("");
+	const [publicChatError, setPublicChatError] = useState<string | null>(null);
+	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -501,7 +627,8 @@ export function PrivateBoard({
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
 		transcript: true,
-		ideablock: true
+		ideablock: true,
+		"public-chat": true
 	});
 
 	useEffect(() => {
@@ -546,6 +673,30 @@ export function PrivateBoard({
 		}
 
 		void loadTranscripts();
+
+		return () => controller.abort();
+	}, [participantId, sessionId]);
+
+	useEffect(() => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			return;
+		}
+
+		const controller = new AbortController();
+
+		async function loadPublicChatMessages() {
+			try {
+				const chatMessagesFromDb = (await fetchChatMessageHistory(buildChatMessagesUrl(sessionId), controller.signal)).map(item => chatMessageResponseToMessage(item, participantId));
+				setPublicChatMessages(prev => mergePublicChatMessages(chatMessagesFromDb, prev));
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.warn("[private-board] failed to load public chat messages", error);
+			}
+		}
+
+		void loadPublicChatMessages();
 
 		return () => controller.abort();
 	}, [participantId, sessionId]);
@@ -630,6 +781,12 @@ export function PrivateBoard({
 		}
 
 		const timer = window.setTimeout(() => {
+			if (lastMessage.type === "public_chat_error") {
+				setIsSendingPublicChat(false);
+				setPublicChatError(lastMessage.reason || "公開訊息傳送失敗");
+				return;
+			}
+
 			if (lastMessage.type === "new_idea_block") {
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
@@ -661,6 +818,11 @@ export function PrivateBoard({
 			if (lastMessage.type === "similarity_cue") {
 				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
 				setIdeaBlocks(prev => prev.map(block => (block.id === lastMessage.payload.blockId ? { ...block, hasCue: true, cueText: lastMessage.payload.blockSummary } : block)));
+			}
+
+			if (lastMessage.type === "public_chat_message") {
+				setIsSendingPublicChat(false);
+				setPublicChatMessages(prev => appendPublicChatMessage(prev, publicChatPayloadToMessage(lastMessage.payload, participantId)));
 			}
 		}, 0);
 
@@ -785,7 +947,7 @@ export function PrivateBoard({
 		}
 
 		viewport.scrollTop = viewport.scrollHeight;
-	}, [activeTab, ideaBlocks, transcriptLines]);
+	}, [activeTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
 	useLayoutEffect(() => {
 		const textarea = manualIdeaTextareaRef.current;
@@ -951,6 +1113,25 @@ export function PrivateBoard({
 		}
 	};
 
+	const sendPublicChatMessage = () => {
+		const normalizedMessage = publicChatText.trim();
+		if (!normalizedMessage || isSendingPublicChat) {
+			return;
+		}
+
+		setIsSendingPublicChat(true);
+		setPublicChatError(null);
+		onSendBoardMessage({
+			type: "public_chat_send",
+			message: normalizedMessage,
+			displayName
+		});
+		setPublicChatText("");
+		window.setTimeout(() => {
+			setIsSendingPublicChat(false);
+		}, 5000);
+	};
+
 	const privateMicButton = (
 		<div className="flex justify-center">
 			<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
@@ -987,6 +1168,17 @@ export function PrivateBoard({
 						>
 							Idea Blocks
 						</Button>
+						<Button
+							aria-pressed={activeTab === "public-chat"}
+							className={cn(
+								"transition-all active:translate-y-px active:scale-[0.98]",
+								activeTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+							)}
+							variant={activeTab === "public-chat" ? "default" : "ghost"}
+							onClick={() => setActiveTab("public-chat")}
+						>
+							公開訊息
+						</Button>
 					</div>
 					<div className="flex items-center gap-3">
 						<PhaseBadge phase={visiblePhase} />
@@ -996,7 +1188,7 @@ export function PrivateBoard({
 				</header>
 
 				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
-					{activeTab === "ideablock" ? (
+					{activeTab === "ideablock" && (
 						<div className="grid gap-2 pb-3">
 							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 							{ideaBlocks.map(block => (
@@ -1019,9 +1211,11 @@ export function PrivateBoard({
 								</div>
 							))}
 						</div>
-					) : (
+					)}
+					{activeTab === "transcript" && (
 						<TranscriptLines lines={transcriptLines} emptyText="尚無逐字稿" onJumpToBlock={jumpToBlock} onTranscriptRef={setTranscriptRef} highlightedTranscriptId={highlightedTranscriptId} />
 					)}
+					{activeTab === "public-chat" && <PublicChatMessages messages={publicChatMessages} />}
 				</ScrollArea>
 
 				{activeTab === "ideablock" && (
@@ -1064,6 +1258,24 @@ export function PrivateBoard({
 					</footer>
 				)}
 				{activeTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
+				{activeTab === "public-chat" && (
+					<footer className="border-t bg-card p-3">
+						<div className="grid gap-2">
+							<PublicChatComposer
+								messageText={publicChatText}
+								error={publicChatError}
+								isConnected={isConnected}
+								isSending={isSendingPublicChat}
+								onMessageTextChange={value => {
+									setPublicChatText(value);
+									setPublicChatError(null);
+								}}
+								onSend={sendPublicChatMessage}
+							/>
+							{privateMicButton}
+						</div>
+					</footer>
+				)}
 			</section>
 
 			{visiblePhase === "group" && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
