@@ -167,7 +167,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				onToggle(block.id);
 			}}
 		>
-			{isGenerating ? <CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <Chevron className={cn("h-4 w-4 shrink-0 text-muted-foreground", block.isDeleted && "opacity-45")} aria-hidden="true" />}
+			{isGenerating ? (
+				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			) : (
+				<Chevron className={cn("h-4 w-4 shrink-0 text-muted-foreground", block.isDeleted && "opacity-45")} aria-hidden="true" />
+			)}
 			{isEditingTitle ? (
 				<input
 					className={cn(
@@ -226,7 +230,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					) : (
 						<>
 							{!block.isDraft && (
-								<Button aria-label="Edit idea block title" className={cn(block.isDeleted && "opacity-45")} size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving || block.isDeleted}>
+								<Button
+									aria-label="Edit idea block title"
+									className={cn(block.isDeleted && "opacity-45")}
+									size="icon"
+									variant="ghost"
+									onClick={startTitleEditing}
+									disabled={isSaving || block.isDeleted}
+								>
 									<Pencil className="h-4 w-4" />
 								</Button>
 							)}
@@ -251,7 +262,6 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					{hasLinkedTranscript && (
 						<Button className="w-fit gap-2" variant="ghost" size="sm" onClick={() => onJumpToTranscript?.(block)}>
 							<CornerDownLeft className="h-4 w-4" />
-							
 						</Button>
 					)}
 				</div>
@@ -272,9 +282,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				row
 			)}
 
-			{isEditingTitle && (saveError || titleTooLong) && (
-				<p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>
-			)}
+			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>}
 
 			{block.expanded && !isGenerating && (
 				<div className={cn("ml-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>

@@ -3,7 +3,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, GripVertical, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -198,10 +198,7 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 					aria-label={`與 Public 排序差 ${rankConflictAmount} 位，Private 排序${rankConflictDirection === "up" ? "較前" : "較後"}`}
 				>
 					<span
-						className={cn(
-							"h-0 w-0 border-x-[5px] border-x-transparent",
-							rankConflictDirection === "up" ? "border-b-[8px] border-b-emerald-600" : "border-t-[8px] border-t-rose-600"
-						)}
+						className={cn("h-0 w-0 border-x-[5px] border-x-transparent", rankConflictDirection === "up" ? "border-b-[8px] border-b-emerald-600" : "border-t-[8px] border-t-rose-600")}
 						aria-hidden="true"
 					/>
 					{rankConflictAmount}

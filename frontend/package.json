@@ -10,7 +10,7 @@
 		"format:check": "prettier . --check",
 		"preinstall": "npx only-allow pnpm",
 		"lint": "eslint .",
-		"prepare": "sh -c 'command -v git >/dev/null 2>&1 && [ -d .git ] && git config core.hooksPath .githooks || exit 0'",
+		"prepare": "sh -c 'command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath .githooks || exit 0'",
 		"preview": "vite preview"
 	},
 	"dependencies": {
