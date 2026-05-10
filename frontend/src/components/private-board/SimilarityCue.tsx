@@ -1,4 +1,5 @@
 import { Lightbulb, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -8,7 +9,24 @@ interface SimilarityCueProps {
 	onDismiss: (cueId: string) => void;
 }
 
+const CUE_AUTO_DISMISS_MS = 500;
+
 export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
+	const onDismissRef = useRef(onDismiss);
+
+	useEffect(() => {
+		onDismissRef.current = onDismiss;
+	}, [onDismiss]);
+
+	useEffect(() => {
+		if (cues.length === 0) {
+			return;
+		}
+
+		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue.id), CUE_AUTO_DISMISS_MS));
+		return () => timers.forEach(timer => window.clearTimeout(timer));
+	}, [cues]);
+
 	if (cues.length === 0) {
 		return null;
 	}
