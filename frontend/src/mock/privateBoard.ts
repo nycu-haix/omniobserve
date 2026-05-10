@@ -7,7 +7,7 @@ export const MOCK_IDEA_BLOCKS: IdeaBlock[] = [
 		id: "b1",
 		summary: "先確認大家對海上求生目標的理解一致",
 		aiSummary: "團隊目前同意先用海上求生優先順序來討論，不急著投票。共識是先釐清淡水、求救訊號、定位工具在不同情境下的重要性。",
-		transcript: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
+		transcript: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
 		transcriptLineId: "103",
 		expanded: true,
 		status: "ready"
@@ -47,7 +47,7 @@ MOCK_IDEA_BLOCKS.forEach((block, index) => {
 export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	{
 		id: "t1",
-		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成等待救援，而不是自己航行到岸邊。",
+		text: "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
 		source: "public",
 		userId: "1",
 		displayName: "Otter",
@@ -138,7 +138,7 @@ export const MOCK_TRANSCRIPT_LINES: TranscriptLine[] = [
 	},
 	{
 		id: "t12",
-		text: "私人筆記：等等可以問大家是否把任務假設成原地等待救援。",
+		text: "私人筆記：等等可以問大家是否把任務假設成海上求生，而不是划向陸地。",
 		source: "private",
 		userId: "2",
 		displayName: "Fox",

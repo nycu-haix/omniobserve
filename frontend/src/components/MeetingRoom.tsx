@@ -51,21 +51,21 @@ const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const ITEM_DESCRIPTIONS: Record<string, string> = {
-	sextant: "用太陽或星星測量角度的航海儀器，需要搭配其他資料才能推算位置。",
-	shaving_mirror: "小型鏡子，除了整理儀容，也可以反射陽光形成遠距離閃光。",
-	water_container: "一桶可直接飲用的淡水，容量大約等於 10 多瓶大瓶礦泉水。",
-	mosquito_net: "細網布，原本用來防蚊，也可能被拿來過濾、遮蔽或固定物品。",
-	emergency_rations: "美軍舊式罐裝野戰口糧，重點是可保存、可直接補充熱量。",
-	sea_chart: "紙本海圖，標示太平洋海域、島嶼與航行資訊，但不會自動顯示目前位置。",
-	floating_cushion: "可漂浮的方形坐墊，通常可丟給落水者或當作額外浮力。",
-	petrol: "汽油與機油混合燃料，易燃，通常用於小型引擎或製造火焰訊號。",
-	receive_only_radio: "小型收音機，只能接收廣播或訊號，不能主動發送求救訊息。",
-	shark_repellent: "用來降低鯊魚靠近風險的驅避用品，通常在有人落水時才會派上用場。",
-	waterproof_sheet: "一片不透明防水塑膠布，可遮陽、擋浪，也可能用來收集雨水。",
-	rum: "高酒精濃度蘭姆酒，可作消毒或點火用途；直接飲用可能讓身體更缺水。",
-	rope: "一段尼龍繩，可用來綁住物品、固定救生艇或連接臨時裝置。",
-	chocolate_bars: "高熱量食物，體積小、容易分配，但數量有限。",
-	fishing_rod: "包含魚線、魚鉤等簡易釣具，可能用來取得食物，但需要時間與運氣。"
+	sextant: "航海上用來測量天體或地平線角度的儀器。",
+	shaving_mirror: "小型鏡子，通常用來刮鬍子或整理儀容。",
+	water_container: "一桶可飲用的淡水，容量約 20L。",
+	mosquito_net: "掛在睡覺區域外的細網布，通常用來防蚊蟲。",
+	emergency_rations: "可長時間保存的軍用罐裝或包裝食品。",
+	sea_chart: "紙本海圖，標示太平洋海域與島嶼位置。",
+	floating_cushion: "可漂浮的方形坐墊，通常作為船上安全裝備。",
+	petrol: "汽油與機油混合的燃料，通常供小型引擎使用。",
+	receive_only_radio: "小型收音機，通常用來接收廣播。",
+	shark_repellent: "標示為可驅避鯊魚的罐裝或包裝用品。",
+	waterproof_sheet: "不透明、防水的塑膠布，面積約 2m²。",
+	rum: "酒精濃度約 80% 的蘭姆酒，容量約 1L。",
+	rope: "尼龍材質的繩子，長度約 5m。",
+	chocolate_bars: "兩盒一般巧克力棒。",
+	fishing_rod: "包含魚線、魚鉤等用品的釣魚工具組。"
 };
 
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
