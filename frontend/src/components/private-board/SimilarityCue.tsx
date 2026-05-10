@@ -23,7 +23,6 @@ export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 							<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
 							<span>{message}</span>
 						</div>
-						{cue.blockSummary && <p className="mb-3 line-clamp-2 text-xs text-muted-foreground">{cue.blockSummary}</p>}
 						<div className="flex justify-end gap-2">
 							<Button size="sm" onClick={() => onJump(cue.blockId)}>
 								查看想法

@@ -626,6 +626,7 @@ export function PrivateBoard({
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
+	const lastProcessedBoardMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
@@ -779,6 +780,10 @@ export function PrivateBoard({
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
+		if (lastProcessedBoardMessageRef.current === lastMessage) {
+			return;
+		}
+		lastProcessedBoardMessageRef.current = lastMessage;
 
 		if (lastMessage.type === "phase_changed" || lastMessage.type === "board_state") {
 			return;
@@ -814,7 +819,7 @@ export function PrivateBoard({
 							timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
 							time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
 						}),
-						ideaBlocks
+						ideaBlocksRef.current
 					)
 				);
 			}
@@ -850,7 +855,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [ideaBlocks, lastMessage, participantId, sessionId, visiblePhase]);
+	}, [lastMessage, participantId, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
