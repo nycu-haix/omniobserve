@@ -1,9 +1,5 @@
 # OmniObserve 單人觀察記錄表
 
-訪談問題請看 [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md)。本文件只放需要填寫的紀錄欄位。
-
----
-
 ## Page 1. 實驗期間觀察記錄
 
 ### 基本資料
