@@ -216,9 +216,10 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 		id: item.id
 	});
 	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
-	const isRankConflict = typeof rankDelta === "number" && Math.abs(rankDelta) > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
-	const rankConflictDirection = isRankConflict && rankDelta < 0 ? "up" : "down";
-	const rankConflictAmount = isRankConflict ? Math.abs(rankDelta) : 0;
+	const rankDeltaAmount = typeof rankDelta === "number" ? Math.abs(rankDelta) : 0;
+	const hasRankDelta = rankDeltaAmount > 0;
+	const isRankConflict = rankDeltaAmount > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
+	const rankDeltaDirection = typeof rankDelta === "number" && rankDelta < 0 ? "up" : "down";
 
 	return (
 		<div
@@ -232,7 +233,7 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
-			title={isRankConflict ? `與 Public 排序差 ${rankConflictAmount} 位` : undefined}
+			title={hasRankDelta ? `與 Public 排序差 ${rankDeltaAmount} 位` : undefined}
 			{...attributes}
 			{...listeners}
 		>
@@ -250,16 +251,27 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 			</button>
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
-			{isRankConflict && (
+			{hasRankDelta && (
 				<span
-					className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold", rankConflictDirection === "up" ? "text-emerald-700" : "text-rose-700")}
-					aria-label={`與 Public 排序差 ${rankConflictAmount} 位，Private 排序${rankConflictDirection === "up" ? "較前" : "較後"}`}
+					className={cn(
+						"inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold",
+						isRankConflict && rankDeltaDirection === "up" && "text-emerald-700",
+						isRankConflict && rankDeltaDirection === "down" && "text-rose-700",
+						!isRankConflict && "text-muted-foreground/60"
+					)}
+					aria-label={`與 Public 排序差 ${rankDeltaAmount} 位，Private 排序${rankDeltaDirection === "up" ? "較前" : "較後"}`}
 				>
 					<span
-						className={cn("h-0 w-0 border-x-[5px] border-x-transparent", rankConflictDirection === "up" ? "border-b-[8px] border-b-emerald-600" : "border-t-[8px] border-t-rose-600")}
+						className={cn(
+							"h-0 w-0 border-x-[5px] border-x-transparent",
+							rankDeltaDirection === "up" && isRankConflict && "border-b-[8px] border-b-emerald-600",
+							rankDeltaDirection === "down" && isRankConflict && "border-t-[8px] border-t-rose-600",
+							rankDeltaDirection === "up" && !isRankConflict && "border-b-[8px] border-b-muted-foreground/40",
+							rankDeltaDirection === "down" && !isRankConflict && "border-t-[8px] border-t-muted-foreground/40"
+						)}
 						aria-hidden="true"
 					/>
-					{rankConflictAmount}
+					{rankDeltaAmount}
 				</span>
 			)}
 			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
