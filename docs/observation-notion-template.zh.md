@@ -1,8 +1,12 @@
 # OmniObserve 單人觀察記錄表
 
+訪談問題請看 [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md)。本文件只放需要填寫的紀錄欄位。
+
+---
+
 ## Page 1. 實驗期間觀察記錄
 
-### A. 基本資料
+### 基本資料
 
 | 欄位 | 記錄 |
 | --- | --- |
@@ -11,171 +15,86 @@
 | 實驗條件 | 對照組 / 實驗組 |
 | 受試者 ID | P1 / P2 / P3 |
 | 觀察者 | |
-| 房間 | |
 | 是否使用暗樁 | 否 / 是 |
 | 設備或特殊狀況 | |
 
-### B. 介面熟悉階段
+### Private Channel 使用摘要
 
-| 項目 | 記錄 |
-| --- | --- |
-| 是否理解 public mic | 是 / 否；備註： |
-| 是否理解 private mic / private text | 是 / 否；備註： |
-| 是否理解 group chat 是公開頻道 | 是 / 否；備註： |
-| 是否理解 ranking 操作 | 是 / 否；備註： |
-| 是否出現隱私疑慮 | 否 / 是；內容： |
-| 是否出現操作困難 | 否 / 是；內容： |
-
-### C. 個人思考階段
-
-| 項目 | 記錄 |
+| 欄位 | 記錄 |
 | --- | --- |
 | private input 使用方式 | 語音 / 文字 / 語音+文字 / 未使用 |
-| private thoughts 類型 | 支持理由 / 疑問 / 不同意見 / 不確定 / novel idea / 排序理由 / 其他： |
-| 是否只做 ranking、沒有留下理由 | 否 / 是；備註： |
-| 是否有不願使用 private channel 的跡象 | 否 / 是；可能原因： |
+| private thoughts 類型 | 疑問 / 不同意見 / 支持理由 / 不確定 / novel idea / 其他： |
+| 是否有不願使用 private channel 的跡象 | 否 / 是；原因： |
 | 可追問的 private thought 摘要 | |
 
-### D. 小組討論階段
+### Public Discussion 觀察摘要
 
-| 項目 | 記錄 |
+| 欄位 | 記錄 |
 | --- | --- |
-| private idea 是否進入公開討論 | 無 / 有；內容： |
-| private idea 是否未被公開提出 | 無 / 有；內容： |
-| 是否出現 private-public mismatch | 否 / 是；內容： |
-| 是否公開提出不同意見 | 否 / 是；內容： |
-| 是否有想說但停住的行為 | 否 / 是；行為： |
-| 是否因他人強勢論點改變排序 | 否 / 是；內容： |
-| 是否使用 group chat 取代語音 | 否 / 是；內容： |
-| 公開貢獻是否包含完整理由或比較 | 否 / 是；內容： |
+| private idea 被帶入 public discussion | 無 / 有；內容： |
+| private idea 沒有被公開提出 | 無 / 有；內容： |
+| private-public mismatch | 無 / 有；內容： |
+| 公開提出不同意見 | 無 / 有；內容： |
+| 想講但停住 | 無 / 有；行為： |
+| 高品質貢獻，理由/比較/替代方案 | 無 / 有；內容： |
 
-### E. Cue 反應記錄，實驗組才填
+### Cue 反應，實驗組才填
 
-| Cue 時間 | Cue 內容摘要 | 受試者反應 | 後續公開行動 | 小組反應 | 可追問問題 |
+| Cue 時間 | Cue 內容摘要 | 受試者反應 | 後續公開行動 | 小組反應 | 訪談追問 |
 | --- | --- | --- | --- | --- | --- |
 | | | 注意 / 忽略 / 困惑 / 被打斷 / 更有信心 | 發言 / 打字 / 改 ranking / 無 | 接住 / 忽略 / 否定 / 無 | |
 | | | 注意 / 忽略 / 困惑 / 被打斷 / 更有信心 | 發言 / 打字 / 改 ranking / 無 | 接住 / 忽略 / 否定 / 無 | |
 | | | 注意 / 忽略 / 困惑 / 被打斷 / 更有信心 | 發言 / 打字 / 改 ranking / 無 | 接住 / 忽略 / 否定 / 無 | |
 
-### F. Critical Incident 記錄
+### Critical Incident
 
-事件類型代碼：`Private surfaced` / `Private withheld` / `Shared unspoken` / `Private-public mismatch` / `Disagreement expressed` / `Disagreement withheld` / `Cue noticed` / `Cue ignored` / `Cue prompted speaking` / `Cue accepted` / `Cue resisted` / `Quality contribution` / `Timing barrier` / `Social pressure` / `System confusion` / `Privacy concern`
+事件類型：`Private withheld` / `Private surfaced` / `Private-public mismatch` / `Disagreement expressed` / `Cue noticed` / `Cue ignored` / `Cue prompted speaking` / `Cue accepted` / `Cue resisted` / `Quality contribution` / `Cognitive load` / `Agency`
 
-| 時間 | 類型 | 具體事件描述 | 可能解釋 | 訪談追問 |
-| --- | --- | --- | --- | --- |
-| | | | | |
-| | | | | |
-| | | | | |
-| | | | | |
-| | | | | |
-| | | | | |
-
-### G. 討論結束後摘要
-
-| 摘要欄位 | 記錄 |
-| --- | --- |
-| 最重要的 private-to-public 事件 | |
-| 最重要的 withheld idea / disagreement | |
-| 最需要訪談追問的事件 1 | |
-| 最需要訪談追問的事件 2 | |
-| 最需要訪談追問的事件 3 | |
+| 時間 | 類型 | 具體事件 | 訪談追問 |
+| --- | --- | --- | --- |
+| | | | |
+| | | | |
+| | | | |
+| | | | |
+| | | | |
 
 ---
 
 ## Page 2. 半結構式訪談記錄
 
-### A. 訪談基本資料
+### 訪談基本資料
 
 | 欄位 | 記錄 |
 | --- | --- |
 | 受試者 ID | P1 / P2 / P3 |
 | 訪談者 | |
-| 訪談開始時間 | |
-| 訪談結束時間 | |
+| 訪談時間 | |
 | 實驗條件 | 對照組 / 實驗組 |
 
-### B. 暖身與整體經驗
+### 訪談筆記
 
-| 問題 | 記錄 |
+| 主題 | 記錄 |
 | --- | --- |
-| 1. 請簡單描述剛剛整個小組討論過程。 | |
-| 2. 你覺得自己在討論中表達想法容易嗎？為什麼？ | |
-| 3. 有沒有任何時候你有想法，但最後沒有說出來？ | |
+| private channel 使用與意願 | |
+| private-to-public 轉換 | |
+| withheld ideas / disagreements | |
+| shared unspoken thoughts 與表達信心 | |
+| cue 感受，實驗組才填 | |
+| cognitive load / disruption / agency | |
+| critical incident 追問結果 | |
 
-### C. Private Channel 使用經驗
+### H1-H4 摘要
 
-| 問題 | 記錄 |
+| Hypothesis | 初步證據 |
 | --- | --- |
-| 4. 個人思考階段，你怎麼決定自己的排序和理由？ | |
-| 5. 你有使用 private mic 或 private text 嗎？為什麼有或沒有？ | |
-| 6. 你通常把哪些內容放在 private channel？ | |
-| 7. 知道 private thoughts 不會自動公開，會不會影響你願不願意先記下想法？ | |
-| 8. 使用 private channel 會不會增加負擔或讓你分心？ | |
+| H1 shared unspoken thoughts 是否增加表達不同意見信心 | |
+| H2 early shared support 是否提高貢獻品質 | |
+| H3 alignment-based cue 是否更容易被接受 | |
+| H4 控制是否公開是否增加 private channel 使用意願 | |
 
-### D. Private-to-Public 轉換
+### 其他備註
 
-| 問題 | 記錄 |
+| 欄位 | 記錄 |
 | --- | --- |
-| 9. 有沒有任何 private channel 中的想法後來被你帶到公開討論？ | |
-| 10. 你怎麼決定那個想法可以公開說出來？ | |
-| 11. 有沒有任何 private 想法最後沒有提出？為什麼？ | |
-| 12. 沒提出的原因比較接近哪一種：不確定 / 怕打斷 / 別人已經講了 / 覺得自己是少數 / 時間不夠 / 其他？ | |
-| 13. 有沒有哪一刻你其實不同意別人的說法，但沒有馬上講？當時在考慮什麼？ | |
-
-### E. Shared Unspoken Thoughts and Confidence
-
-| 問題 | 記錄 |
-| --- | --- |
-| 14. 如果系統讓你知道「你不是唯一有這個方向想法的人」，會不會讓你比較有信心提出不同意見？為什麼？ | |
-| 15. 剛剛有沒有哪個時刻，你因為覺得可能有人支持你或有類似想法，而比較願意發言？ | |
-| 16. 有沒有哪個時刻，即使知道可能有人有類似想法，你仍然不想講？為什麼？ | |
-
-### F. Cue 相關問題，實驗組才問
-
-| 問題 | 記錄 |
-| --- | --- |
-| 17. 你有注意到系統提示嗎？第一次看到時，以為它代表什麼？ | |
-| 18. 你覺得提示是在幫助你、打斷你，還是沒有太大影響？ | |
-| 19. 有沒有任何提示讓你更想把不同意見、疑問或不確定想法說出來？ | |
-| 20. 有沒有任何提示你選擇忽略？為什麼？ | |
-| 21. 你覺得提示出現的時機合理嗎？有沒有太早、太晚或太多？ | |
-| 22. 提示有沒有讓你提出更完整的理由、比較或替代方案？ | |
-| 23. 你會不會擔心系統提示讓別人猜到你的 private thoughts？ | |
-
-### G. 對照組問題，對照組才問
-
-| 問題 | 記錄 |
-| --- | --- |
-| 17. 沒有系統提示時，你怎麼判斷什麼時候該提出自己的想法？ | |
-| 18. 有沒有任何時候你希望系統提醒你「這個想法可以講」？ | |
-| 19. 如果系統告訴你「你不是唯一有這個方向想法的人」，你覺得會更願意提出不同意見嗎？ | |
-| 20. 你覺得小組討論中有沒有任何想法被忽略？為什麼？ | |
-
-### H. Critical Incident 追問
-
-| 追問事件 | 問題 | 記錄 |
-| --- | --- | --- |
-| 事件 1 | | |
-| 事件 2 | | |
-| 事件 3 | | |
-| 事件 4 | | |
-
-### I. 收尾
-
-| 問題 | 記錄 |
-| --- | --- |
-| 24. 如果之後再用這個系統討論，你希望 private channel 或提示怎麼改？ | |
-| 25. 你覺得這個系統比較適合幫助哪一種想法被提出：疑問、反對、支持理由、還是新點子？為什麼？ | |
-| 26. 還有沒有任何你剛剛想說、但我沒有問到的地方？ | |
-
-### J. 訪談後摘要
-
-| 摘要欄位 | 記錄 |
-| --- | --- |
-| 受試者對 private channel 的態度 | 願意用 / 不願意用 / 有隱私疑慮 / 覺得負擔；原因： |
-| 受試者對 cue 的態度，實驗組才填 | 有幫助 / 干擾 / 無感 / 混淆；原因： |
-| H1 初步證據：shared unspoken thoughts 是否增加表達不同意見信心 | |
-| H2 初步證據：early shared support 是否提高貢獻品質 | |
-| H3 初步證據：alignment-based cue 是否更容易被接受 | |
-| H4 初步證據：控制是否公開是否增加 private channel 使用意願 | |
-| 其他重要備註 | |
+| 受試者建議 | |
+| 研究者備註 | |

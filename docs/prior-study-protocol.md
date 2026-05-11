@@ -343,18 +343,13 @@ The researcher captures the current state of the group ranking directly from the
 
 Each observer should use [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md) as the read-only observation reminder and one copy of [`observation-notion-template.zh.md`](./observation-notion-template.zh.md) as the per-participant record sheet. Observers should record critical incidents, not full transcripts. Focus on moments that can become concrete interview questions.
 
-The record sheet covers:
-
-- Record fields for each experiment phase.
-- Critical incident records.
-- Semi-structured interview response fields.
-- Post-interview summary fields for H1-H4.
+The record sheet only contains fields for private channel use, private-to-public transition, cue reactions, critical incidents, and H1-H4 summaries.
 
 ## 15. Post-study Interview Guide
 
 Interview participants individually. Target 8 to 12 minutes per participant. Do not begin by saying that the study is testing whether cues made them speak; ask about experience first, then private-to-public movement and critical incidents.
 
-Use the "Page 2. 半結構式訪談問什麼" section in [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md) as the interview reminder, and record responses in the "Page 2. 半結構式訪談記錄" section in [`observation-notion-template.zh.md`](./observation-notion-template.zh.md).
+Use the "Page 2. 半結構式訪談問什麼" section in [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md) as the interview reminder, and record only notes/summaries in the "Page 2. 半結構式訪談記錄" section in [`observation-notion-template.zh.md`](./observation-notion-template.zh.md).
 
 ## 16. Debrief Script
 

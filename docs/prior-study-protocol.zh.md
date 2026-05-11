@@ -347,11 +347,7 @@ Cue 的角色應該是提供 shared unspoken alignment 的 awareness，而不是
 
 **單人觀察記錄表詳見**：[`observation-notion-template.zh.md`](./observation-notion-template.zh.md)
 
-記錄表包含：
-- 單一受試者的 session 基本資訊。
-- 實驗期間各階段需要記錄的欄位。
-- Critical incident 快速記錄表。
-- 半結構式訪談記錄欄位與 critical incident 追問欄位。
+記錄表只保留填寫欄位：private channel 使用、private-to-public transition、cue 反應、critical incidents，以及 H1-H4 摘要。
 
 ## 15. 事後訪談
 
@@ -361,18 +357,7 @@ Cue 的角色應該是提供 shared unspoken alignment 的 awareness，而不是
 
 **訪談記錄表詳見**：[`observation-notion-template.zh.md`](./observation-notion-template.zh.md) — 「Page 2. 半結構式訪談記錄」段落
 
-訪談記錄表包含以下區塊：
-
-| 區塊 | 內容 | 備註 |
-| --- | --- | --- |
-| 暖身問題 | 整體經驗、表達難易度 | 三組同問 |
-| 個人思考階段 | 排序决策、private 功能使用 | 三組同問 |
-| Private-to-Public 轉換 | 未發言原因、發言觸發因素 | 三組同問 |
-| Cue 相關問題 | 注意到 cue、理解、影響 | 僅實驗組 |
-| 對照組問題 | 自判發言時機、對 cue 的想像 | 僅對照組 |
-| Critical Incident 追問 | 根據觀察者記錄的具體事件追問 | 三組同 |
-
-> **提醒**：不要一開始就說本研究在測試 cue 是否讓參與者更願意發言。先問整體經驗，再追問具體事件。
+訪談只圍繞 private channel 使用、private-to-public transition、shared unspoken thoughts、cue 感受，以及觀察者記錄的 critical incidents。不要一開始就說本研究在測試 cue 是否讓參與者更願意發言。
 
 ## 16. Debrief 說明
 
