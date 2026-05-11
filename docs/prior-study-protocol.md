@@ -1,42 +1,74 @@
-# OmniObserve Prior Study Protocol v0
+# OmniObserve Prior Study Protocol v1
 
 ## 1. Study Overview
 
-### 1.1 Research Goal
+### 1.1 Motivation and Research Gap
 
-This prior study examines whether OmniObserve's Similarity Cue helps participants bring ideas from their private thinking space into public group discussion.
+Group brainstorming and group decision-making are widely used in classrooms and workplaces, but they often underperform because of hidden group dynamics. Participants may withhold doubts, disagreements, or novel ideas because they feel uncertain, do not want to interrupt, worry about evaluation, or believe they are alone in holding a minority view. As a result, some valuable insights may never appear in the public discussion [cite].
 
-The study focuses on four questions:
+Existing AI facilitators usually operate on what has already been said or typed, such as group chat, real-time transcripts, or meeting summaries. These systems can organize public discourse, but they cannot help with ideas that remain unspoken. If the best ideas stay silent, a facilitator that only analyzes the public channel will not see them.
 
-1. What ideas do participants generate during the private thinking phase?
-2. Which private ideas are later raised in public discussion?
-3. Does the Similarity Cue encourage participants to voice ideas they might otherwise withhold?
-4. How do participants interpret, trust, ignore, or act on the cue?
+The central question of this study is: Can an AI facilitator help bring silent ideas to light without disrupting the main discussion or taking agency away from participants?
+
+### 1.2 Our Approach: Front-Back Channel Framework
+
+OmniObserve uses a front-back channel framework to bridge public discussion and private thought.
+
+- **Front channel**: public group discussion, including public voice, group chat, public transcript, and shared ranking.
+- **Back channel**: each participant's private thoughts, including quick voice input, text notes, doubts, disagreements, emerging ideas, and ranking rationales.
+- **AI facilitation layer**: the system detects alignment or mismatch across private thoughts and between private thoughts and public discourse without directly exposing private content.
+
+The system does not speak for participants. It supports three transition steps:
+
+1. **Capture private signals**: record doubts, disagreements, and supporting reasons through lightweight private input.
+2. **Connect shared unspoken thoughts**: identify when multiple participants have similar ideas that have not yet surfaced publicly.
+3. **Scaffold transition into public discussion**: cue participants that they may not be alone in a thought, while leaving whether, when, and how to share under participant control.
+
+This pilot uses the Lost at Sea group-ranking task because it naturally creates disagreement, minority views, confidence gaps, and competing rationales. Although it is not an open-ended creativity task, it provides an observable setting for private-to-public transition: participants may privately hold a rationale but fail to raise it publicly because of social pressure, timing, or uncertainty.
+
+### 1.3 Design Considerations
+
+| ID | Design consideration | OmniObserve design implication |
+| --- | --- | --- |
+| D1 | Reduce cognitive load: the backchannel should not compete with the main discussion. | Support lightweight private input such as quick voice or short text; prioritize cues about private-public mismatch or shared unspoken thoughts rather than requiring long-form input. |
+| D2 | Minimize disruption: avoid interrupting the primary discussion flow. | Surface cues only when the system detects shared unspoken alignment or salient private-public mismatch. Cues should be brief, sparse, and ignorable. |
+| D3 | Preserve agency: participants decide if and when to share. | The system never automatically publishes private thoughts or reveals another participant's private reasoning. Cues provide social support and timing hints, but participants control public sharing. |
+
+### 1.4 Key Hypotheses
+
+This study replaces open-ended RQs with hypotheses and aligns logs, observations, and interviews to each hypothesis.
+
+| Hypothesis | Claim | Main evidence |
+| --- | --- | --- |
+| H1 | Awareness of shared unspoken thoughts increases confidence in expressing disagreement. | Disagreement after cue display, interview accounts of increased confidence, private disagreement converted into public disagreement. |
+| H2 | Early signals of shared support for unspoken ideas lead to higher-quality contributions. | Contributions after cues include reasons, evidence, comparisons, alternatives, or integration; group-ranking quality as secondary evidence. |
+| H3 | Participants are more receptive to interruptions when surfaced ideas demonstrate prior alignment. | Participants describe cue timing as grounded rather than disruptive; constructive uptake after cue display. |
+| H4 | Control over if and when to share increases participants' willingness to externalize ideas in the private channel. | Quantity, specificity, and type of private inputs; interview accounts of privacy and control. |
 
 The goal is not only to compare final task scores. Because this is a small pilot, the main evidence should come from system logs, observation notes, and post-study interviews about private-to-public idea movement.
 
-### 1.2 Study Conditions
+### 1.5 Study Conditions
 
-This study uses a between-subjects pilot design with two groups. Each group has three participants.
+This study uses a between-subjects pilot design with two groups. Each group has three discussants. If a confederate is used, the confederate should replace one discussant rather than add a fourth person, so the three-person group structure remains consistent.
 
 | Group | Condition | Description |
 | --- | --- | --- |
-| Control Group | No Similarity Cue | Participants use the platform for private thinking and public discussion, but similarity cues are disabled. |
-| Experimental Group | With Similarity Cue | During group discussion, the system may show cues based on private ideas and detected alignment with another participant or the current discussion. |
+| Control Group | Front channel + private capture only | Participants use the platform for private thinking and public discussion, and the system logs private input, but no shared unspoken thought cue is shown. |
+| Experimental Group | Front-back channel cue | During group discussion, the system may show cues based on private thoughts, public discourse, and detected alignment across participants. |
 
-The control condition should keep the same core task, public discussion, ranking interface, public transcript, and group chat when possible. It should remove the core intervention: similarity/backchannel cueing.
+The control condition should keep the same core task, public discussion, ranking interface, public transcript, private input, and group chat when possible. It should remove the core intervention: converting backchannel alignment into public-discussion cues.
 
-### 1.3 Participants
+### 1.6 Participants
 
-Each group includes three participants. Preferred criteria:
+Each group includes three discussants. Preferred criteria:
 
 - Participants do not know the Lost at Sea standard answer.
 - Participants are not part of the OmniObserve development team.
-- Participants should not know the exact research hypothesis about Similarity Cue and private-to-public idea transfer.
+- Participants should not know the exact research hypothesis about shared unspoken thoughts and speaking behavior.
 - If possible, participants should not already be close collaborators.
 - If a confederate is used, the other participants should not know this during the task, but the deception must be explained in the debrief.
 
-### 1.4 Setting
+### 1.7 Setting
 
 Participants are placed in three separate rooms or classrooms. They communicate only through OmniObserve.
 
@@ -238,7 +270,7 @@ Duration: 5 minutes.
 - Ranking movement history.
 - Mic state and input behavior.
 
-Important: Similarity Cue should not be shown during the individual thinking phase, even if the system computes similarity in the background.
+Important: cues should not be shown during the individual thinking phase, even if the system computes similarity or shared unspoken alignment in the background.
 
 ## 12. Phase 2: Group Discussion
 
@@ -258,17 +290,19 @@ Duration: 15 minutes.
 >
 > 你們有 15 分鐘，需要在時間內產生一份小組共同排序。
 >
-> 系統有時候可能會根據你先前記錄的想法，提醒你有些內容可能和目前討論有關。你可以自行決定是否採納、忽略，或把它帶入討論。系統不會自動替你公開你的個人想法。
+> 系統有時候可能會根據你先前記錄的想法，提醒你有些內容可能和目前討論有關，或可能也有其他人有相近想法。你可以自行決定是否採納、忽略，或把它帶入討論。系統不會自動替你公開你的個人想法，也不會公開其他人的個人想法。
 
 ### 12.3 Suggested Cue Text
 
 Use one of these cue styles:
 
-> 有人和你對「{item}」有相似想法，但理由可能不完全一樣。你可以考慮把你的觀點提出來討論。
+> 你不是唯一對「{item}」有這個方向想法的人。若你覺得合適，可以把你的觀點帶入討論。
 
-> 你先前提到的「{idea_summary}」可能和目前討論有關。你可以考慮提出來補充。
+> 你先前提到的「{idea_summary}」和目前討論可能有落差。若你想補充，可以選擇現在或稍後提出。
 
-The cue should invite action without exposing another participant's private reasoning. The system should connect participants based on conclusion alignment or decision-level alignment, not necessarily identical reasoning.
+> 目前有不只一個人私下提到與「{item}」相關的疑問或支持理由。你可以決定是否提出自己的版本。
+
+The cue should provide awareness of shared unspoken alignment without exposing another participant's private reasoning. The system should connect participants based on conclusion alignment, decision-level alignment, or private-public mismatch, not necessarily identical reasoning. Cues should be sparse: if there is only one private thought and no alignment or mismatch, the system should usually stay silent.
 
 ### 12.4 If a Confederate Is Used
 
@@ -279,7 +313,8 @@ The confederate should:
 - Present strong but plausible incorrect arguments.
 - Avoid obviously absurd reasoning.
 - Avoid dominating so much that real participants cannot speak.
-- Create opportunities for other participants to challenge the argument.
+- Create situations where real participants may privately disagree but need confidence and timing to challenge publicly.
+- Leave room after disagreement so researchers can observe whether public discussion accepts the challenge.
 
 The confederate role must be explained during debrief, and participants must be allowed to withdraw their data afterward.
 
@@ -300,81 +335,26 @@ The researcher captures the current state of the group ranking directly from the
 - Public chat messages.
 - Cues shown, cue timing, cue recipient, and linked idea blocks.
 - Whether cued ideas appeared in public discussion after cue display.
+- Whether the public discussion accepted, ignored, or resisted the cued idea.
+- Whether private thoughts include doubts, disagreements, novel ideas, and support signals.
+- Whether detected shared unspoken thoughts became public contributions.
 
 ## 14. Observer Note Sheet
 
-Observers should record critical incidents, not full transcripts. Focus on moments that can become concrete interview questions.
+Each observer should use [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md) as the read-only observation reminder and one copy of [`observation-notion-template.zh.md`](./observation-notion-template.zh.md) as the per-participant record sheet. Observers should record critical incidents, not full transcripts. Focus on moments that can become concrete interview questions.
 
-| Time | Participant | Event | Possible Interpretation | Follow-up Question |
-| --- | --- | --- | --- | --- |
-| 06:30 | P2 | Saw cue, paused, did not speak. | Cue noticed but not acted on. | 你剛剛看到提示時在想什麼？ |
-| 09:10 | P1 | Mentioned mirror privately, but did not raise it publicly. | Private-to-public transfer failed. | 你後來沒有提出小鏡子的原因是什麼？ |
-| 12:40 | P3 | Changed ranking after another participant spoke strongly. | Social influence. | 是什麼讓你改變排序？ |
+The record sheet covers:
 
-Observers should especially watch for:
-
-- Participant notices a cue and speaks soon after.
-- Participant notices a cue but ignores it.
-- Participant has private idea that never appears publicly.
-- Participant tries to speak but stops.
-- Participant changes ranking after another participant pushes an argument.
-- Participant looks confused about mic state, cue meaning, or ranking controls.
-- Participant asks for help or appears blocked by the interface.
-- Participant uses group chat instead of public mic.
+- Record fields for each experiment phase.
+- Critical incident records.
+- Semi-structured interview response fields.
+- Post-interview summary fields for H1-H4.
 
 ## 15. Post-study Interview Guide
 
-Interview participants individually. Target 8 to 12 minutes per participant. Do not begin by saying that the study is testing whether cues made them speak; ask about experience first, then critical incidents.
+Interview participants individually. Target 8 to 12 minutes per participant. Do not begin by saying that the study is testing whether cues made them speak; ask about experience first, then private-to-public movement and critical incidents.
 
-### 15.1 Warm-up Questions
-
-1. 你可以簡單描述一下剛剛整個討論過程嗎？
-2. 你覺得你在小組討論中有多容易表達自己的想法？
-3. 有沒有任何時候你有想法，但最後沒有說出來？
-
-### 15.2 Individual Thinking Questions
-
-1. 在 5 分鐘個人思考階段，你是怎麼決定排序的？
-2. 你有使用個人想法記錄功能嗎？為什麼有或沒有？
-3. 你覺得個人想法記錄對後面的討論有幫助嗎？
-4. 你會不會擔心個人想法被其他人看到？
-
-### 15.3 Private-to-Public Transition Questions
-
-1. 有沒有任何你在個人階段想到的東西，後來在小組討論中沒有提出來？
-2. 你沒有提出來的原因是什麼？例如不確定、怕打斷、覺得別人已經講了、時間不夠、或覺得不重要。
-3. 有沒有任何想法是你原本沒有打算講，但後來因為討論過程而提出來？
-4. 有沒有哪個人的發言讓你改變自己的排序？
-
-### 15.4 Cue-specific Questions: Experimental Group Only
-
-1. 你有注意到系統提示嗎？
-2. 你第一次看到提示時，以為它代表什麼？
-3. 你覺得提示是在幫助你、干擾你，還是沒有太大影響？
-4. 有沒有任何提示讓你更想把自己的想法說出來？
-5. 有沒有任何提示你選擇忽略？為什麼？
-6. 你覺得提示文字有足夠清楚嗎？
-7. 你覺得系統提示「有人和你有相似想法」時，會讓你更願意提出不同意見嗎？
-8. 你會不會擔心自己的 private 想法被別人看到？
-
-### 15.5 Control Group Questions
-
-1. 在沒有系統提示的情況下，你怎麼判斷什麼時候該提出自己的想法？
-2. 有沒有任何時候你希望系統提醒你「這個想法可以講」？
-3. 如果系統告訴你有人和你有類似想法，你覺得你會更願意提出來嗎？
-4. 你覺得小組討論中有沒有任何想法被忽略？
-
-### 15.6 Critical Incident Questions
-
-Use observer notes and system logs. Examples:
-
-> 我注意到你在第 8 分鐘時看了一下右側提示，但後來沒有講話。你當時在想什麼？
-
-> 我注意到你在個人階段把「小鏡子」排得很高，但小組討論時沒有主動提出。你還記得當時為什麼沒有講嗎？
-
-> 我注意到你在提示出現後不久提出了「萊姆酒」的理由。那個提示有影響你提出這個想法嗎？
-
-> 我注意到你在某位參與者提出不同排序後改了自己的排序。你當時是被哪個理由說服？
+Use the "Page 2. 半結構式訪談問什麼" section in [`observation-cheatsheet.zh.md`](./observation-cheatsheet.zh.md) as the interview reminder, and record responses in the "Page 2. 半結構式訪談記錄" section in [`observation-notion-template.zh.md`](./observation-notion-template.zh.md).
 
 ## 16. Debrief Script
 
@@ -382,11 +362,11 @@ Use observer notes and system logs. Examples:
 
 > 謝謝你完成今天的研究。
 >
-> 我們這次研究主要想了解，在小組討論中，系統是否能幫助參與者把個人階段想到、但可能沒有說出來的想法帶入公開討論。
+> 我們這次研究主要想了解，在小組討論中，系統是否能幫助參與者把個人階段想到、但可能沒有說出來的想法帶入公開討論。特別是當不只一個人私下有相近的疑問、支持或不同意見時，系統能否提供適當提醒，讓參與者更有信心決定是否提出。
 >
 > 有些組別會看到系統提示，有些組別不會。這是我們研究設計的一部分，用來比較提示是否影響討論行為。
 >
-> 系統不會自動公開你的個人想法。提示的目的是提醒你可能有相關觀點可以提出，但是否提出仍由你自己決定。
+> 系統不會自動公開你的個人想法，也不會把你的 private reasoning 直接給其他人看。提示的目的是提供可能的 shared alignment 或討論時機，但是否提出、何時提出、怎麼提出仍由你自己決定。
 >
 > 你的資料會匿名處理，只用於研究分析。
 
@@ -394,13 +374,22 @@ Use observer notes and system logs. Examples:
 
 > 另外，今天討論中有一位參與者是研究團隊安排的成員。他的任務是在討論中提出某些具有說服力、但不一定正確的觀點。
 >
-> 這是為了觀察當小組中出現較強勢的意見時，其他參與者是否會提出不同想法，以及系統提示是否能幫助不同觀點被提出。
+> 這是為了觀察當小組中出現較強勢的意見時，其他參與者是否會先在 private channel 留下不同想法，以及系統提示是否能幫助 shared unspoken disagreement 被帶入公開討論。
 >
 > 我們不會用這個設計評價你的能力或表現，而是分析系統與討論過程。
 >
 > 如果你對這個安排感到不舒服，可以告訴我們，我們可以刪除你的資料。
 
 ## 17. Measures
+
+### 17.0 Hypothesis-to-measure Mapping
+
+| Hypothesis | Observable phenomenon | Data source |
+| --- | --- | --- |
+| H1 confidence in disagreement | Participants become more willing to express disagreement after becoming aware of shared unspoken thoughts. | Disagreement after cues, interview accounts of confidence, private disagreement to public disagreement conversion. |
+| H2 quality of contribution | Early private support becomes more elaborated public contribution. | Whether public contributions include reasons, evidence, comparison, integration, or alternatives; final ranking improvement as secondary evidence. |
+| H3 interruption receptivity | Participants treat cues as grounded reminders rather than disruptions. | Cue noticed, cue ignored, cue perceived as helpful/disruptive, public uptake after cues. |
+| H4 willingness to externalize privately | Participant control increases willingness to leave thoughts in the private channel. | Quantity, length, type, and specificity of private input; interview accounts of privacy and control. |
 
 ### 17.1 Quantitative Measures
 
@@ -410,12 +399,17 @@ Use observer notes and system logs. Examples:
 | Group score | Sum of absolute ranking differences between final group ranking and standard answer. Lower is better. |
 | Improvement from individual to group | Average individual score minus group score. |
 | Private-to-public conversion rate | Private ideas later appearing in public discussion divided by all private ideas. |
+| Shared unspoken conversion rate | Shared unspoken private ideas later appearing in public discussion divided by all shared unspoken private ideas. |
 | Cue uptake rate | Cues followed by related public contribution divided by all cues shown. |
 | Ignored cue rate | Cues not followed by related public contribution divided by all cues shown. |
+| Disagreement expression rate | Private disagreements later expressed publicly, or number of public disagreement turns per participant. |
+| Private externalization rate | Number, average length, type, and task-item coverage of private ideas per participant. |
+| Cue receptivity rating | Interview or questionnaire rating of whether cues were helpful, disruptive, and well timed. |
+| Contribution quality score | Researcher-coded quality of public contribution, such as rationale, comparison, evidence, integration, or new perspective. |
 | Speaking turns | Number of public speaking turns per participant. |
 | Speaking duration | Total public speaking time per participant, if available. |
 | Ranking change count | Number of item moves per participant and group. |
-| Conflict highlighting cases | Number of private-public rank differences above threshold, such as more than 2 positions. |
+| Private-public mismatch cases | Number of private-public rank or idea differences above threshold, such as more than 2 positions. |
 
 ### 17.2 Qualitative Codes
 
@@ -426,6 +420,13 @@ Use observer notes and system logs. Examples:
 | cue noticed | Participant noticed the cue. |
 | cue ignored | Participant noticed the cue but did not act on it. |
 | cue prompted speaking | Participant reported that a cue contributed to speaking. |
+| shared unspoken alignment | Two or more participants expressed similar private thoughts that had not surfaced publicly. |
+| private-public mismatch | A participant's private thought differs from public discussion or the group ranking. |
+| disagreement expressed | Participant publicly disagreed, challenged, or expressed reservation. |
+| disagreement withheld | Participant had a private disagreement but did not raise it publicly. |
+| contribution elaborated | Public contribution included rationale, comparison, evidence, assumptions, or integration. |
+| interruption accepted | Participant perceived cue timing as reasonable or public discussion took up the cued idea. |
+| interruption resisted | Participant perceived cue as disruptive or public discussion ignored/rejected the cued idea. |
 | uncertainty | Participant was unsure whether their idea was correct or worth saying. |
 | timing barrier | Participant did not know when to interrupt or enter the discussion. |
 | social pressure | Participant held back because of dominant opinion or group consensus. |
@@ -454,6 +455,7 @@ During the study:
 - [ ] Private transcripts and idea blocks captured.
 - [ ] Group discussion transcript captured.
 - [ ] Cue logs captured for experimental condition.
+- [ ] Shared unspoken alignment and private-public mismatch cases marked.
 - [ ] Final group ranking captured.
 - [ ] Observer notes written with timestamps.
 
@@ -482,7 +484,7 @@ Because Lost at Sea has a standard answer, participants must be told not to sear
 
 ### 19.4 Cue Overexposure
 
-Do not over-explain the Similarity Cue before the task. If participants focus only on the cue, the study may become less natural. The experimental group only needs to know that the system may sometimes show relevant reminders, and that they control whether to act on them.
+Do not over-explain the shared unspoken thought cue before the task. If participants focus only on the cue, the study may become less natural. The experimental group only needs to know that the system may sometimes show relevant reminders, and that they control whether to act on them.
 
 ### 19.5 Confederate Deception
 
@@ -502,7 +504,7 @@ Use this as the quick checklist on experiment day.
 8. Start 5-minute individual thinking phase.
 9. Save or confirm individual ranking.
 10. Start 15-minute group discussion phase.
-11. For experimental group, enable Similarity Cue during group phase only.
+11. For experimental group, enable shared unspoken thought cue during group phase only.
 12. Submit final group ranking.
 13. Conduct individual interviews using observer notes.
 14. Debrief participants.

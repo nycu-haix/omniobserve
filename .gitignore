@@ -5,4 +5,4 @@ node_modules/
 /audio-test/vad-backend/segments
 .DS_Store
 .env
-similarity_eval_prompt.md
+*.pdf

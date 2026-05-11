@@ -14,6 +14,13 @@ The confederate participates as a normal group member. His speaking style should
 
 The confederate's main discussion stance:
 
+The confederate's research role is not simply to push the group toward an incorrect answer. The role is to create a plausible but debatable public position that may produce "privately disagree, publicly hesitate" moments among real participants. Researchers should observe:
+
+- Whether participants first record doubts or counterarguments in the private channel.
+- Whether multiple participants form shared unspoken disagreement.
+- Whether system cues help those unspoken disagreements enter public discussion.
+- Whether the group accepts, ignores, or resists those disagreements once voiced.
+
 > I would prioritize direction, basic information, and long-term survival tools. The prompt says our position is uncertain and land is far away, so I would not rely on only one type of item.
 
 ## 2. Suggested Initial Ranking
@@ -146,6 +153,8 @@ The confederate should:
 - Discuss naturally like a regular participant.
 - Occasionally ask others for their rankings or reasons.
 - Concede small points so the discussion can continue.
+- Pause or invite responses after making a strong claim, so others have space to disagree.
+- If someone challenges the claim, ask them to explain the reason before pushing back.
 - Keep explaining his ranking through information, direction, and long-term survival tools.
 - Avoid saying he knows the answer.
 - Leave room for other people to speak.
