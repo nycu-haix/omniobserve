@@ -41,6 +41,12 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
 	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
+	const similarityReasonTitleColor =
+		shouldShowCue && block.similarityIsSameReason != null
+			? block.similarityIsSameReason
+				? "bg-[rgb(205,255,186)]"
+				: "bg-[rgb(255,249,184)]"
+			: null;
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -162,6 +168,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			className={cn(
 				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
+				similarityReasonTitleColor,
 				block.isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
