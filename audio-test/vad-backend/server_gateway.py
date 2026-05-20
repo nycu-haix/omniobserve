@@ -66,6 +66,17 @@ TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
 PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
+ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
+ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
+
+
+@app.get("/asr-status")
+async def asr_status():
+    return {
+        "mock": ASR_MOCK,
+        "model": ASR_MODEL_NAME,
+        "device": str(asr_device),
+    }
 
 # Clear old wav / transcript files on backend startup
 def clear_output_files():
@@ -122,29 +133,44 @@ print("Silero VAD loaded")
 # Load Breeze ASR
 # =========================
 
-ASR_MODEL_NAME = "MediaTek-Research/Breeze-ASR-25"
+def resolve_asr_device() -> torch.device:
+    configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
 
-asr_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if configured_device in ("", "auto"):
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-if asr_device.type == "cuda":
-    asr_dtype = torch.float16
-    print("CUDA detected. Breeze ASR will run on GPU.")
+    if configured_device == "cuda":
+        return torch.device("cuda:0")
+
+    return torch.device(configured_device)
+
+if ASR_MOCK:
+    asr_device = torch.device("cpu")
+    asr_processor = None
+    asr_model = None
+    print("ASR_MOCK enabled. Breeze ASR model loading is skipped.")
 else:
-    asr_dtype = torch.float32
-    print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
+    asr_device = resolve_asr_device()
 
-print("Loading Breeze ASR 25 from Hugging Face cache...")
+    if asr_device.type == "cuda":
+        asr_dtype = torch.float16
+        print("CUDA detected. Breeze ASR will run on GPU.")
+    else:
+        asr_dtype = torch.float32
+        print("CUDA not detected. Breeze ASR will run on CPU. This may be slow.")
 
-asr_processor = WhisperProcessor.from_pretrained(ASR_MODEL_NAME)
+    print(f"Loading Breeze ASR from Hugging Face cache: {ASR_MODEL_NAME}")
 
-asr_model = WhisperForConditionalGeneration.from_pretrained(
-    ASR_MODEL_NAME,
-    torch_dtype=asr_dtype,
-).to(asr_device)
+    asr_processor = WhisperProcessor.from_pretrained(ASR_MODEL_NAME)
 
-asr_model.eval()
+    asr_model = WhisperForConditionalGeneration.from_pretrained(
+        ASR_MODEL_NAME,
+        torch_dtype=asr_dtype,
+    ).to(asr_device)
 
-print(f"Breeze ASR 25 loaded on {asr_device}")
+    asr_model.eval()
+
+    print(f"Breeze ASR loaded on {asr_device}")
 
 # def resolve_asr_device() -> str:
 #     configured_device = os.getenv("ASR_DEVICE", "auto").strip().lower()
@@ -497,6 +523,9 @@ def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
     if segment_rms < 0.0008:
         print("Skip ASR: segment rms too low")
         return ""
+
+    if ASR_MOCK:
+        return "local mock transcript"
 
     inputs = asr_processor(
         audio_float32,

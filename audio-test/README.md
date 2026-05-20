@@ -2,7 +2,7 @@
 
 This directory contains the standalone audio test stack for validating browser microphone capture, WebSocket audio streaming, backend VAD segmentation, FunASR transcription, and transcript return messages.
 
-It is separate from the main `backend/` and `frontend/` app. Use it when you want to test whether the audio pipeline itself works before wiring it into the full OmniObserve meeting experience.
+It can run either as a standalone diagnostic stack or as part of the root local full-stack Compose setup. Use the standalone mode when you want to test whether the audio pipeline itself works before wiring it into the full OmniObserve meeting experience.
 
 ## What It Provides
 

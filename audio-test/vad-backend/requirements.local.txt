@@ -1,0 +1,11 @@
+fastapi
+numpy
+opencc-python-reimplemented
+torch==2.4.1
+torchaudio==2.4.1
+uvicorn[standard]
+websockets
+huggingface_hub
+transformers==4.44.2
+accelerate
+sentencepiece

@@ -204,6 +204,56 @@ cd backend
 docker compose up -d    # 啓動 PostgreSQL + Ollama + Backend
 ```
 
+## Local Full Stack
+
+本機如果要把前端、後端、DB、Ollama、audio-test ASR gateway 都放在同一個 Docker Desktop project 裡，從 repo root 啟動：
+
+```bash
+docker compose -p omniobserve-local -f docker-compose.local.yml up --build
+```
+
+這個本機 stack 會啟動：
+
+| Service | URL / Port | Purpose |
+|---------|------------|---------|
+| Frontend | `http://127.0.0.1:5177` | OmniObserve Vite app |
+| Backend | `http://127.0.0.1:8000` | FastAPI API + board WebSockets |
+| VAD/ASR gateway | `http://127.0.0.1:8001` | `audio-test/vad-backend` diagnostic page and `/sessions/{id}/audio-stream` |
+| Audio static tests | `http://127.0.0.1:3001` | Legacy audio-test static pages |
+| Jitsi Meet | `https://meet.omni.elvismao.com` | Remote meeting UI used by the frontend |
+| Postgres | `127.0.0.1:5433` | Local DB |
+| Ollama | `127.0.0.1:11434` | Local embedding service |
+
+The frontend in this stack is configured with:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_WS_BASE_URL=ws://127.0.0.1:8000
+VITE_AUDIO_WS_BASE_URL=ws://127.0.0.1:8001
+VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+```
+
+The frontend is published on host port `5177` by default to avoid common local Vite ports `5173-5176`. Override it with `FRONTEND_PORT=...` if needed.
+
+`audio-test` remains available as a standalone diagnostic stack, and `backend/`, `frontend/`, `meet/` keep their separate Compose files for Dokploy deployment. The root `docker-compose.local.yml` is only the local all-in-one entrypoint.
+
+On macOS, the ASR gateway uses `audio-test/vad-backend/Dockerfile.omni-local` and defaults to the real Breeze ASR model, `MediaTek-Research/Breeze-ASR-25`. The first startup downloads the Hugging Face model into the `model_cache` Docker volume and can take several minutes:
+
+```bash
+docker compose -p omniobserve-local -f docker-compose.local.yml logs -f vad-backend
+curl http://127.0.0.1:8001/asr-status
+```
+
+Set `ASR_MOCK=1` if you want a fast local smoke test that returns `local mock transcript` without loading Breeze. Set `ASR_DEVICE=cpu` to force CPU, or leave `ASR_DEVICE=auto` to use CUDA if Docker exposes a GPU.
+
+Local Jitsi is optional. By default the frontend uses `https://meet.omni.elvismao.com`. To test the local Jitsi containers instead:
+
+```bash
+VITE_JITSI_BASE_URL=http://127.0.0.1:8088 \
+JITSI_INTERNAL_BASE_URL=http://meet-web \
+docker compose -p omniobserve-local -f docker-compose.local.yml --profile local-meet up --build
+```
+
 ### Environment Variables
 
 | Variable | Default | Description |

@@ -1,0 +1,268 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-omniobserve}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-omniobserve}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-omniobserve}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://opencode.ai/zen/go/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-qwen3.6-plus}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-bge-m3}
+      LLM_MOCK: ${LLM_MOCK:-1}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-0}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  vad-backend:
+    build:
+      context: ./audio-test/vad-backend
+      dockerfile: Dockerfile.omni-local
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: "1"
+      XDG_CACHE_HOME: /root/.cache
+      TORCH_HOME: /root/.cache/torch
+      MODELSCOPE_CACHE: /root/.cache/modelscope
+      HF_HOME: /root/.cache/huggingface
+      ASR_MOCK: ${ASR_MOCK:-0}
+      ASR_MODEL_NAME: ${ASR_MODEL_NAME:-MediaTek-Research/Breeze-ASR-25}
+      ASR_DEVICE: ${ASR_DEVICE:-auto}
+      FUNASR_DISABLE_PUNC: ${FUNASR_DISABLE_PUNC:-0}
+      PIPELINE_WS_BASE_URL: ws://backend:8000
+    ports:
+      - "${VAD_BACKEND_PORT:-8001}:8000"
+    volumes:
+      - model_cache:/root/.cache
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 600s
+
+  audio-test-static:
+    image: python:3.11-slim
+    restart: unless-stopped
+    working_dir: /site
+    command: python -m http.server 3000 --bind 0.0.0.0
+    ports:
+      - "${AUDIO_TEST_STATIC_PORT:-3001}:3000"
+    volumes:
+      - ./audio-test:/site:ro
+    depends_on:
+      - vad-backend
+
+  frontend:
+    image: node:24-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm dev --host 0.0.0.0"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://127.0.0.1:8000}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://127.0.0.1:8000}
+      VITE_AUDIO_WS_BASE_URL: ${VITE_AUDIO_WS_BASE_URL:-ws://127.0.0.1:8001}
+      VITE_JITSI_BASE_URL: ${VITE_JITSI_BASE_URL:-https://meet.omni.elvismao.com}
+      VITE_DEFAULT_ROOM_NAME: ${VITE_DEFAULT_ROOM_NAME:-lost-at-sea}
+      JITSI_INTERNAL_BASE_URL: ${JITSI_INTERNAL_BASE_URL:-}
+    ports:
+      - "${FRONTEND_PORT:-5177}:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - frontend_pnpm_store:/root/.local/share/pnpm/store
+    depends_on:
+      - backend
+      - vad-backend
+
+  meet-web:
+    profiles:
+      - local-meet
+    image: jitsi/web:${JITSI_IMAGE_VERSION:-stable-10888}
+    restart: unless-stopped
+    volumes:
+      - meet_web_config:/config
+      - meet_web_crontabs:/var/spool/cron/crontabs
+      - meet_transcripts:/usr/share/jitsi-meet/transcripts
+      - meet_web_load_test:/usr/share/jitsi-meet/load-test
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      PUBLIC_URL: ${JITSI_PUBLIC_URL:-http://127.0.0.1:8088}
+      DISABLE_HTTPS: "1"
+      ENABLE_HTTP_REDIRECT: "0"
+      ENABLE_LETSENCRYPT: "0"
+      ENABLE_AUTH: "0"
+      ENABLE_GUESTS: "1"
+      BOSH_RELATIVE: "1"
+      ENABLE_XMPP_WEBSOCKET: "0"
+      ENABLE_P2P: "1"
+      ENABLE_PREJOIN_PAGE: "1"
+      ENABLE_WELCOME_PAGE: "1"
+      RESOLUTION: ${RESOLUTION:-720}
+      RESOLUTION_WIDTH: ${RESOLUTION_WIDTH:-1280}
+      START_AUDIO_MUTED: ${START_AUDIO_MUTED:-10}
+      START_VIDEO_MUTED: ${START_VIDEO_MUTED:-10}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_GUEST_DOMAIN: ${XMPP_GUEST_DOMAIN:-guest.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_RECORDER_DOMAIN: ${XMPP_RECORDER_DOMAIN:-recorder.meet.jitsi}
+      XMPP_PORT: ${XMPP_PORT:-5222}
+      JVB_PREFER_SCTP: "1"
+    ports:
+      - "${JITSI_WEB_PORT:-8088}:80"
+    depends_on:
+      - meet-prosody
+      - meet-jicofo
+      - meet-jvb
+
+  meet-prosody:
+    profiles:
+      - local-meet
+    image: jitsi/prosody:${JITSI_IMAGE_VERSION:-stable-10888}
+    restart: unless-stopped
+    expose:
+      - "5222"
+      - "5269"
+      - "5280"
+      - "5347"
+    volumes:
+      - meet_prosody_config:/config
+      - meet_prosody_plugins_custom:/prosody-plugins-custom
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      PUBLIC_URL: ${JITSI_PUBLIC_URL:-http://localhost:8088}
+      AUTH_TYPE: internal
+      ENABLE_AUTH: "0"
+      ENABLE_GUESTS: "1"
+      ENABLE_XMPP_WEBSOCKET: "1"
+      JICOFO_AUTH_PASSWORD: ${JICOFO_AUTH_PASSWORD:-local-jicofo-password}
+      JVB_AUTH_USER: ${JVB_AUTH_USER:-jvb}
+      JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD:-local-jvb-password}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_GUEST_DOMAIN: ${XMPP_GUEST_DOMAIN:-guest.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+      XMPP_RECORDER_DOMAIN: ${XMPP_RECORDER_DOMAIN:-recorder.meet.jitsi}
+      XMPP_PORT: ${XMPP_PORT:-5222}
+    networks:
+      default:
+        aliases:
+          - ${XMPP_SERVER:-xmpp.meet.jitsi}
+
+  meet-jicofo:
+    profiles:
+      - local-meet
+    image: jitsi/jicofo:${JITSI_IMAGE_VERSION:-stable-10888}
+    restart: unless-stopped
+    volumes:
+      - meet_jicofo_config:/config
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      ENABLE_AUTH: "0"
+      JICOFO_AUTH_PASSWORD: ${JICOFO_AUTH_PASSWORD:-local-jicofo-password}
+      JVB_BREWERY_MUC: ${JVB_BREWERY_MUC:-jvbbrewery}
+      XMPP_DOMAIN: ${XMPP_DOMAIN:-meet.jitsi}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+      XMPP_MUC_DOMAIN: ${XMPP_MUC_DOMAIN:-muc.meet.jitsi}
+      XMPP_RECORDER_DOMAIN: ${XMPP_RECORDER_DOMAIN:-recorder.meet.jitsi}
+      XMPP_SERVER: ${XMPP_SERVER:-xmpp.meet.jitsi}
+      XMPP_PORT: ${XMPP_PORT:-5222}
+    depends_on:
+      - meet-prosody
+
+  meet-jvb:
+    profiles:
+      - local-meet
+    image: jitsi/jvb:${JITSI_IMAGE_VERSION:-stable-10888}
+    restart: unless-stopped
+    ports:
+      - "${JVB_PORT:-10000}:10000/udp"
+      - "127.0.0.1:${JVB_COLIBRI_PORT:-8081}:8080"
+    volumes:
+      - meet_jvb_config:/config
+    environment:
+      TZ: ${TZ:-Asia/Taipei}
+      PUBLIC_URL: ${JITSI_PUBLIC_URL:-http://localhost:8088}
+      COLIBRI_REST_ENABLED: "1"
+      ENABLE_COLIBRI_WEBSOCKET: "0"
+      JVB_ADVERTISE_IPS: ${JVB_ADVERTISE_IPS:-127.0.0.1}
+      JVB_AUTH_USER: ${JVB_AUTH_USER:-jvb}
+      JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD:-local-jvb-password}
+      JVB_BREWERY_MUC: ${JVB_BREWERY_MUC:-jvbbrewery}
+      JVB_PORT: ${JVB_PORT:-10000}
+      XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}
+      XMPP_INTERNAL_MUC_DOMAIN: ${XMPP_INTERNAL_MUC_DOMAIN:-internal-muc.meet.jitsi}
+      XMPP_SERVER: ${XMPP_SERVER:-xmpp.meet.jitsi}
+      XMPP_PORT: ${XMPP_PORT:-5222}
+    depends_on:
+      - meet-prosody
+
+volumes:
+  postgres_data:
+  ollama_data:
+  model_cache:
+  frontend_node_modules:
+  frontend_pnpm_store:
+  meet_web_config:
+  meet_web_crontabs:
+  meet_web_load_test:
+  meet_transcripts:
+  meet_prosody_config:
+  meet_prosody_plugins_custom:
+  meet_jicofo_config:
+  meet_jvb_config:

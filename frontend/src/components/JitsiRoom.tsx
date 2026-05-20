@@ -1,7 +1,6 @@
-import { JitsiMeeting } from "@jitsi/react-sdk";
 import type IJitsiMeetExternalApi from "@jitsi/react-sdk/lib/types/IJitsiMeetExternalApi";
 import { Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
@@ -19,13 +18,43 @@ const JITSI_AUDIO_SYNC_RECHECK_DELAY_MS = 250;
 const JITSI_AUDIO_JOIN_RECHECK_DELAY_MS = 1000;
 
 type JitsiEventListener = (...args: unknown[]) => void;
+type JitsiMeetExternalApiConstructor = new (
+	domain: string,
+	options: {
+		roomName: string;
+		parentNode: HTMLElement;
+		width?: string | number;
+		height?: string | number;
+		noSSL?: boolean;
+		userInfo?: {
+			displayName?: string;
+			email?: string;
+		};
+		configOverwrite?: Record<string, unknown>;
+		interfaceConfigOverwrite?: Record<string, unknown>;
+	}
+) => IJitsiMeetExternalApi;
+
+declare global {
+	interface Window {
+		JitsiMeetExternalAPI?: JitsiMeetExternalApiConstructor;
+	}
+}
+
+const externalApiScriptPromises = new Map<string, Promise<JitsiMeetExternalApiConstructor>>();
 
 interface JitsiAudioMuteStatusEvent {
 	muted?: boolean;
 	isMuted?: boolean;
 }
 
-function parseJitsiDomain(meetingDomain?: string): string | null {
+interface JitsiEndpoint {
+	baseUrl: string;
+	host: string;
+	noSSL: boolean;
+}
+
+function parseJitsiEndpoint(meetingDomain?: string): JitsiEndpoint | null {
 	if (!meetingDomain) {
 		return null;
 	}
@@ -34,14 +63,73 @@ function parseJitsiDomain(meetingDomain?: string): string | null {
 		const normalizedDomain = meetingDomain.includes("://") ? meetingDomain : `https://${meetingDomain}`;
 		const url = new URL(normalizedDomain);
 
-		if (!url.hostname) {
+		if (!url.host) {
 			return null;
 		}
 
-		return url.hostname;
+		return {
+			baseUrl: url.origin,
+			host: url.host,
+			noSSL: url.protocol === "http:"
+		};
 	} catch {
 		return null;
 	}
+}
+
+function loadJitsiExternalApi(endpoint: JitsiEndpoint): Promise<JitsiMeetExternalApiConstructor> {
+	const scriptKey = `${endpoint.baseUrl}|${endpoint.noSSL ? "http" : "https"}`;
+	const existingPromise = externalApiScriptPromises.get(scriptKey);
+	if (existingPromise) {
+		return existingPromise;
+	}
+
+	const promise = new Promise<JitsiMeetExternalApiConstructor>((resolve, reject) => {
+		if (window.JitsiMeetExternalAPI && !endpoint.noSSL) {
+			resolve(window.JitsiMeetExternalAPI);
+			return;
+		}
+
+		const script = document.createElement("script");
+		script.async = true;
+		const fail = (error: Error) => {
+			script.remove();
+			reject(error);
+		};
+
+		if (endpoint.noSSL) {
+			script.src = "/__jitsi_external_api.js";
+			script.onload = () => {
+				if (window.JitsiMeetExternalAPI) {
+					resolve(window.JitsiMeetExternalAPI);
+				} else {
+					fail(new Error("Patched Jitsi external API script loaded without JitsiMeetExternalAPI"));
+				}
+			};
+			script.onerror = () => fail(new Error(`Failed to load patched Jitsi external API from ${script.src}`));
+			document.head.appendChild(script);
+			return;
+		}
+
+		script.src = `${endpoint.baseUrl}/external_api.js`;
+		script.onload = () => {
+			if (window.JitsiMeetExternalAPI) {
+				resolve(window.JitsiMeetExternalAPI);
+			} else {
+				fail(new Error("Jitsi external API script loaded without JitsiMeetExternalAPI"));
+			}
+		};
+		script.onerror = () => fail(new Error(`Failed to load Jitsi external API from ${script.src}`));
+		document.head.appendChild(script);
+	});
+
+	const retryablePromise = promise.catch(error => {
+		externalApiScriptPromises.delete(scriptKey);
+		throw error;
+	});
+
+	externalApiScriptPromises.set(scriptKey, retryablePromise);
+	return retryablePromise;
 }
 
 function renderJitsiError(title: string, message: string) {
@@ -61,13 +149,15 @@ function wait(milliseconds: number): Promise<void> {
 
 export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
+	const containerRef = useRef<HTMLDivElement | null>(null);
 	const desiredAudioMutedRef = useRef(micMode !== "public");
 	const audioSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const jitsiListenersRef = useRef<{ api: IJitsiMeetExternalApi; listeners: [string, JitsiEventListener][] } | null>(null);
 	const [readyMeetingKey, setReadyMeetingKey] = useState<string | null>(null);
-	const domain = parseJitsiDomain(meetingDomain);
+	const [initError, setInitError] = useState<string | null>(null);
+	const endpoint = useMemo(() => parseJitsiEndpoint(meetingDomain), [meetingDomain]);
 	const normalizedRoomName = roomName?.trim();
-	const meetingKey = domain && normalizedRoomName ? `${domain}/${normalizedRoomName}` : null;
+	const meetingKey = endpoint && normalizedRoomName ? `${endpoint.baseUrl}/${normalizedRoomName}` : null;
 	const isReady = readyMeetingKey === meetingKey;
 
 	const syncJitsiAudioMuted = useCallback((reason: string) => {
@@ -119,12 +209,12 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 	}, []);
 
 	useEffect(() => {
-		onStatusChange?.(domain && normalizedRoomName ? "loading" : "unavailable");
+		onStatusChange?.(endpoint && normalizedRoomName ? "loading" : "unavailable");
 
 		return () => {
 			onStatusChange?.("closed");
 		};
-	}, [domain, normalizedRoomName, onStatusChange]);
+	}, [endpoint, normalizedRoomName, onStatusChange]);
 
 	useEffect(() => {
 		desiredAudioMutedRef.current = micMode !== "public";
@@ -133,7 +223,114 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 	useEffect(() => detachJitsiListeners, [detachJitsiListeners]);
 
-	if (!domain) {
+	useEffect(() => {
+		const parentNode = containerRef.current;
+		if (!endpoint || !normalizedRoomName || !parentNode) {
+			return;
+		}
+
+		let disposed = false;
+		let api: IJitsiMeetExternalApi | null = null;
+
+		parentNode.replaceChildren();
+		setReadyMeetingKey(null);
+		setInitError(null);
+		onStatusChange?.("loading");
+
+		void loadJitsiExternalApi(endpoint)
+			.then(JitsiMeetExternalAPI => {
+				if (disposed) {
+					return;
+				}
+
+				api = new JitsiMeetExternalAPI(endpoint.host, {
+					roomName: normalizedRoomName,
+					parentNode,
+					width: "100%",
+					height: "100%",
+					noSSL: endpoint.noSSL,
+					userInfo: {
+						displayName,
+						email: ""
+					},
+					configOverwrite: {
+						prejoinPageEnabled: false,
+						prejoinConfig: {
+							enabled: false
+						},
+						startWithAudioMuted: true,
+						startWithVideoMuted: true,
+						toolbarButtons: [],
+						disableDeepLinking: true,
+						disableInviteFunctions: true,
+						notifications: []
+					},
+					interfaceConfigOverwrite: {
+						TOOLBAR_BUTTONS: [],
+						VIDEO_LAYOUT_FIT: "nocrop",
+						SHOW_JITSI_WATERMARK: false,
+						SHOW_WATERMARK_FOR_GUESTS: false,
+						SHOW_BRAND_WATERMARK: false,
+						SHOW_POWERED_BY: false,
+						SHOW_CHROME_EXTENSION_BANNER: false,
+						DISABLE_JOIN_LEAVE_NOTIFICATIONS: true
+					}
+				});
+
+				detachJitsiListeners();
+				apiRef.current = api;
+
+				const handleVideoConferenceJoined = () => {
+					syncJitsiAudioMuted("videoConferenceJoined");
+					window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
+				};
+				const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
+					const reportedMuted = typeof event.muted === "boolean" ? event.muted : event.isMuted;
+					if (reportedMuted === false && desiredAudioMutedRef.current) {
+						syncJitsiAudioMuted("audioMuteStatusChanged");
+					}
+				};
+				const handleReadyToClose = () => {
+					detachJitsiListeners();
+					apiRef.current = null;
+					setReadyMeetingKey(null);
+					onStatusChange?.("closed");
+				};
+				const listeners: [string, JitsiEventListener][] = [
+					["videoConferenceJoined", handleVideoConferenceJoined],
+					["audioMuteStatusChanged", handleAudioMuteStatusChanged as JitsiEventListener],
+					["readyToClose", handleReadyToClose]
+				];
+
+				listeners.forEach(([eventName, listener]) => api?.on(eventName, listener));
+				jitsiListenersRef.current = { api, listeners };
+
+				setReadyMeetingKey(meetingKey);
+				onStatusChange?.("connected");
+				syncJitsiAudioMuted("apiReady");
+				onApiReady?.(api);
+			})
+			.catch(error => {
+				console.warn("[jitsi] failed to initialize external API", error);
+				if (!disposed) {
+					setInitError(error instanceof Error ? error.message : String(error));
+					onStatusChange?.("unavailable");
+				}
+			});
+
+		return () => {
+			disposed = true;
+			detachJitsiListeners();
+			apiRef.current = null;
+			if (api) {
+				(api as { dispose?: () => void }).dispose?.();
+			}
+			parentNode.replaceChildren();
+			setReadyMeetingKey(null);
+		};
+	}, [detachJitsiListeners, displayName, endpoint, meetingKey, normalizedRoomName, onApiReady, onStatusChange, syncJitsiAudioMuted]);
+
+	if (!endpoint) {
 		return renderJitsiError("Jitsi Unavailable", "Set VITE_JITSI_BASE_URL to show Jitsi");
 	}
 
@@ -143,81 +340,15 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 	return (
 		<div className="relative h-full min-h-24">
-			{!isReady && (
+			{initError && <div className="absolute inset-0 z-30 bg-background">{renderJitsiError("Jitsi Unavailable", initError)}</div>}
+			{!isReady && !initError && (
 				<div className="absolute inset-0 z-10 grid place-items-center bg-muted text-muted-foreground">
 					<Loader2 className="h-6 w-6 animate-spin" />
 				</div>
 			)}
 			{/* Transparent overlay to prevent iframe interaction */}
 			<div className="absolute inset-0 z-20" />
-			<JitsiMeeting
-				domain={domain}
-				roomName={normalizedRoomName}
-				userInfo={{
-					displayName,
-					email: ""
-				}}
-				configOverwrite={{
-					prejoinPageEnabled: false,
-					prejoinConfig: {
-						enabled: false
-					},
-					startWithAudioMuted: true,
-					startWithVideoMuted: true,
-					toolbarButtons: [],
-					disableDeepLinking: true,
-					disableInviteFunctions: true,
-					notifications: []
-				}}
-				interfaceConfigOverwrite={{
-					TOOLBAR_BUTTONS: [],
-					VIDEO_LAYOUT_FIT: "nocrop",
-					SHOW_JITSI_WATERMARK: false,
-					SHOW_WATERMARK_FOR_GUESTS: false,
-					SHOW_BRAND_WATERMARK: false,
-					SHOW_POWERED_BY: false,
-					SHOW_CHROME_EXTENSION_BANNER: false,
-					DISABLE_JOIN_LEAVE_NOTIFICATIONS: true
-				}}
-				onApiReady={api => {
-					detachJitsiListeners();
-					apiRef.current = api;
-					desiredAudioMutedRef.current = micMode !== "public";
-
-					const handleVideoConferenceJoined = () => {
-						syncJitsiAudioMuted("videoConferenceJoined");
-						window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
-					};
-					const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
-						const reportedMuted = typeof event.muted === "boolean" ? event.muted : event.isMuted;
-						if (reportedMuted === false && desiredAudioMutedRef.current) {
-							syncJitsiAudioMuted("audioMuteStatusChanged");
-						}
-					};
-					const listeners: [string, JitsiEventListener][] = [
-						["videoConferenceJoined", handleVideoConferenceJoined],
-						["audioMuteStatusChanged", handleAudioMuteStatusChanged as JitsiEventListener]
-					];
-
-					listeners.forEach(([eventName, listener]) => api.on(eventName, listener));
-					jitsiListenersRef.current = { api, listeners };
-
-					setReadyMeetingKey(meetingKey);
-					onStatusChange?.("connected");
-					syncJitsiAudioMuted("apiReady");
-					onApiReady?.(api);
-				}}
-				onReadyToClose={() => {
-					detachJitsiListeners();
-					apiRef.current = null;
-					setReadyMeetingKey(null);
-					onStatusChange?.("closed");
-				}}
-				getIFrameRef={parentNode => {
-					parentNode.style.height = "100%";
-					parentNode.style.width = "100%";
-				}}
-			/>
+			<div ref={containerRef} className="h-full w-full" />
 		</div>
 	);
 }

@@ -2,6 +2,7 @@
 __pycache__/
 .venv/
 node_modules/
+.pnpm-store/
 /audio-test/vad-backend/segments
 .DS_Store
 .env
