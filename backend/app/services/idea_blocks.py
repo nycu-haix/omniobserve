@@ -238,6 +238,13 @@ async def update_idea_block_fields(
             "Idea block not found",
             details={"field": "block_id", "value": block_id},
         )
+    if block.is_deleted:
+        raise ApiError(
+            409,
+            "IDEA_BLOCK_DELETED",
+            "Deleted idea blocks cannot be edited",
+            details={"field": "block_id", "value": block_id},
+        )
 
     if "content" in fields:
         content = str(fields["content"] or "").strip()

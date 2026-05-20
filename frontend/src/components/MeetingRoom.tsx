@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Info, Keyboard, Maximize, Mic, MicOff, Minimize, Radio } from "lucide-react";
+import { AlertCircle, GripVertical, Info, Keyboard, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -322,7 +322,7 @@ function LostAtSeaRankingPanel({
 }
 
 export default function MeetingRoom() {
-	const [micMode, setMicMode] = useState<MicMode>("off");
+	const [micMode, setMicMode] = useState<MicMode>("private");
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
 	const [taskTitle, setTaskTitle] = useState("Lost at Sea");
 	const [taskDetail, setTaskDetail] = useState("");
@@ -358,9 +358,9 @@ export default function MeetingRoom() {
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
-	const { startAudioStream, stopAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
+	const { startAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
-	const hasAudioConnectionError = micMode !== "off" && !!audioError;
+	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
 		setJitsiStatus(status);
 	}, []);
@@ -462,19 +462,13 @@ export default function MeetingRoom() {
 
 	const handleMic = useCallback(
 		async (mode: MicMode) => {
-			const shouldRetryCurrentMode = mode !== "off" && micMode === mode && hasAudioConnectionError;
-			const nextMode = shouldRetryCurrentMode ? mode : mode === "off" ? "off" : micMode === mode ? "off" : mode;
+			const shouldRetryCurrentMode = micMode === mode && hasAudioConnectionError;
+			const nextMode = shouldRetryCurrentMode ? mode : mode;
 
 			setMicMode(nextMode);
-
-			if (nextMode === "off") {
-				stopAudioStream();
-				return;
-			}
-
 			await startAudioStream(nextMode);
 		},
-		[hasAudioConnectionError, micMode, startAudioStream, stopAudioStream]
+		[hasAudioConnectionError, micMode, startAudioStream]
 	);
 
 	useEffect(() => {
@@ -932,10 +926,6 @@ export default function MeetingRoom() {
 								<span className="text-sm">悄悄話</span>
 								<ShortcutKey label="W" />
 							</Button>
-							<Button className="bg-background/90" variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
-								<MicOff className="h-4 w-4" />
-								關閉
-							</Button>
 						</div>
 					</div>
 					{hasAudioConnectionError && (
@@ -969,10 +959,6 @@ export default function MeetingRoom() {
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 							<ShortcutKey label="W" />
-						</Button>
-						<Button variant={micMode === "off" ? "default" : "outline"} onClick={() => void handleMic("off")}>
-							<MicOff className="h-4 w-4" />
-							靜音
 						</Button>
 					</div>
 					{hasAudioConnectionError && (

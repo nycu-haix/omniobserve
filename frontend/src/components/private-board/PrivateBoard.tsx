@@ -1090,12 +1090,16 @@ export function PrivateBoard({
 	}, [visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
 	const toggleBlock = (id: string) => {
-		setIdeaBlocks(prev => prev.map(block => (block.id === id ? { ...block, expanded: !block.expanded } : block)));
+		setIdeaBlocks(prev => prev.map(block => (block.id === id && !block.isDeleted ? { ...block, expanded: !block.expanded } : block)));
 	};
 
 	const saveIdeaBlock = async (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => {
 		const normalizedContent = values.aiSummary.trim();
 		const currentBlock = ideaBlocks.find(block => block.id === id);
+		if (currentBlock?.isDeleted) {
+			throw new Error("Deleted idea blocks cannot be edited");
+		}
+
 		const isDraft = currentBlock ? !!currentBlock.isDraft : id.startsWith("draft-");
 		const derivedTitle = isDraft
 			? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea"

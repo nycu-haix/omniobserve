@@ -91,6 +91,9 @@ async def update_idea_block(
     db: AsyncSession,
 ) -> IdeaBlock:
     idea_block = await get_idea_block(idea_block_id, db)
+    if idea_block.is_deleted:
+        raise HTTPException(status_code=409, detail="Deleted idea blocks cannot be edited")
+
     update_data = payload.model_dump(exclude_unset=True)
     summary_changed = "summary" in update_data and update_data["summary"] is not None
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:
@@ -139,6 +142,9 @@ async def update_scoped_idea_block(
         user_id=user_id,
         db=db,
     )
+    if idea_block.is_deleted:
+        raise HTTPException(status_code=409, detail="Deleted idea blocks cannot be edited")
+
     update_data = payload.model_dump(exclude_unset=True)
     summary_changed = "summary" in update_data and update_data["summary"] is not None
     if "similarity_id" in update_data and update_data["similarity_id"] is not None:

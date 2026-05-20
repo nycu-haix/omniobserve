@@ -31,12 +31,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const aiSummaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const isGenerating = block.status === "generating";
+	const isDeleted = !!block.isDeleted;
+	const canToggle = !isGenerating && !isEditingTitle && !isDeleted;
 	const Chevron = block.expanded ? ChevronDown : ChevronRight;
 	const aiSummaryChanged = draftAiSummary.trim() !== savedAiSummary.trim();
-	const canSaveAiSummary = draftAiSummary.trim().length > 0 && aiSummaryChanged && !isSaving;
+	const canSaveAiSummary = draftAiSummary.trim().length > 0 && aiSummaryChanged && !isSaving && !isDeleted;
 	const titleChanged = draftTitle.trim() !== savedTitle.trim();
 	const titleTooLong = draftTitle.trim().length > 10;
-	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving;
+	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
@@ -57,6 +59,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			setDraftTranscript(block.transcript || "");
 			setSaveError(null);
 			setIsEditingTitle(false);
+			setShowDeleteConfirm(false);
 		}, 0);
 
 		return () => window.clearTimeout(timer);
@@ -79,6 +82,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const startTitleEditing = (event: MouseEvent<HTMLButtonElement>) => {
 		event.stopPropagation();
+		if (isDeleted) {
+			return;
+		}
 		setDraftTitle(savedTitle);
 		setSaveError(null);
 		setIsEditingTitle(true);
@@ -92,11 +98,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const deleteBlock = (event: MouseEvent<HTMLButtonElement>) => {
 		event.stopPropagation();
+		if (isDeleted) {
+			return;
+		}
 		setShowDeleteConfirm(true);
 	};
 
 	const confirmDelete = async () => {
-		if (!onDelete || isDeleting) {
+		if (!onDelete || isDeleting || isDeleted) {
 			return;
 		}
 
@@ -115,7 +124,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const saveDraft = async () => {
 		const nextAiSummary = draftAiSummary.trim();
 		const nextSummary = nextAiSummary.slice(0, 10) || "Idea";
-		if (!nextAiSummary || isSaving) {
+		if (!nextAiSummary || isSaving || isDeleted) {
 			return;
 		}
 
@@ -138,7 +147,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const saveTitle = async () => {
 		const nextTitle = draftTitle.trim();
-		if (!nextTitle || nextTitle.length > 10 || isSaving) {
+		if (!nextTitle || nextTitle.length > 10 || isSaving || isDeleted) {
 			return;
 		}
 
@@ -163,23 +172,23 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const row = (
 		<div
-			role="button"
-			tabIndex={isGenerating || isEditingTitle ? -1 : 0}
+			role={canToggle ? "button" : undefined}
+			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
 				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				similarityReasonTitleColor,
-				block.isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
+				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
 			)}
 			onClick={() => {
-				if (!isGenerating && !isEditingTitle) {
+				if (canToggle) {
 					onToggle(block.id);
 				}
 			}}
 			onKeyDown={event => {
-				if (isGenerating || isEditingTitle || (event.key !== "Enter" && event.key !== " ")) {
+				if (!canToggle || (event.key !== "Enter" && event.key !== " ")) {
 					return;
 				}
 				event.preventDefault();
@@ -188,8 +197,10 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		>
 			{isGenerating ? (
 				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			) : isDeleted ? (
+				<span className="h-4 w-4 shrink-0" aria-hidden="true" />
 			) : (
-				<Chevron className={cn("h-4 w-4 shrink-0 text-muted-foreground", block.isDeleted && "opacity-45")} aria-hidden="true" />
+				<Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			)}
 			{isEditingTitle ? (
 				<input
@@ -249,24 +260,25 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
-							{!block.isDraft && (
+							{!isDeleted && !block.isDraft && (
 								<Button
 									aria-label="Edit idea block title"
-									className={cn(block.isDeleted && "opacity-45")}
 									size="icon"
 									variant="ghost"
 									onClick={startTitleEditing}
-									disabled={isSaving || block.isDeleted}
+									disabled={isSaving}
 								>
 									<Pencil className="h-4 w-4" />
 								</Button>
 							)}
-							<Button aria-label="Delete idea block" className={cn(block.isDeleted && "opacity-45")} size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting || block.isDeleted}>
-								<Trash2 className="h-4 w-4" />
-							</Button>
+							{!isDeleted && (
+								<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
+									<Trash2 className="h-4 w-4" />
+								</Button>
+							)}
 						</>
 					)}
-					{showDeleteConfirm && (
+					{showDeleteConfirm && !isDeleted && (
 						<div className="absolute right-0 top-full z-50 mt-1 rounded-md border bg-popover p-1 shadow-lg ring-1 ring-black/5" onClick={event => event.stopPropagation()}>
 							<div className="flex items-center gap-1">
 								<Button aria-label="Confirm delete idea block" className="h-7 w-7" size="icon" variant="destructive" onClick={() => void confirmDelete()} disabled={isDeleting}>
@@ -280,7 +292,16 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					)}
 
 					{hasLinkedTranscript && (
-						<Button className="w-fit gap-2" variant="ghost" size="sm" onClick={() => onJumpToTranscript?.(block)}>
+						<Button
+							aria-label="Jump to transcript"
+							className="w-fit gap-2"
+							variant="ghost"
+							size="sm"
+							onClick={event => {
+								event.stopPropagation();
+								onJumpToTranscript?.(block);
+							}}
+						>
 							<CornerDownLeft className="h-4 w-4" />
 						</Button>
 					)}
@@ -304,8 +325,8 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>}
 
-			{block.expanded && !isGenerating && (
-				<div className={cn("ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1", block.isDeleted && "text-muted-foreground/60")}>
+			{block.expanded && !isGenerating && !isDeleted && (
+				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
 					{shouldShowCue && (
 						<div className="flex flex-wrap gap-1.5">
 							<Badge className="w-fit" variant="secondary">

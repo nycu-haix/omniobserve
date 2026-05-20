@@ -49,5 +49,5 @@ export interface PublicChatMessage {
 	isDeleted?: boolean;
 }
 
-export type MicMode = "public" | "private" | "off";
+export type MicMode = "public" | "private";
 export type BoardTab = "transcript" | "ideablock" | "public-chat";
