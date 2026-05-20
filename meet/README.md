@@ -67,7 +67,7 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
 
 ## Operational notes
 
-- `JVB_ADVERTISE_IPS` is currently set to `140.113.240.11`, which is the public IP resolved by `meet.omni.elvismao.com`. Update it if the host public IP changes.
+- `JVB_ADVERTISE_IPS` is currently set to `203.145.220.54`, which is the public IP resolved by `meet.omni.elvismao.com`. Update it if the host public IP changes.
 - `10000/udp` must remain reachable from the internet. HTTP reverse proxies do not carry this media traffic.
 - Jitsi's generated runtime config is stored in Docker named volumes so Dokploy volume backups can include it.
 - If the web page loads but participants cannot see or hear each other, check `JVB_ADVERTISE_IPS`, firewall/NAT rules, and whether `10000/udp` is still published.
