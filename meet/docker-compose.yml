@@ -11,12 +11,13 @@ services:
       - web-load-test:/usr/share/jitsi-meet/load-test
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: ${PUBLIC_URL:-https://meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
       DISABLE_HTTPS: ${DISABLE_HTTPS:-1}
       ENABLE_HTTP_REDIRECT: ${ENABLE_HTTP_REDIRECT:-0}
       ENABLE_LETSENCRYPT: ${ENABLE_LETSENCRYPT:-0}
       ENABLE_AUTH: ${ENABLE_AUTH:-0}
       ENABLE_GUESTS: ${ENABLE_GUESTS:-1}
+      BOSH_RELATIVE: ${BOSH_RELATIVE:-1}
       ENABLE_XMPP_WEBSOCKET: ${ENABLE_XMPP_WEBSOCKET:-1}
       ENABLE_P2P: ${ENABLE_P2P:-1}
       ENABLE_PREJOIN_PAGE: ${ENABLE_PREJOIN_PAGE:-1}
@@ -68,7 +69,7 @@ services:
       - prosody-plugins-custom:/prosody-plugins-custom
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: ${PUBLIC_URL:-https://meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
       AUTH_TYPE: ${AUTH_TYPE:-internal}
       ENABLE_AUTH: ${ENABLE_AUTH:-0}
       ENABLE_GUESTS: ${ENABLE_GUESTS:-1}
@@ -124,7 +125,7 @@ services:
       - jvb-config:/config
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: ${PUBLIC_URL:-https://meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
       COLIBRI_REST_ENABLED: ${COLIBRI_REST_ENABLED:-1}
       ENABLE_COLIBRI_WEBSOCKET: ${ENABLE_COLIBRI_WEBSOCKET:-0}
       JVB_ADVERTISE_IPS: ${JVB_ADVERTISE_IPS:-203.145.220.54}
