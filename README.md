@@ -48,7 +48,7 @@ Frontend (React 19 + Vite) ──WebSocket──▶ Backend (FastAPI)
 | Backend | Python, FastAPI, SQLAlchemy (async), Alembic |
 | Database | PostgreSQL 16 + pgvector |
 | ASR | Breeze ASR (internal STT model) |
-| LLM | OpenAI API / compatible (GPT-4.1-mini) |
+| LLM | OpenCode Go / OpenAI-compatible (qwen3.6-plus) |
 | Embedding | Ollama (bge-m3) or OpenAI |
 | Infra | Docker, nginx, Jitsi Meet |
 
@@ -209,9 +209,9 @@ docker compose up -d    # 啓動 PostgreSQL + Ollama + Backend
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@127.0.0.1:5433/omniobserve` | PostgreSQL 連線字串 |
-| `OPENAI_API_KEY` | - | OpenAI API key（LLM + similarity detection） |
-| `OPENAI_MODEL` | `gpt-4.1-mini` | LLM 模型 |
-| `OPENAI_BASE_URL` | - | 自訂 OpenAI-compatible endpoint |
+| `OPENAI_API_KEY` | - | OpenCode Go API key（LLM + similarity detection） |
+| `OPENAI_MODEL` | `qwen3.6-plus` | LLM 模型 |
+| `OPENAI_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenAI-compatible endpoint |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama embedding 服務 |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding 模型 |
 | `SKIP_DB_STARTUP` | `false` | 跳過資料庫初始化 |
@@ -279,11 +279,12 @@ Required backend environment:
 
 ```bash
 export DATABASE_URL="postgresql+asyncpg://postgres:postgres@<db-ip>:5432/omniobserve"
-export OPENAI_API_KEY="<openai-api-key>"
-export OPENAI_MODEL="gpt-4.1-mini"
+export OPENAI_API_KEY="<opencode-go-api-key>"
+export OPENAI_BASE_URL="https://opencode.ai/zen/go/v1"
+export OPENAI_MODEL="qwen3.6-plus"
 ```
 
-If the OpenAI-compatible endpoint is not the default OpenAI endpoint:
+If the OpenAI-compatible endpoint changes:
 
 ```bash
 export OPENAI_BASE_URL="<base-url>"
