@@ -43,12 +43,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && currentPhase === "group";
 	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
-	const similarityReasonTitleColor =
-		shouldShowCue && block.similarityIsSameReason != null
-			? block.similarityIsSameReason
-				? "bg-[rgb(205,255,186)]"
-				: "bg-[rgb(255,249,184)]"
-			: null;
+	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
 
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
@@ -261,13 +256,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 					) : (
 						<>
 							{!isDeleted && !block.isDraft && (
-								<Button
-									aria-label="Edit idea block title"
-									size="icon"
-									variant="ghost"
-									onClick={startTitleEditing}
-									disabled={isSaving}
-								>
+								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 									<Pencil className="h-4 w-4" />
 								</Button>
 							)}
