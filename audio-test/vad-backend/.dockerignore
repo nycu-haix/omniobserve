@@ -1,6 +1,11 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.DS_Store
+.env
+.env.*
+.venv/
+.venv-*/
 venv*/
 segments/*.wav
 transcripts.jsonl
