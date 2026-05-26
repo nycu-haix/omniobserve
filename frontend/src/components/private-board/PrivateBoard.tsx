@@ -1,4 +1,4 @@
-import { ChevronRight, Radio } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
@@ -7,7 +7,6 @@ import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
-import { ShortcutKey } from "../ui/ShortcutKey";
 import { IdeaBlockItem } from "./IdeaBlockItem";
 import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
@@ -617,8 +616,6 @@ export function PrivateBoard({
 	lastMessage,
 	lastAudioMessage,
 	isConnected,
-	micMode,
-	onMicModeChange,
 	onSendBoardMessage,
 	displayName,
 	currentPhase: controlledPhase,
@@ -1269,18 +1266,6 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
-	const privateMicButton = null;
-/*
-		<div className="flex justify-center">
-			<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
-				<Radio className="h-4 w-4" />
-				<span className="text-sm">悄悄話</span>
-				<ShortcutKey label="W" />
-			</Button>
-		</div>
-	);
-
-*/
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
@@ -1293,40 +1278,40 @@ export function PrivateBoard({
 						)}
 						<div className="flex rounded-lg bg-muted p-1">
 							<Button
-							aria-pressed={visibleActiveTab === "transcript"}
-							className={cn(
-								"transition-all active:translate-y-px active:scale-[0.98]",
-								visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
-							)}
-							variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
-							onClick={() => setActiveTab("transcript")}
-						>
-							逐字稿
-						</Button>
-						{canShowIdeaBlocks && (
-							<Button
-								aria-pressed={activeTab === "ideablock"}
+								aria-pressed={visibleActiveTab === "transcript"}
 								className={cn(
 									"transition-all active:translate-y-px active:scale-[0.98]",
-									activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+									visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
-								variant={activeTab === "ideablock" ? "default" : "ghost"}
-								onClick={() => setActiveTab("ideablock")}
+								variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
+								onClick={() => setActiveTab("transcript")}
 							>
-								Idea Blocks
+								逐字稿
 							</Button>
-						)}
-						<Button
-							aria-pressed={visibleActiveTab === "public-chat"}
-							className={cn(
-								"transition-all active:translate-y-px active:scale-[0.98]",
-								visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+							{canShowIdeaBlocks && (
+								<Button
+									aria-pressed={activeTab === "ideablock"}
+									className={cn(
+										"transition-all active:translate-y-px active:scale-[0.98]",
+										activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+									)}
+									variant={activeTab === "ideablock" ? "default" : "ghost"}
+									onClick={() => setActiveTab("ideablock")}
+								>
+									Idea Blocks
+								</Button>
 							)}
-							variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
-							onClick={() => setActiveTab("public-chat")}
-						>
-							聊天室
-						</Button>
+							<Button
+								aria-pressed={visibleActiveTab === "public-chat"}
+								className={cn(
+									"transition-all active:translate-y-px active:scale-[0.98]",
+									visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+								)}
+								variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
+								onClick={() => setActiveTab("public-chat")}
+							>
+								聊天室
+							</Button>
 						</div>
 					</div>
 					<div className="flex items-center gap-3">
@@ -1405,18 +1390,10 @@ export function PrivateBoard({
 									{isSavingManualIdea ? "儲存中" : "新增"}
 								</Button>
 							</div>
-							<div className="hidden">
-								<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
-									<Radio className="h-4 w-4" />
-									<span className="text-sm">悄悄話</span>
-									<ShortcutKey label="W" />
-								</Button>
-							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
 						</div>
 					</footer>
 				)}
-				{false && visibleActiveTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
 				{visibleActiveTab === "public-chat" && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
