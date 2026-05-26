@@ -836,7 +836,7 @@ export default function MeetingRoom() {
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-0.5 rounded-lg border bg-card px-3 pb-1 pt-3 text-card-foreground xl:min-h-0">
 				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
 						<div className="grid min-w-0 gap-1">
