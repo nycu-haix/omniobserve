@@ -1,4 +1,4 @@
-import { Radio } from "lucide-react";
+import { ChevronRight, Radio } from "lucide-react";
 import type { UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
@@ -25,6 +25,7 @@ interface PrivateBoardProps {
 	displayName: string;
 	currentPhase?: SessionPhase;
 	timerEndTime?: number;
+	onCollapse?: () => void;
 }
 
 type BoardMessage =
@@ -621,7 +622,8 @@ export function PrivateBoard({
 	onSendBoardMessage,
 	displayName,
 	currentPhase: controlledPhase,
-	timerEndTime: controlledTimerEndTime
+	timerEndTime: controlledTimerEndTime,
+	onCollapse
 }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
@@ -1267,7 +1269,8 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
-	const privateMicButton = (
+	const privateMicButton = null;
+/*
 		<div className="flex justify-center">
 			<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
 				<Radio className="h-4 w-4" />
@@ -1277,12 +1280,19 @@ export function PrivateBoard({
 		</div>
 	);
 
+*/
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
-					<div className="flex rounded-lg bg-muted p-1">
-						<Button
+					<div className="flex items-center gap-2">
+						{onCollapse && (
+							<Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" aria-label="收合 Private Board" title="收合 Private Board" onClick={onCollapse}>
+								<ChevronRight className="h-4 w-4" />
+							</Button>
+						)}
+						<div className="flex rounded-lg bg-muted p-1">
+							<Button
 							aria-pressed={visibleActiveTab === "transcript"}
 							className={cn(
 								"transition-all active:translate-y-px active:scale-[0.98]",
@@ -1317,6 +1327,7 @@ export function PrivateBoard({
 						>
 							聊天室
 						</Button>
+						</div>
 					</div>
 					<div className="flex items-center gap-3">
 						<PhaseBadge phase={visiblePhase} />
@@ -1394,7 +1405,7 @@ export function PrivateBoard({
 									{isSavingManualIdea ? "儲存中" : "新增"}
 								</Button>
 							</div>
-							<div className="flex justify-center">
+							<div className="hidden">
 								<Button className="min-w-32 gap-2" variant={micMode === "private" ? "default" : "outline"} onClick={() => void onMicModeChange("private")}>
 									<Radio className="h-4 w-4" />
 									<span className="text-sm">悄悄話</span>
@@ -1405,7 +1416,7 @@ export function PrivateBoard({
 						</div>
 					</footer>
 				)}
-				{visibleActiveTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
+				{false && visibleActiveTab === "transcript" && <footer className="border-t bg-card p-3">{privateMicButton}</footer>}
 				{visibleActiveTab === "public-chat" && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
@@ -1421,7 +1432,6 @@ export function PrivateBoard({
 								}}
 								onSend={sendPublicChatMessage}
 							/>
-							{privateMicButton}
 						</div>
 					</footer>
 				)}
