@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Info, Keyboard, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, GripVertical, Info, Keyboard, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -337,6 +337,8 @@ export default function MeetingRoom() {
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
+	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -370,8 +372,8 @@ export default function MeetingRoom() {
 	const shouldHighlightRankConflict = currentPhase === "group";
 	const activeRankingScrollScope = currentPhase === "group" ? rankingScrollScope : "private";
 	const meetingLayoutStyle = {
-		"--private-board-width": `${privateBoardWidth}px`,
-		"--jitsi-height": `${jitsiHeight}px`
+		"--private-board-width": `${isPrivateBoardCollapsed ? 48 : privateBoardWidth}px`,
+		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
 	} as CSSProperties;
 
 	useEffect(() => {
@@ -834,7 +836,7 @@ export default function MeetingRoom() {
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_10px_var(--jitsi-height)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
 				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
 					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
 						<div className="grid min-w-0 gap-1">
@@ -885,21 +887,38 @@ export default function MeetingRoom() {
 					</div>
 				</section>
 
-				<div className="grid place-items-center">
-					<button
-						type="button"
-						className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						aria-label="調整 Jitsi 區塊高度"
-						aria-orientation="horizontal"
-						aria-valuemin={MIN_JITSI_HEIGHT}
-						aria-valuenow={jitsiHeight}
-						role="separator"
-						onPointerDown={handleJitsiResizeStart}
-						onKeyDown={handleJitsiResizeKeyDown}
-					/>
+				<div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-1">
+					<div />
+					{!isJitsiCollapsed && (
+						<button
+							type="button"
+							className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							aria-label="調整 Jitsi 區塊高度"
+							aria-orientation="horizontal"
+							aria-valuemin={MIN_JITSI_HEIGHT}
+							aria-valuenow={jitsiHeight}
+							role="separator"
+							onPointerDown={handleJitsiResizeStart}
+							onKeyDown={handleJitsiResizeKeyDown}
+						/>
+					)}
+					<div className="flex justify-end">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className="h-7 w-7"
+							aria-label={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
+							title={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
+							aria-expanded={!isJitsiCollapsed}
+							onClick={() => setIsJitsiCollapsed(current => !current)}
+						>
+							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+						</Button>
+					</div>
 				</div>
 
-				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
+				<div className={cn("min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
 					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
 					<div className="hidden">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
@@ -1034,30 +1053,54 @@ export default function MeetingRoom() {
 			)}
 
 			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
-				<button
+				{!isPrivateBoardCollapsed && (
+					<button
+						type="button"
+						className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
+						aria-label="調整 Private Board 寬度"
+						aria-orientation="vertical"
+						aria-valuemin={MIN_PRIVATE_BOARD_WIDTH}
+						aria-valuenow={privateBoardWidth}
+						role="separator"
+						onPointerDown={handlePrivateBoardResizeStart}
+						onKeyDown={handlePrivateBoardResizeKeyDown}
+					/>
+				)}
+				<Button
 					type="button"
-					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
-					aria-label="調整 Private Board 寬度"
-					aria-orientation="vertical"
-					aria-valuemin={MIN_PRIVATE_BOARD_WIDTH}
-					aria-valuenow={privateBoardWidth}
-					role="separator"
-					onPointerDown={handlePrivateBoardResizeStart}
-					onKeyDown={handlePrivateBoardResizeKeyDown}
-				/>
-				<PrivateBoard
-					sessionId={sessionId}
-					participantId={participantId}
-					lastMessage={lastMessage}
-					lastAudioMessage={lastAudioMessage}
-					isConnected={isConnected}
-					micMode={micMode}
-					onMicModeChange={handleMic}
-					onSendBoardMessage={sendMessage}
-					displayName={displayName}
-					currentPhase={currentPhase}
-					timerEndTime={timerEndTime}
-				/>
+					variant="outline"
+					size="icon"
+					className={cn(
+						"absolute top-3 z-20 h-8 w-8 shadow-sm",
+						isPrivateBoardCollapsed ? "right-2 xl:left-1/2 xl:right-auto xl:-translate-x-1/2" : "right-3 xl:-left-5 xl:right-auto"
+					)}
+					aria-label={isPrivateBoardCollapsed ? "展開 Private Board" : "收合 Private Board"}
+					title={isPrivateBoardCollapsed ? "展開 Private Board" : "收合 Private Board"}
+					aria-expanded={!isPrivateBoardCollapsed}
+					onClick={() => setIsPrivateBoardCollapsed(current => !current)}
+				>
+					{isPrivateBoardCollapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+				</Button>
+				{isPrivateBoardCollapsed && (
+					<div className="grid h-12 place-items-center rounded-lg border bg-card xl:h-full">
+						<div className="text-xs font-medium uppercase tracking-wider text-muted-foreground xl:rotate-180 xl:[writing-mode:vertical-rl]">Private Board</div>
+					</div>
+				)}
+				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
+					<PrivateBoard
+						sessionId={sessionId}
+						participantId={participantId}
+						lastMessage={lastMessage}
+						lastAudioMessage={lastAudioMessage}
+						isConnected={isConnected}
+						micMode={micMode}
+						onMicModeChange={handleMic}
+						onSendBoardMessage={sendMessage}
+						displayName={displayName}
+						currentPhase={currentPhase}
+						timerEndTime={timerEndTime}
+					/>
+				</div>
 			</aside>
 			<button
 				onClick={toggleFullscreen}
