@@ -482,28 +482,59 @@ function sortPublicChatMessages(messages: PublicChatMessage[]): PublicChatMessag
 }
 
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): IdeaBlock[] {
-	return sortIdeaBlocks(
-		nextBlocks.reduce((blocks, nextBlock) => {
-			const existingBlock = blocks.find(block => block.id === nextBlock.id);
-			if (!existingBlock) {
-				return [...blocks, nextBlock];
-			}
+	return deduplicateIdeaBlocks(
+		sortIdeaBlocks(
+			nextBlocks.reduce((blocks, nextBlock) => {
+				const existingBlock = blocks.find(block => block.id === nextBlock.id);
+				if (!existingBlock) {
+					return [...blocks, nextBlock];
+				}
 
-			return blocks.map(block =>
-				block.id === nextBlock.id
-					? {
-							...block,
-							...nextBlock,
-							expanded: block.expanded,
-							cueText: block.cueText,
-							hasCue: block.hasCue || nextBlock.hasCue,
-							similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
-							createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
-						}
-					: block
-			);
-		}, baseBlocks)
+				return blocks.map(block =>
+					block.id === nextBlock.id
+						? {
+								...block,
+								...nextBlock,
+								expanded: block.expanded,
+								cueText: block.cueText,
+								hasCue: block.hasCue || nextBlock.hasCue,
+								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
+							}
+						: block
+				);
+			}, baseBlocks)
+		)
 	);
+}
+
+function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
+	const seenKeys = new Set<string>();
+	const deduplicatedBlocks: IdeaBlock[] = [];
+
+	for (const block of blocks) {
+		const key = ideaBlockDedupKey(block);
+		if (key && seenKeys.has(key)) {
+			continue;
+		}
+		if (key) {
+			seenKeys.add(key);
+		}
+		deduplicatedBlocks.push(block);
+	}
+
+	return deduplicatedBlocks;
+}
+
+function ideaBlockDedupKey(block: IdeaBlock): string {
+	return normalizeIdeaBlockText(block.aiSummary || block.summary);
+}
+
+function normalizeIdeaBlockText(value: string): string {
+	return value
+		.normalize("NFKC")
+		.toLocaleLowerCase()
+		.replace(/[\s\p{P}]/gu, "");
 }
 
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -1201,18 +1232,16 @@ export function PrivateBoard({
 			return;
 		}
 
-		const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
-		const localBlockId = `manual-${Date.now()}`;
-
 		setManualIdeaText("");
 		setManualIdeaPendingCount(current => current + 1);
 		setManualIdeaError(null);
 		window.requestAnimationFrame(() => manualIdeaTextareaRef.current?.focus());
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+				const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
 				const newBlock: IdeaBlock = {
 					...createDraftIdeaBlock(),
-					id: localBlockId,
+					id: `manual-${Date.now()}`,
 					summary: derivedTitle,
 					aiSummary: normalizedContent,
 					transcript: "",
@@ -1228,8 +1257,7 @@ export function PrivateBoard({
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					title: derivedTitle,
-					summary: normalizedContent
+					content: normalizedContent
 				})
 			});
 
@@ -1238,8 +1266,8 @@ export function PrivateBoard({
 			}
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
-			setIdeaBlocks(prev => sortIdeaBlocks([...prev.filter(block => block.id !== savedBlock.id), savedBlock]));
-			setHighlightedBlockId(savedBlock.id);
+			setIdeaBlocks(prev => mergeIdeaBlocks(prev, [savedBlock]));
+			jumpToBlock(savedBlock.id);
 			setIdeaBlockRefreshKey(current => current + 1);
 		} catch (error) {
 			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");

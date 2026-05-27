@@ -12,6 +12,7 @@ from ..config import IDEA_BLOCK_SYSTEM_PROMPT, LLM_TOPIC_DESCRIPTION, OPENAI_MOD
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
 from .embedding_service import create_text_embedding
+from .idea_block_deduplication import find_duplicate_idea_block
 
 
 def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
@@ -172,18 +173,44 @@ async def generate_and_save_idea_blocks(
     for block_data in generated_blocks:
         summary = block_data["summary"]
         title = _title_from_content(block_data["content"])
+        embedding_vector = await create_text_embedding(summary)
+        duplicate_match = await find_duplicate_idea_block(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            title=title,
+            summary=summary,
+            embedding_vector=embedding_vector,
+        )
+        if duplicate_match is not None:
+            logger.info(
+                (
+                    "frontend_board_idea_block_deduplicated session_name=%s user_id=%s "
+                    "duplicate_id=%s reason=%s similarity=%s"
+                ),
+                session_name,
+                user_id,
+                duplicate_match.idea_block_id,
+                duplicate_match.reason,
+                duplicate_match.similarity,
+            )
+            continue
+
         idea_block = IdeaBlock(
             user_id=user_id,
             session_name=session_name,
             title=title,
             summary=summary,
             transcript_id=None,
-            embedding_vector=await create_text_embedding(summary),
+            embedding_vector=embedding_vector,
             similarity_id=None,
         )
         db.add(idea_block)
         await db.flush()
         idea_blocks.append(idea_block)
+
+    if not idea_blocks:
+        return []
 
     await db.flush()
 

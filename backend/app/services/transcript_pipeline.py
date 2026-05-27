@@ -13,6 +13,7 @@ from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
+from .idea_block_deduplication import find_duplicate_idea_block
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import generate_and_save_task_items_for_idea_block
@@ -174,10 +175,34 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 len(embedding_vector),
             )
+            title = _title_from_content(content)
+            duplicate_match = await find_duplicate_idea_block(
+                db,
+                session_name=session_name,
+                user_id=user_id,
+                title=title,
+                summary=summary,
+                embedding_vector=embedding_vector,
+            )
+            if duplicate_match is not None:
+                logger.info(
+                    (
+                        "pipeline_block_deduplicated session_name=%s user_id=%s block_index=%s "
+                        "duplicate_id=%s reason=%s similarity=%s"
+                    ),
+                    session_name,
+                    user_id,
+                    block_index,
+                    duplicate_match.idea_block_id,
+                    duplicate_match.reason,
+                    duplicate_match.similarity,
+                )
+                continue
+
             idea_block = IdeaBlock(
                 user_id=user_id,
                 session_name=session_name,
-                title=_title_from_content(content),
+                title=title,
                 summary=summary,
                 transcript_id=main_transcript_id,
                 embedding_vector=embedding_vector,

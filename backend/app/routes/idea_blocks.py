@@ -15,6 +15,7 @@ from ..schemas import (
 )
 from ..services.idea_block_service import (
     create_idea_block,
+    create_idea_block_from_content,
     delete_scoped_idea_block,
     get_scoped_idea_block,
     list_idea_blocks,
@@ -104,6 +105,18 @@ async def post_idea_block(
     payload: IdeaBlockCreateRequest,
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockResponse:
+    if payload.content and payload.content.strip():
+        return await create_idea_block_from_content(
+            session_name=session_name,
+            user_id=user_id,
+            content=payload.content,
+            transcript_id=payload.transcript_id,
+            db=db,
+        )
+
+    if payload.title is None or payload.summary is None:
+        raise ApiError(400, "INVALID_PAYLOAD", "title and summary are required")
+
     scoped_payload = IdeaBlockCreate(
         session_name=session_name,
         user_id=user_id,

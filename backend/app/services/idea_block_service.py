@@ -8,11 +8,47 @@ from sqlalchemy.orm import selectinload
 from ..config import logger
 from ..db import SessionLocal
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
-from ..schemas import IdeaBlockCreate, IdeaBlockUpdate
+from ..schemas import ApiError, IdeaBlockCreate, IdeaBlockUpdate
 from .embedding_service import create_text_embedding
+from .idea_block_deduplication import find_duplicate_idea_block
 from .idea_block_similarity_context import attach_similarity_reason_flags
+from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import replace_task_items_for_idea_block
+
+
+async def create_idea_block_from_content(
+    *,
+    session_name: str,
+    user_id: int,
+    content: str,
+    transcript_id: int | None,
+    db: AsyncSession,
+) -> IdeaBlock:
+    normalized_content = content.strip()
+    if not normalized_content:
+        raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
+
+    generated_blocks = await build_idea_blocks_with_llm(normalized_content)
+    if not generated_blocks:
+        raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
+
+    generated_block = generated_blocks[0]
+    generated_content = str(generated_block["content"]).strip()
+    summary = str(generated_block["summary"]).strip()
+    if not summary:
+        raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block summary could not be generated")
+
+    return await create_idea_block(
+        IdeaBlockCreate(
+            session_name=session_name,
+            user_id=user_id,
+            title=_title_from_content(generated_content or summary),
+            summary=summary,
+            transcript_id=transcript_id,
+        ),
+        db,
+    )
 
 
 async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaBlock:
@@ -21,11 +57,38 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
 
     idea_block_data = payload.model_dump()
     idea_block_data["embedding_vector"] = await _create_embedding_or_none(payload.summary)
+    duplicate_match = await find_duplicate_idea_block(
+        db,
+        session_name=payload.session_name,
+        user_id=payload.user_id,
+        title=payload.title,
+        summary=payload.summary,
+        embedding_vector=idea_block_data["embedding_vector"],
+    )
+    if duplicate_match is not None:
+        logger.info(
+            (
+                "idea_block_create_deduplicated session_name=%s user_id=%s "
+                "duplicate_id=%s reason=%s similarity=%s"
+            ),
+            payload.session_name,
+            payload.user_id,
+            duplicate_match.idea_block_id,
+            duplicate_match.reason,
+            duplicate_match.similarity,
+        )
+        return await get_idea_block(duplicate_match.idea_block_id, db)
+
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
     await db.commit()
     _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
+
+
+def _title_from_content(content: str) -> str:
+    value = content.strip()[:10]
+    return value or "Idea"
 
 
 async def get_idea_block(idea_block_id: int, db: AsyncSession) -> IdeaBlock:

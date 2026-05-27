@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..models import Visibility
 from .task_item import TaskItemResponse
@@ -30,16 +30,25 @@ class IdeaBlockCreate(BaseModel):
 
 
 class IdeaBlockCreateRequest(BaseModel):
-    title: str
-    summary: str
+    title: str | None = None
+    summary: str | None = None
+    content: str | None = None
     transcript_id: int | None = None
 
     @field_validator("title")
     @classmethod
-    def validate_title_length(cls, value: str) -> str:
-        if len(value) > 10:
+    def validate_title_length(cls, value: str | None) -> str | None:
+        if value is not None and len(value) > 10:
             raise ValueError("title must be at most 10 characters")
         return value
+
+    @model_validator(mode="after")
+    def validate_create_payload(self) -> "IdeaBlockCreateRequest":
+        if self.content and self.content.strip():
+            return self
+        if self.title and self.title.strip() and self.summary and self.summary.strip():
+            return self
+        raise ValueError("content or title and summary is required")
 
 
 class IdeaBlockUpdate(BaseModel):
