@@ -2,7 +2,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, GripVertical, Info, Keyboard, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, Columns2, GripVertical, Info, Keyboard, Lock, Maximize, Mic, Minimize, Radio, Rows2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -29,6 +29,26 @@ interface LostAtSeaItem {
 
 type RankingScope = "public" | "private";
 type SessionPhase = "private" | "group";
+type TaskPaneContent = "task-instructions" | "private-ranking" | "public-ranking";
+type TaskSplitDirection = "horizontal" | "vertical";
+
+interface TaskPaneLeaf {
+	type: "leaf";
+	id: string;
+	content: TaskPaneContent;
+}
+
+interface TaskPaneSplit {
+	type: "split";
+	id: string;
+	direction: TaskSplitDirection;
+	ratio: number;
+	first: TaskPaneNode;
+	second: TaskPaneNode;
+}
+
+type TaskPaneNode = TaskPaneLeaf | TaskPaneSplit;
+
 const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
 	loading: "連線中",
 	connected: "已連線",
@@ -51,6 +71,13 @@ const MIN_JITSI_HEIGHT = 220;
 const MIN_RANKING_HEIGHT = 220;
 const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
+const MAX_TASK_PANES = 3;
+const MIN_TASK_PANE_RATIO = 24;
+const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
+	"task-instructions": "Task Instructions",
+	"private-ranking": "Private Ranking",
+	"public-ranking": "Public Ranking"
+};
 const ITEM_DESCRIPTIONS: Record<string, string> = {
 	sextant: "航海上用來測量天體或地平線角度的儀器。",
 	shaving_mirror: "小型鏡子，通常用來刮鬍子或整理儀容。",
@@ -158,6 +185,104 @@ function createRankedItems(itemIds: string[], taskItemsById: Record<string, Task
 
 function createRankIndexById(items: LostAtSeaItem[]): Map<string, number> {
 	return new Map(items.map((item, index) => [item.id, index + 1]));
+}
+
+function createTaskPaneLeaf(content: TaskPaneContent): TaskPaneLeaf {
+	return {
+		type: "leaf",
+		id: `task-pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		content
+	};
+}
+
+function createDefaultTaskPaneLayout(phase: SessionPhase): TaskPaneNode {
+	if (phase === "group") {
+		return {
+			type: "split",
+			id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			direction: "horizontal",
+			ratio: 50,
+			first: createTaskPaneLeaf("public-ranking"),
+			second: createTaskPaneLeaf("private-ranking")
+		};
+	}
+
+	return createTaskPaneLeaf("private-ranking");
+}
+
+function countTaskPaneLeaves(node: TaskPaneNode): number {
+	return node.type === "leaf" ? 1 : countTaskPaneLeaves(node.first) + countTaskPaneLeaves(node.second);
+}
+
+function getFirstTaskPaneLeafId(node: TaskPaneNode): string {
+	return node.type === "leaf" ? node.id : getFirstTaskPaneLeafId(node.first);
+}
+
+function hasTaskPaneContent(node: TaskPaneNode, content: TaskPaneContent): boolean {
+	return node.type === "leaf" ? node.content === content : hasTaskPaneContent(node.first, content) || hasTaskPaneContent(node.second, content);
+}
+
+function chooseNewTaskPaneContent(node: TaskPaneNode, phase: SessionPhase): TaskPaneContent {
+	const preferredContents: TaskPaneContent[] = phase === "group" ? ["public-ranking", "private-ranking", "task-instructions"] : ["private-ranking", "task-instructions", "public-ranking"];
+	return preferredContents.find(content => !hasTaskPaneContent(node, content)) ?? "task-instructions";
+}
+
+function updateTaskPaneNode(node: TaskPaneNode, paneId: string, updater: (leaf: TaskPaneLeaf) => TaskPaneNode): TaskPaneNode {
+	if (node.type === "leaf") {
+		return node.id === paneId ? updater(node) : node;
+	}
+
+	return {
+		...node,
+		first: updateTaskPaneNode(node.first, paneId, updater),
+		second: updateTaskPaneNode(node.second, paneId, updater)
+	};
+}
+
+function updateTaskPaneSplit(node: TaskPaneNode, splitId: string, ratio: number): TaskPaneNode {
+	if (node.type === "leaf") {
+		return node;
+	}
+
+	if (node.id === splitId) {
+		return {
+			...node,
+			ratio: Math.min(100 - MIN_TASK_PANE_RATIO, Math.max(MIN_TASK_PANE_RATIO, ratio))
+		};
+	}
+
+	return {
+		...node,
+		first: updateTaskPaneSplit(node.first, splitId, ratio),
+		second: updateTaskPaneSplit(node.second, splitId, ratio)
+	};
+}
+
+function removeTaskPaneNode(node: TaskPaneNode, paneId: string): TaskPaneNode | null {
+	if (node.type === "leaf") {
+		return node.id === paneId ? null : node;
+	}
+
+	const nextFirst = removeTaskPaneNode(node.first, paneId);
+	const nextSecond = removeTaskPaneNode(node.second, paneId);
+
+	if (!nextFirst) {
+		return nextSecond;
+	}
+
+	if (!nextSecond) {
+		return nextFirst;
+	}
+
+	return {
+		...node,
+		first: nextFirst,
+		second: nextSecond
+	};
+}
+
+function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase): boolean {
+	return content !== "public-ranking" || phase === "group";
 }
 
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
@@ -303,14 +428,11 @@ function LostAtSeaRankingPanel({
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
 	return (
-		<section className="flex min-h-[260px] min-w-0 flex-col overflow-hidden rounded-lg border p-3" aria-label={title}>
-			<header className="mb-3 flex shrink-0 items-center justify-between gap-3">
-				<h3 className="min-w-0 truncate text-sm font-semibold">{title}</h3>
-				<span className="shrink-0 text-xs text-muted-foreground">{status}</span>
-			</header>
+		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={title}>
+			<div className="sr-only">{status}</div>
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 gap-2 overflow-y-auto pr-1">
+					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
 							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} onPreview={onPreviewItem} />
 						))}
@@ -318,6 +440,375 @@ function LostAtSeaRankingPanel({
 				</SortableContext>
 			</DndContext>
 		</section>
+	);
+}
+
+function TaskWorkspace({
+	currentPhase,
+	taskTitle,
+	taskDetail,
+	renderPrivateRanking,
+	renderPublicRanking
+}: {
+	currentPhase: SessionPhase;
+	taskTitle: string;
+	taskDetail: string;
+	renderPrivateRanking: () => React.ReactNode;
+	renderPublicRanking: () => React.ReactNode;
+}) {
+	const [layout, setLayout] = useState<TaskPaneNode>(() => createDefaultTaskPaneLayout(currentPhase));
+	const [hasUserCustomizedLayout, setHasUserCustomizedLayout] = useState(false);
+	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+	const defaultLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase), [currentPhase]);
+	const visibleLayout = hasUserCustomizedLayout ? layout : defaultLayout;
+	const paneCount = countTaskPaneLeaves(visibleLayout);
+
+	useEffect(() => {
+		const mediaQuery = window.matchMedia("(max-width: 767px)");
+		const handleChange = () => setIsNarrowLayout(mediaQuery.matches);
+		handleChange();
+		mediaQuery.addEventListener("change", handleChange);
+		return () => mediaQuery.removeEventListener("change", handleChange);
+	}, []);
+
+	const markCustomized = () => setHasUserCustomizedLayout(true);
+
+	const splitPane = (paneId: string, direction: TaskSplitDirection) => {
+		if (paneCount >= MAX_TASK_PANES) {
+			return;
+		}
+
+		markCustomized();
+		setLayout(
+			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
+				type: "split",
+				id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				direction,
+				ratio: 50,
+				first: leaf,
+				second: createTaskPaneLeaf(chooseNewTaskPaneContent(visibleLayout, currentPhase))
+			}))
+		);
+	};
+
+	const changePaneContent = (paneId: string, content: TaskPaneContent) => {
+		markCustomized();
+		setLayout(
+			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
+				...leaf,
+				content
+			}))
+		);
+	};
+
+	const resizeSplit = (splitId: string, ratio: number) => {
+		markCustomized();
+		setLayout(updateTaskPaneSplit(visibleLayout, splitId, ratio));
+	};
+
+	const closePane = (paneId: string) => {
+		if (paneCount <= 1) {
+			return;
+		}
+
+		markCustomized();
+		const nextLayout = removeTaskPaneNode(visibleLayout, paneId);
+		if (!nextLayout) {
+			return;
+		}
+		setLayout(nextLayout);
+	};
+
+	const showTaskInstructions = () => {
+		markCustomized();
+		if (hasTaskPaneContent(visibleLayout, "task-instructions")) {
+			return;
+		}
+
+		if (paneCount < MAX_TASK_PANES) {
+			const paneId = getFirstTaskPaneLeafId(visibleLayout);
+			setLayout(
+				updateTaskPaneNode(visibleLayout, paneId, leaf => ({
+					type: "split",
+					id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+					direction: "horizontal",
+					ratio: 60,
+					first: leaf,
+					second: createTaskPaneLeaf("task-instructions")
+				}))
+			);
+			return;
+		}
+
+		const paneId = getFirstTaskPaneLeafId(visibleLayout);
+		changePaneContent(paneId, "task-instructions");
+	};
+
+	const renderPaneContent = (content: TaskPaneContent) => {
+		if (!getTaskPaneContentAvailability(content, currentPhase)) {
+			return (
+				<div className="grid h-full min-h-0 place-items-center bg-muted/30 p-4 text-center">
+					<div className="grid max-w-xs gap-2 text-muted-foreground">
+						<Lock className="mx-auto h-5 w-5" aria-hidden="true" />
+						<div className="text-sm font-medium text-foreground">{TASK_PANE_CONTENT_LABELS[content]}</div>
+						<p className="text-sm leading-6">此區塊目前階段尚未開放</p>
+					</div>
+				</div>
+			);
+		}
+
+		if (content === "private-ranking") {
+			return renderPrivateRanking();
+		}
+
+		if (content === "public-ranking") {
+			return renderPublicRanking();
+		}
+
+		return (
+			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
+				<div className="min-h-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
+					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
+				</div>
+			</section>
+		);
+	};
+
+	return (
+		<section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Task workspace">
+			<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
+				<div className="grid min-w-0 gap-1">
+					<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
+				</div>
+				<Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={showTaskInstructions}>
+					<Info className="h-4 w-4" />
+					任務說明
+				</Button>
+			</header>
+			<div className="min-h-0 overflow-hidden">
+				<TaskPaneRenderer
+					node={visibleLayout}
+					currentPhase={currentPhase}
+					paneCount={paneCount}
+					isNarrowLayout={isNarrowLayout}
+					onSplitPane={splitPane}
+					onClosePane={closePane}
+					onChangePaneContent={changePaneContent}
+					onResizeSplit={resizeSplit}
+					renderPaneContent={renderPaneContent}
+				/>
+			</div>
+		</section>
+	);
+}
+
+function TaskPaneRenderer({
+	node,
+	currentPhase,
+	paneCount,
+	isNarrowLayout,
+	onSplitPane,
+	onClosePane,
+	onChangePaneContent,
+	onResizeSplit,
+	renderPaneContent
+}: {
+	node: TaskPaneNode;
+	currentPhase: SessionPhase;
+	paneCount: number;
+	isNarrowLayout: boolean;
+	onSplitPane: (paneId: string, direction: TaskSplitDirection) => void;
+	onClosePane: (paneId: string) => void;
+	onChangePaneContent: (paneId: string, content: TaskPaneContent) => void;
+	onResizeSplit: (splitId: string, ratio: number) => void;
+	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
+}) {
+	if (node.type === "leaf") {
+		return (
+			<TaskPane
+				pane={node}
+				currentPhase={currentPhase}
+				canSplit={paneCount < MAX_TASK_PANES}
+				canClose={paneCount > 1}
+				onSplit={direction => onSplitPane(node.id, direction)}
+				onClose={() => onClosePane(node.id)}
+				onChangeContent={content => onChangePaneContent(node.id, content)}
+			>
+				{renderPaneContent(node.content)}
+			</TaskPane>
+		);
+	}
+
+	const effectiveDirection = isNarrowLayout ? "vertical" : node.direction;
+	const gridStyle =
+		effectiveDirection === "horizontal"
+			? ({ gridTemplateColumns: `minmax(280px, ${node.ratio}fr) 1rem minmax(280px, ${100 - node.ratio}fr)` } as CSSProperties)
+			: ({ gridTemplateRows: `minmax(180px, ${node.ratio}fr) 1rem minmax(180px, ${100 - node.ratio}fr)` } as CSSProperties);
+
+	return (
+		<div className="grid h-full min-h-0 min-w-0 gap-0" style={gridStyle}>
+			<TaskPaneRenderer
+				node={node.first}
+				currentPhase={currentPhase}
+				paneCount={paneCount}
+				isNarrowLayout={isNarrowLayout}
+				onSplitPane={onSplitPane}
+				onClosePane={onClosePane}
+				onChangePaneContent={onChangePaneContent}
+				onResizeSplit={onResizeSplit}
+				renderPaneContent={renderPaneContent}
+			/>
+			<PaneSeparator split={node} direction={effectiveDirection} onResize={onResizeSplit} />
+			<TaskPaneRenderer
+				node={node.second}
+				currentPhase={currentPhase}
+				paneCount={paneCount}
+				isNarrowLayout={isNarrowLayout}
+				onSplitPane={onSplitPane}
+				onClosePane={onClosePane}
+				onChangePaneContent={onChangePaneContent}
+				onResizeSplit={onResizeSplit}
+				renderPaneContent={renderPaneContent}
+			/>
+		</div>
+	);
+}
+
+function TaskPane({
+	pane,
+	currentPhase,
+	canSplit,
+	canClose,
+	onSplit,
+	onClose,
+	onChangeContent,
+	children
+}: {
+	pane: TaskPaneLeaf;
+	currentPhase: SessionPhase;
+	canSplit: boolean;
+	canClose: boolean;
+	onSplit: (direction: TaskSplitDirection) => void;
+	onClose: () => void;
+	onChangeContent: (content: TaskPaneContent) => void;
+	children: React.ReactNode;
+}) {
+	const isLocked = !getTaskPaneContentAvailability(pane.content, currentPhase);
+
+	return (
+		<section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border bg-card" aria-label={TASK_PANE_CONTENT_LABELS[pane.content]}>
+			<header className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5">
+				<div className="flex min-w-0 items-center gap-2">
+					{canClose && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							className="h-8 w-8 shrink-0"
+							title="Close pane"
+							aria-label={`Close ${TASK_PANE_CONTENT_LABELS[pane.content]} pane`}
+							onClick={event => {
+								event.stopPropagation();
+								onClose();
+							}}
+						>
+							<X className="h-4 w-4" />
+						</Button>
+					)}
+					<select
+						className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm font-medium outline-none focus:ring-1 focus:ring-ring"
+						value={pane.content}
+						aria-label="選擇 pane 內容"
+						onChange={event => onChangeContent(event.target.value as TaskPaneContent)}
+						onPointerDown={event => event.stopPropagation()}
+					>
+						{(Object.keys(TASK_PANE_CONTENT_LABELS) as TaskPaneContent[]).map(content => (
+							<option key={content} value={content}>
+								{TASK_PANE_CONTENT_LABELS[content]}
+							</option>
+						))}
+					</select>
+					{isLocked && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="目前階段鎖定" />}
+				</div>
+				<div className="flex shrink-0 items-center gap-1">
+					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Right" aria-label="Split Right" disabled={!canSplit} onClick={() => onSplit("horizontal")}>
+						<Columns2 className="h-4 w-4" />
+					</Button>
+					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Down" aria-label="Split Down" disabled={!canSplit} onClick={() => onSplit("vertical")}>
+						<Rows2 className="h-4 w-4" />
+					</Button>
+				</div>
+			</header>
+			<div className="min-h-0 overflow-hidden p-2">{children}</div>
+		</section>
+	);
+}
+
+function PaneSeparator({ split, direction, onResize }: { split: TaskPaneSplit; direction: TaskSplitDirection; onResize: (splitId: string, ratio: number) => void }) {
+	const handleResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const separator = event.currentTarget;
+		const container = separator.parentElement;
+		if (!container) {
+			return;
+		}
+
+		separator.setPointerCapture(event.pointerId);
+		const containerRect = container.getBoundingClientRect();
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			const nextRatio = direction === "horizontal" ? ((moveEvent.clientX - containerRect.left) / containerRect.width) * 100 : ((moveEvent.clientY - containerRect.top) / containerRect.height) * 100;
+			onResize(split.id, nextRatio);
+		};
+
+		const handlePointerUp = () => {
+			if (separator.hasPointerCapture(event.pointerId)) {
+				separator.releasePointerCapture(event.pointerId);
+			}
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+
+	const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		const isHorizontalKey = event.key === "ArrowLeft" || event.key === "ArrowRight";
+		const isVerticalKey = event.key === "ArrowUp" || event.key === "ArrowDown";
+		if ((direction === "horizontal" && !isHorizontalKey) || (direction === "vertical" && !isVerticalKey)) {
+			return;
+		}
+
+		event.preventDefault();
+		const directionMultiplier = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+		onResize(split.id, split.ratio + directionMultiplier * 4);
+	};
+
+	return (
+		<button
+			type="button"
+			className={cn(
+				"group grid place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				direction === "horizontal" ? "h-full w-4 cursor-col-resize" : "h-4 w-full cursor-row-resize"
+			)}
+			aria-label={direction === "horizontal" ? "調整左右 pane 大小" : "調整上下 pane 大小"}
+			aria-orientation={direction === "horizontal" ? "vertical" : "horizontal"}
+			aria-valuemin={MIN_TASK_PANE_RATIO}
+			aria-valuemax={100 - MIN_TASK_PANE_RATIO}
+			aria-valuenow={Math.round(split.ratio)}
+			role="separator"
+			onPointerDown={handleResizeStart}
+			onKeyDown={handleResizeKeyDown}
+		>
+			<span className={cn("rounded-full bg-border transition-colors group-hover:bg-primary/30", direction === "horizontal" ? "h-20 w-0.5" : "h-0.5 w-20")} aria-hidden="true" />
+		</button>
 	);
 }
 
@@ -333,10 +824,11 @@ export default function MeetingRoom() {
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
 	const [timerEndTime, setTimerEndTime] = useState(0);
-	const [isTaskDetailOpen, setIsTaskDetailOpen] = useState(false);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
+	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -347,7 +839,6 @@ export default function MeetingRoom() {
 	});
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
-	const [rankingScrollScope, setRankingScrollScope] = useState<RankingScope>("private");
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -368,10 +859,9 @@ export default function MeetingRoom() {
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
 	const shouldHighlightRankConflict = currentPhase === "group";
-	const activeRankingScrollScope = currentPhase === "group" ? rankingScrollScope : "private";
 	const meetingLayoutStyle = {
-		"--private-board-width": `${privateBoardWidth}px`,
-		"--jitsi-height": `${jitsiHeight}px`
+		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
+		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
 	} as CSSProperties;
 
 	useEffect(() => {
@@ -479,67 +969,13 @@ export default function MeetingRoom() {
 
 			if (event.code === "Space") {
 				event.preventDefault();
-				void handleMic("public");
-				return;
-			}
-
-			if (event.code === "KeyW") {
-				event.preventDefault();
-				void handleMic("private");
+				void handleMic(micMode === "public" ? "private" : "public");
 			}
 		};
 
 		window.addEventListener("keydown", handleMicShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
-	}, [handleMic]);
-
-	useEffect(() => {
-		const handleRankingScrollKeyDown = (event: KeyboardEvent) => {
-			if (
-				event.defaultPrevented ||
-				event.metaKey ||
-				event.ctrlKey ||
-				event.altKey ||
-				event.shiftKey ||
-				(event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-			) {
-				return;
-			}
-
-			const activeElement = document.activeElement;
-			if (activeElement && activeElement !== document.body && activeElement !== document.documentElement) {
-				return;
-			}
-
-			if (event.key === "ArrowLeft") {
-				if (currentPhase === "group") {
-					event.preventDefault();
-					setRankingScrollScope("public");
-				}
-				return;
-			}
-
-			if (event.key === "ArrowRight") {
-				event.preventDefault();
-				setRankingScrollScope("private");
-				return;
-			}
-
-			const scrollContainer = activeRankingScrollScope === "public" ? publicRankingScrollRef.current : privateRankingScrollRef.current;
-			if (!scrollContainer) {
-				return;
-			}
-
-			event.preventDefault();
-			scrollContainer.scrollBy({
-				top: event.key === "ArrowDown" ? 72 : -72,
-				behavior: "smooth"
-			});
-		};
-
-		window.addEventListener("keydown", handleRankingScrollKeyDown);
-		return () => window.removeEventListener("keydown", handleRankingScrollKeyDown);
-	}, [activeRankingScrollScope, currentPhase]);
+	}, [handleMic, micMode]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -834,34 +1270,27 @@ export default function MeetingRoom() {
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_10px_var(--jitsi-height)_auto] gap-y-1 rounded-lg border bg-card p-3 text-card-foreground xl:min-h-0">
-				<section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Lost at sea ranking task">
-					<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
-						<div className="grid min-w-0 gap-1">
-							<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
-						</div>
-						<Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" aria-expanded={isTaskDetailOpen} onClick={() => setIsTaskDetailOpen(current => !current)}>
-							<Info className="h-4 w-4" />
-							{isTaskDetailOpen ? "收合說明" : "任務說明"}
-						</Button>
-					</header>
-					{isTaskDetailOpen && taskDetail && <p className="mb-3 w-full shrink-0 rounded-lg border bg-background px-3 py-2 text-sm leading-6 text-muted-foreground">{taskDetail}</p>}
-					<div className={cn("grid h-full min-h-0 gap-3 overflow-y-auto pr-1 lg:overflow-hidden lg:pr-0", currentPhase === "group" && "lg:grid-cols-2")}>
-						{currentPhase === "group" && (
-							<LostAtSeaRankingPanel
-								title="Public 排序"
-								status="協作中"
-								items={publicItems}
-								sensors={sensors}
-								onDragStart={() => {
-									isDraggingRef.current.public = true;
-								}}
-								onDragCancel={() => handleRankingDragCancel("public")}
-								onDragEnd={event => handleRankingDragEnd("public", event)}
-								onPreviewItem={setPreviewItem}
-								scrollContainerRef={publicRankingScrollRef}
-							/>
-						)}
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-0.5 text-card-foreground xl:min-h-0">
+				<TaskWorkspace
+					currentPhase={currentPhase}
+					taskTitle={taskTitle}
+					taskDetail={taskDetail}
+					renderPublicRanking={() => (
+						<LostAtSeaRankingPanel
+							title="Public 排序"
+							status="協作中"
+							items={publicItems}
+							sensors={sensors}
+							onDragStart={() => {
+								isDraggingRef.current.public = true;
+							}}
+							onDragCancel={() => handleRankingDragCancel("public")}
+							onDragEnd={event => handleRankingDragEnd("public", event)}
+							onPreviewItem={setPreviewItem}
+							scrollContainerRef={publicRankingScrollRef}
+						/>
+					)}
+					renderPrivateRanking={() => (
 						<LostAtSeaRankingPanel
 							title="Private 排序"
 							status={`${displayName} (${participantId})`}
@@ -882,25 +1311,49 @@ export default function MeetingRoom() {
 								return publicRank == null ? undefined : item.rank - publicRank;
 							}}
 						/>
-					</div>
-				</section>
+					)}
+				/>
 
-				<div className="grid place-items-center">
-					<button
-						type="button"
-						className="h-2 w-24 cursor-row-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-						aria-label="調整 Jitsi 區塊高度"
-						aria-orientation="horizontal"
-						aria-valuemin={MIN_JITSI_HEIGHT}
-						aria-valuenow={jitsiHeight}
-						role="separator"
-						onPointerDown={handleJitsiResizeStart}
-						onKeyDown={handleJitsiResizeKeyDown}
-					/>
+				<div className={cn("grid h-4 grid-cols-[1fr_auto_1fr] items-center gap-2", isJitsiCollapsed && "hidden")}>
+					<div />
+					{!isJitsiCollapsed && (
+						<button
+							type="button"
+							className="group grid h-4 w-20 cursor-row-resize place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							aria-label="調整 Jitsi 區塊高度"
+							aria-orientation="horizontal"
+							aria-valuemin={MIN_JITSI_HEIGHT}
+							aria-valuenow={jitsiHeight}
+							role="separator"
+							onPointerDown={handleJitsiResizeStart}
+							onKeyDown={handleJitsiResizeKeyDown}
+						>
+							<span className="h-0.5 w-20 rounded-full bg-border transition-colors group-hover:bg-primary/30" aria-hidden="true" />
+						</button>
+					)}
+					<div />
 				</div>
 
-				<div className="min-h-0 overflow-hidden rounded-lg border bg-muted">
-					<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
+				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
+					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
+						<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
+					</div>
+					{!isJitsiCollapsed && (
+						<>
+							<Button
+								type="button"
+								variant="outline"
+								size="icon"
+								className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+								aria-label="收合 Jitsi"
+								title="收合 Jitsi"
+								aria-expanded="true"
+								onClick={() => setIsJitsiCollapsed(true)}
+							>
+								<ChevronDown className="h-4 w-4" />
+							</Button>
+						</>
+					)}
 					<div className="hidden">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
 						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
@@ -924,7 +1377,6 @@ export default function MeetingRoom() {
 							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
-								<ShortcutKey label="W" />
 							</Button>
 						</div>
 					</div>
@@ -935,8 +1387,8 @@ export default function MeetingRoom() {
 					)}
 				</div>
 
-				<div className="relative flex items-center justify-center pt-2">
-					<div className="absolute left-0 flex flex-col items-start gap-0.5 text-xs text-muted-foreground">
+				<div className="relative flex h-10 items-start justify-center pt-1">
+					<div className="hidden">
 						<div>WebSocket: {isConnected ? "已連線" : "未連線"}</div>
 						<div>Jitsi: {jitsiStatusLabels[jitsiStatus]}</div>
 						{micPermission !== "granted" && micPermission !== "unknown" && (
@@ -945,27 +1397,40 @@ export default function MeetingRoom() {
 							</button>
 						)}
 					</div>
-					<div className="flex flex-wrap items-center justify-center gap-2">
+					<div className="flex flex-wrap items-center justify-center gap-2.5">
 						<Button
 							variant={micMode === "public" ? "destructive" : "outline"}
-							className={cn("gap-2", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
+							className={cn("h-9 gap-2 px-4 text-sm", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
 							onClick={() => void handleMic("public")}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
 							<ShortcutKey label="Space" />
 						</Button>
-						<Button className="hidden" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button className="h-9 gap-2 px-4 text-sm" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
-							<ShortcutKey label="W" />
 						</Button>
 					</div>
 					{hasAudioConnectionError && (
-						<AlertCircle className="absolute right-0 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
+						<AlertCircle className="absolute right-24 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
 							<title>{audioError}</title>
 						</AlertCircle>
 					)}
+					<div className="absolute bottom-0 left-0">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className={cn("h-8 w-8", !isJitsiCollapsed && "hidden")}
+							aria-label={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
+							title={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
+							aria-expanded={!isJitsiCollapsed}
+							onClick={() => setIsJitsiCollapsed(current => !current)}
+						>
+							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+						</Button>
+					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
 						<Button
 							type="button"
@@ -981,12 +1446,8 @@ export default function MeetingRoom() {
 						{isShortcutHelpOpen && (
 							<div className="absolute bottom-full right-0 z-30 mb-1 grid w-44 gap-1 rounded-md border bg-popover p-2 text-xs text-popover-foreground shadow-md">
 								<div className="flex items-center justify-between gap-3">
-									<span>公開發言</span>
+									<span>切換發言狀態</span>
 									<ShortcutKey label="Space" />
-								</div>
-								<div className="flex items-center justify-between gap-3">
-									<span>悄悄話</span>
-									<ShortcutKey label="W" />
 								</div>
 								<div className="flex items-center justify-between gap-3">
 									<span>切換分頁</span>
@@ -995,14 +1456,6 @@ export default function MeetingRoom() {
 								<div className="flex items-center justify-between gap-3">
 									<span>輸入</span>
 									<ShortcutKey label="Enter" />
-								</div>
-								<div className="flex items-center justify-between gap-3">
-									<span>滾動排序</span>
-									<ShortcutKey label="↑/↓" />
-								</div>
-								<div className="flex items-center justify-between gap-3">
-									<span>切換排序欄</span>
-									<ShortcutKey label="←/→" />
 								</div>
 							</div>
 						)}
@@ -1034,34 +1487,55 @@ export default function MeetingRoom() {
 			)}
 
 			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
-				<button
-					type="button"
-					className="absolute -left-3 top-1/2 hidden h-24 w-2 -translate-y-1/2 cursor-col-resize rounded-full bg-border transition-colors hover:bg-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:block"
-					aria-label="調整 Private Board 寬度"
-					aria-orientation="vertical"
-					aria-valuemin={MIN_PRIVATE_BOARD_WIDTH}
-					aria-valuenow={privateBoardWidth}
-					role="separator"
-					onPointerDown={handlePrivateBoardResizeStart}
-					onKeyDown={handlePrivateBoardResizeKeyDown}
-				/>
-				<PrivateBoard
-					sessionId={sessionId}
-					participantId={participantId}
-					lastMessage={lastMessage}
-					lastAudioMessage={lastAudioMessage}
-					isConnected={isConnected}
-					micMode={micMode}
-					onMicModeChange={handleMic}
-					onSendBoardMessage={sendMessage}
-					displayName={displayName}
-					currentPhase={currentPhase}
-					timerEndTime={timerEndTime}
-				/>
+				{!isPrivateBoardCollapsed && (
+					<button
+						type="button"
+						className="group absolute -left-4 top-1/2 hidden h-20 w-4 -translate-y-1/2 cursor-col-resize place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:grid"
+						aria-label="調整 Private Board 寬度"
+						aria-orientation="vertical"
+						aria-valuemin={MIN_PRIVATE_BOARD_WIDTH}
+						aria-valuenow={privateBoardWidth}
+						role="separator"
+						onPointerDown={handlePrivateBoardResizeStart}
+						onKeyDown={handlePrivateBoardResizeKeyDown}
+					>
+						<span className="h-20 w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary/30" aria-hidden="true" />
+					</button>
+				)}
+				{isPrivateBoardCollapsed && (
+					<Button
+						type="button"
+						variant="outline"
+						size="icon"
+						className="absolute -right-2 top-3 z-20 h-8 w-8 shadow-sm"
+						aria-label="展開 Private Board"
+						title="展開 Private Board"
+						aria-expanded="false"
+						onClick={() => setIsPrivateBoardCollapsed(false)}
+					>
+						<ChevronLeft className="h-4 w-4" />
+					</Button>
+				)}
+				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
+					<PrivateBoard
+						sessionId={sessionId}
+						participantId={participantId}
+						lastMessage={lastMessage}
+						lastAudioMessage={lastAudioMessage}
+						isConnected={isConnected}
+						micMode={micMode}
+						onMicModeChange={handleMic}
+						onSendBoardMessage={sendMessage}
+						displayName={displayName}
+						currentPhase={currentPhase}
+						timerEndTime={timerEndTime}
+						onCollapse={() => setIsPrivateBoardCollapsed(true)}
+					/>
+				</div>
 			</aside>
 			<button
 				onClick={toggleFullscreen}
-				className="fixed bottom-4 right-4 z-50 grid h-10 w-10 place-items-center rounded-full bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				className="fixed bottom-1 right-1 z-50 grid h-10 w-10 place-items-center rounded-full bg-background/80 text-foreground shadow-sm backdrop-blur transition-colors hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				title={isFullscreen ? "退出全螢幕" : "全螢幕"}
 			>
 				{isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
