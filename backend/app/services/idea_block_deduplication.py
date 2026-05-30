@@ -23,6 +23,7 @@ async def find_duplicate_idea_block(
     *,
     session_name: str,
     user_id: int,
+    task_name: str,
     title: str,
     summary: str,
     embedding_vector: list[float] | None,
@@ -31,6 +32,7 @@ async def find_duplicate_idea_block(
         db,
         session_name=session_name,
         user_id=user_id,
+        task_name=task_name,
         title=title,
         summary=summary,
     )
@@ -54,6 +56,7 @@ async def find_duplicate_idea_block(
         db,
         session_name=session_name,
         user_id=user_id,
+        task_name=task_name,
         embedding_vector=embedding_vector,
     )
     if semantic_match is None:
@@ -80,6 +83,7 @@ async def _find_exact_text_match(
     *,
     session_name: str,
     user_id: int,
+    task_name: str,
     title: str,
     summary: str,
 ) -> IdeaBlock | None:
@@ -93,6 +97,7 @@ async def _find_exact_text_match(
         .where(
             IdeaBlock.session_name == session_name,
             IdeaBlock.user_id == user_id,
+            IdeaBlock.task_name == task_name,
             IdeaBlock.is_deleted.is_(False),
         )
         .order_by(IdeaBlock.id.desc())
@@ -113,6 +118,7 @@ async def _find_semantic_match(
     *,
     session_name: str,
     user_id: int,
+    task_name: str,
     embedding_vector: list[float],
 ) -> tuple[IdeaBlock, float] | None:
     distance = IdeaBlock.embedding_vector.cosine_distance(embedding_vector)
@@ -122,6 +128,7 @@ async def _find_semantic_match(
         .where(
             IdeaBlock.session_name == session_name,
             IdeaBlock.user_id == user_id,
+            IdeaBlock.task_name == task_name,
             IdeaBlock.is_deleted.is_(False),
             IdeaBlock.embedding_vector.is_not(None),
             distance < DEDUPLICATION_DISTANCE_THRESHOLD,

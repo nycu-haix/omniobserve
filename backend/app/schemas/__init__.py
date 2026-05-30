@@ -25,6 +25,17 @@ from .idea_block import (
     IdeaBlockUpdate,
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
+from .poster_task_item import (
+    EnhanceThePosterConfigResponse,
+    EnhanceThePosterOptionResponse,
+    PosterRankingCandidatesResponse,
+    PosterTaskItemCreate,
+    PosterTaskItemPatch,
+    PosterTaskItemResponse,
+    PosterTaskItemsCreateRequest,
+    PosterTaskItemsReplaceRequest,
+)
+from .poster_idea_block_task_item import PosterIdeaBlockTaskItemResponse
 from .ranking_move import RankingMoveResponse
 from .similarity import (
     SimilarityCreate,
@@ -60,6 +71,15 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
+    "EnhanceThePosterConfigResponse",
+    "EnhanceThePosterOptionResponse",
+    "PosterRankingCandidatesResponse",
+    "PosterIdeaBlockTaskItemResponse",
+    "PosterTaskItemCreate",
+    "PosterTaskItemPatch",
+    "PosterTaskItemResponse",
+    "PosterTaskItemsCreateRequest",
+    "PosterTaskItemsReplaceRequest",
     "RankingMoveResponse",
     "SimilarityCreate",
     "SimilarityResponse",

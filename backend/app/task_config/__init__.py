@@ -10,6 +10,14 @@ from .lost_at_sea import (
     TOPIC_DESCRIPTION,
     serialize_task_config,
 )
+from .enhance_the_poster import (
+    ACTION_IDS as POSTER_ACTION_IDS,
+    ADVANCED_ACTION_IDS as POSTER_ADVANCED_ACTION_IDS,
+    MAX_PRIVATE_TASK_ITEMS as POSTER_MAX_PRIVATE_TASK_ITEMS,
+    POSTER_COMPONENT_IDS,
+    TASK_ID as ENHANCE_THE_POSTER_TASK_ID,
+    serialize_enhance_the_poster_config,
+)
 
 __all__ = [
     "LLM_TOPIC_DESCRIPTION",
@@ -22,4 +30,10 @@ __all__ = [
     "TASK_TOPIC_DETAIL",
     "TOPIC_DESCRIPTION",
     "serialize_task_config",
+    "ENHANCE_THE_POSTER_TASK_ID",
+    "POSTER_ACTION_IDS",
+    "POSTER_ADVANCED_ACTION_IDS",
+    "POSTER_COMPONENT_IDS",
+    "POSTER_MAX_PRIVATE_TASK_ITEMS",
+    "serialize_enhance_the_poster_config",
 ]

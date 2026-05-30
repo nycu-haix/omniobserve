@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
-from ..models import TaskItem
+from ..models import PosterIdeaBlockTaskItem, TaskItem
 from ..schemas import ApiError
 from ..task_config import RANKING_ITEMS, TASK_CONFIG
+from ..task_config.enhance_the_poster import ACTION_IDS, ADVANCED_ACTION_IDS, POSTER_COMPONENT_IDS
+from ..task_config.registry import DEFAULT_TASK_NAME, get_task_prompt_config, normalize_task_name
 
 
 TASK_ITEM_CONFIGS_BY_ID = {item["id"]: item for item in TASK_CONFIG["items"]}
@@ -104,12 +106,123 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
     return normalized_ids
 
 
+async def build_poster_task_items_with_llm(text: str) -> list[dict[str, str]]:
+    task_config = get_task_prompt_config("enhance-the-poster")
+    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not openai_api_key:
+        raise ApiError(
+            422,
+            "TASK_ITEM_GENERATION_FAILED",
+            "Task items could not be generated",
+            details={"hint": "Set OPENAI_API_KEY for poster task item detection"},
+        )
+
+    poster_component_lines = "\n".join(
+        _format_poster_option_line(item)
+        for item in task_config.poster_components or []
+    )
+    advanced_action_lines = "\n".join(
+        _format_poster_option_line(item)
+        for item in task_config.advanced_actions or []
+    )
+    system_prompt = f"""
+You classify user text for the Enhance The Poster task.
+
+Use only this exact POSTER_TASK_ITEMS vocabulary.
+
+Poster components:
+{poster_component_lines}
+
+Actions:
+- add
+- remove
+- edit
+
+Advanced actions:
+{advanced_action_lines}
+
+Given the user input, identify every poster improvement task item being discussed.
+Each returned item must include:
+- poster_component
+- action
+- advanced_action
+
+Rules:
+- The input may be Mandarin Chinese, English, or mixed language.
+- Match against ids, Chinese labels, English labels, and obvious synonyms.
+- If the user proposes changing an existing element, use action="edit".
+- If the user proposes adding a missing element, use action="add".
+- If the user proposes deleting an element, use action="remove".
+- Do not invent components or advanced actions.
+- Deduplicate exact triples.
+- Return JSON only in this exact shape:
+{{"poster_task_items":[{{"poster_component":"title","action":"edit","advanced_action":"enlarge"}}]}}
+- If unrelated, return {{"poster_task_items":[]}}.
+""".strip()
+    user_prompt = f"User input:\n{text.strip()}"
+
+    try:
+        logger.info(
+            "poster_task_item_llm_request model=%s text_chars=%s",
+            OPENAI_MODEL,
+            len(text),
+        )
+        completion = await openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        raw_content = completion.choices[0].message.content or "{}"
+        logger.info(
+            "poster_task_item_llm_response model=%s response_chars=%s",
+            OPENAI_MODEL,
+            len(raw_content),
+        )
+        parsed = _parse_llm_json_payload(raw_content)
+    except ApiError:
+        raise
+    except Exception as exc:
+        logger.exception("poster_task_item_llm_failed model=%s error=%s", OPENAI_MODEL, exc)
+        raise ApiError(
+            422,
+            "TASK_ITEM_GENERATION_FAILED",
+            "Task items could not be generated",
+            details={"provider": "openai", "reason": exc.__class__.__name__},
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
+
+    items = parsed.get("poster_task_items")
+    if not isinstance(items, list):
+        raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
+
+    normalized_items = _normalize_poster_task_items(items)
+    logger.info(
+        "poster_task_item_llm_parsed poster_task_items=%s",
+        normalized_items,
+    )
+    return normalized_items
+
+
 async def generate_and_save_task_items_for_idea_block(
     db: AsyncSession,
     *,
     idea_block_id: int,
     text: str,
-) -> list[TaskItem]:
+    task_name: str = DEFAULT_TASK_NAME,
+) -> list[TaskItem | PosterIdeaBlockTaskItem]:
+    task_name = normalize_task_name(task_name)
+    if task_name == "enhance-the-poster":
+        return await generate_and_save_poster_task_items_for_idea_block(
+            db,
+            idea_block_id=idea_block_id,
+            text=text,
+        )
+
     task_item_ids = await build_task_item_ids_with_llm(text)
     logger.info(
         "task_item_ids_generated idea_block_id=%s task_item_ids=%s",
@@ -142,7 +255,16 @@ async def replace_task_items_for_idea_block(
     *,
     idea_block_id: int,
     text: str,
-) -> list[TaskItem]:
+    task_name: str = DEFAULT_TASK_NAME,
+) -> list[TaskItem | PosterIdeaBlockTaskItem]:
+    task_name = normalize_task_name(task_name)
+    if task_name == "enhance-the-poster":
+        return await replace_poster_task_items_for_idea_block(
+            db,
+            idea_block_id=idea_block_id,
+            text=text,
+        )
+
     task_item_ids = await build_task_item_ids_with_llm(text)
     logger.info(
         "task_item_ids_rebuilt idea_block_id=%s task_item_ids=%s",
@@ -163,6 +285,56 @@ async def replace_task_items_for_idea_block(
         len(task_items),
     )
     return task_items
+
+
+async def generate_and_save_poster_task_items_for_idea_block(
+    db: AsyncSession,
+    *,
+    idea_block_id: int,
+    text: str,
+) -> list[PosterIdeaBlockTaskItem]:
+    poster_task_items = await build_poster_task_items_with_llm(text)
+    rows = [
+        PosterIdeaBlockTaskItem(
+            idea_block_id=idea_block_id,
+            poster_component=item["poster_component"],
+            action=item["action"],
+            advanced_action=item["advanced_action"],
+        )
+        for item in poster_task_items
+    ]
+    if not rows:
+        logger.info("poster_task_item_rows_skipped_empty idea_block_id=%s", idea_block_id)
+        return []
+
+    db.add_all(rows)
+    await db.flush()
+    logger.info("poster_task_item_rows_saved idea_block_id=%s count=%s", idea_block_id, len(rows))
+    return rows
+
+
+async def replace_poster_task_items_for_idea_block(
+    db: AsyncSession,
+    *,
+    idea_block_id: int,
+    text: str,
+) -> list[PosterIdeaBlockTaskItem]:
+    poster_task_items = await build_poster_task_items_with_llm(text)
+    await db.execute(delete(PosterIdeaBlockTaskItem).where(PosterIdeaBlockTaskItem.idea_block_id == idea_block_id))
+    rows = [
+        PosterIdeaBlockTaskItem(
+            idea_block_id=idea_block_id,
+            poster_component=item["poster_component"],
+            action=item["action"],
+            advanced_action=item["advanced_action"],
+        )
+        for item in poster_task_items
+    ]
+    if rows:
+        db.add_all(rows)
+        await db.flush()
+    logger.info("poster_task_item_rows_replaced idea_block_id=%s count=%s", idea_block_id, len(rows))
+    return rows
 
 
 def _normalize_task_item_ids(values: list[Any]) -> list[int]:
@@ -187,6 +359,39 @@ def _format_ranking_item_line(index: int, item_id: str) -> str:
         f'{index}. task_item_id={index}; config_id="{item_id}"; '
         f'zh="{item["label_zh"]}"; en="{item["label_en"]}"; aliases="{aliases}"'
     )
+
+
+def _format_poster_option_line(item: dict[str, str]) -> str:
+    return f'- id="{item["id"]}"; zh="{item["label_zh"]}"; en="{item["label_en"]}"'
+
+
+def _normalize_poster_task_items(values: list[Any]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        poster_component = str(value.get("poster_component") or "").strip()
+        action = str(value.get("action") or "").strip()
+        advanced_action = str(value.get("advanced_action") or "").strip()
+        if poster_component not in POSTER_COMPONENT_IDS:
+            continue
+        if action not in ACTION_IDS:
+            continue
+        if advanced_action not in ADVANCED_ACTION_IDS:
+            continue
+        key = (poster_component, action, advanced_action)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(
+            {
+                "poster_component": poster_component,
+                "action": action,
+                "advanced_action": advanced_action,
+            }
+        )
+    return normalized
 
 
 def _build_mock_task_item_ids() -> list[int] | None:

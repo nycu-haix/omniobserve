@@ -32,6 +32,7 @@ class IdeaBlockGenerateRequest(BaseModel):
 class GeneratedIdeaBlockResponse(BaseModel):
     id: int
     session_name: str
+    task_name: str = "lost-at-sea"
     participant_id: str
     visibility: Literal["public", "private"]
     content: str

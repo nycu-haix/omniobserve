@@ -8,109 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
-from ..models import IdeaBlock, Similarity, TaskItem
-from ..task_config import SIMILARITY_TASK_CONTEXT
+from ..models import IdeaBlock, PosterIdeaBlockTaskItem, Similarity, TaskItem
+from ..task_config.registry import get_task_prompt_config
 from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
-
-SIMILARITY_SYSTEM_PROMPT = f"""
-# Role
-You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a Lost at Sea group ranking discussion.
-
-Your goal is not to detect duplicate wording or shared item mentions. Your goal is to find ideas that could help participants notice a shared ranking intuition and feel invited to join the discussion.
-
-# Task Context
-{SIMILARITY_TASK_CONTEXT}
-
-Participants are ranking the items by importance for surviving at sea while waiting for rescue. A useful similarity cue should support group consensus-building, not merely point out that two people mentioned the same item.
-
-# Core Similarity Definition
-A candidate idea is similar only when it shares a compatible ranking stance with the core idea.
-
-"Ranking stance" means the practical ranking direction, priority judgment, or group recommendation implied by the idea. For example:
-- both prioritize the same item,
-- both deprioritize the same item,
-- both imply the item should be high priority,
-- both imply the item should be low priority,
-- both rank item A above item B,
-- both rank item A below item B,
-- both make a compatible recommendation about keeping, using, dismissing, or assigning value to an item.
-
-Similarity does NOT require the same reason. Two ideas may be similar even when their reasons differ, as long as their ranking stance is compatible.
-
-Generic positive or negative evaluations are not enough. Phrases like "good", "useful", "valuable", "important", "helpful for survival", or "helpful for rescue" do NOT establish similarity unless the idea also gives a concrete ranking signal, comparison, or survival use.
-Do not infer a strong ranking stance from weak wording alone. Words like "useful", "important", or "valuable" are not enough unless the idea clearly implies a priority level, rank movement, or comparison.
-
-# Similarity Criteria
-Mark a candidate as similar only if ALL of the following are true:
-
-1. Same decision target
-The two ideas discuss the same item, the same comparison pair, or the same survival strategy.
-
-2. Compatible ranking stance
-The two ideas imply a similar priority direction or practical ranking conclusion.
-
-3. Concrete evidence
-At least one of the following must be present:
-- an explicit rank, rank range, priority level, or order,
-- a direct comparison between items,
-- a concrete survival/rescue use that explains why the item should move up or down in the ranking.
-
-4. Meaningful discussion bridge
-The match would reasonably help a participant feel: "Someone else has a similar ranking intuition, so I can build on or compare with that idea."
-
-# Same Reason Classification
-After deciding that a candidate is similar, classify `is_same_reason`:
-
-- `true`: the ranking stance is similar AND the survival rationale, intended use, or reason is also similar.
-  Example: both rank the mirror high because it can reflect sunlight to signal rescuers.
-  Use `true` when the main shared rationale is the same, even if one idea adds extra supporting reasons.
-  Compare the primary shared rationale, not the full set of all reasons.
-  Also use `true` when one idea is more detailed, but its main rationale overlaps with the other.
-
-- `false`: the ranking stance is similar BUT the survival rationale, intended use, or reason is different.
-  Example: both rank the waterproof sheet high, but one focuses on collecting rainwater while the other focuses on shade or protection.
-  Use `false` only when the primary rationale is genuinely different.
-  Use `false` only when the similar ranking stance comes from different survival mechanisms or intended uses.
-
-Examples:
-- "Mosquito net is useless because there are no mosquitoes" and "Mosquito net is useless because there are no mosquitoes and it may entangle me" => `is_same_reason: true`
-- "Waterproof sheet should rank high because it collects rainwater" and "Waterproof sheet should rank high because it provides shade" => `is_same_reason: false`
-- "Rum should rank high because it disinfects wounds" and "Rum should rank high because it provides calories" => `is_same_reason: false`
-
-# Do NOT Mark As Similar
-Return `id: null` if any of the following apply:
-
-- The ideas merely mention the same item.
-- Both ideas say an item is useful, but do not imply a similar ranking direction.
-- Both ideas only use generic praise or importance words, such as "good", "great", "valuable", "important", "useful", "helpful for survival", or "helpful for rescue".
-- The practical ranking conclusion is unclear, neutral, or too generic.
-- One idea prioritizes an item while the other deprioritizes it.
-- The ideas compare the same items in opposite directions.
-  Example: "the sextant is more important than the map" vs "the map is better than the sextant."
-- One idea ranks item A above item B, while the other ranks item B above item A.
-- For relative comparisons, the relative order must match. "A above B" is NOT similar to "A and B are both useless" unless both ideas make the same relative ordering claim.
-- Questions, doubts, or feasibility challenges are not similar to positive proposals. If one idea asks whether a use is possible and the other asserts that use as valuable, return `id: null`.
-- The match would not create a meaningful bridge for discussion or consensus-building.
-
-# Selection Rule
-Review the candidate list and choose only the first candidate that satisfies the similarity criteria.
-
-# Output Requirements
-Return JSON only. Do not include Markdown, comments, or extra text.
-
-If a similar idea is found:
-{{"id": 123, "reason": "Briefly explain the shared ranking stance, then compare the primary rationale.", "is_same_reason": true}}
-
-If the ranking stance is similar but the reason is different:
-{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their primary rationales are different.", "is_same_reason": false}}
-
-If no candidate has a compatible ranking stance:
-{{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
-""".strip()
-
 
 async def trigger_similarity_detection(idea_block_id: int, db: AsyncSession) -> None:
     try:
@@ -144,7 +47,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         idea_block.summary,
     )
 
-    task_item_ids = await _get_task_item_ids(idea_block.id, db)
+    task_item_ids = await _get_task_item_ids(idea_block, db)
     logger.info(
         "similarity_detection_task_items idea_block_id=%s task_item_ids=%s count=%s",
         idea_block.id,
@@ -242,25 +145,48 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
     await _replace_similarity_pair(idea_block, selected_id, reason, is_same_reason, db)
 
 
-async def _get_task_item_ids(idea_block_id: int, db: AsyncSession) -> list[int]:
+async def _get_task_item_ids(idea_block: IdeaBlock, db: AsyncSession) -> list[Any]:
+    if idea_block.task_name == "enhance-the-poster":
+        return await _get_poster_task_item_keys(idea_block.id, db)
     result = await db.execute(
         select(TaskItem.task_item_id)
-        .where(TaskItem.idea_block_id == idea_block_id)
+        .where(TaskItem.idea_block_id == idea_block.id)
         .order_by(TaskItem.task_item_id.asc())
     )
     return list(result.scalars().all())
 
 
+async def _get_poster_task_item_keys(idea_block_id: int, db: AsyncSession) -> list[tuple[str, str, str]]:
+    result = await db.execute(
+        select(
+            PosterIdeaBlockTaskItem.poster_component,
+            PosterIdeaBlockTaskItem.action,
+            PosterIdeaBlockTaskItem.advanced_action,
+        )
+        .where(PosterIdeaBlockTaskItem.idea_block_id == idea_block_id)
+        .order_by(
+            PosterIdeaBlockTaskItem.poster_component.asc(),
+            PosterIdeaBlockTaskItem.action.asc(),
+            PosterIdeaBlockTaskItem.advanced_action.asc(),
+        )
+    )
+    return [(component, action, advanced_action) for component, action, advanced_action in result.all()]
+
+
 async def _find_same_item_blocks(
     idea_block: IdeaBlock,
-    task_item_ids: list[int],
+    task_item_ids: list[Any],
     db: AsyncSession,
 ) -> list[IdeaBlock]:
+    if idea_block.task_name == "enhance-the-poster":
+        return await _find_same_poster_item_blocks(idea_block, task_item_ids, db)
+
     id_result = await db.execute(
         select(distinct(IdeaBlock.id))
         .join(TaskItem, TaskItem.idea_block_id == IdeaBlock.id)
         .where(
             IdeaBlock.session_name == idea_block.session_name,
+            IdeaBlock.task_name == idea_block.task_name,
             IdeaBlock.user_id != idea_block.user_id,
             IdeaBlock.id != idea_block.id,
             IdeaBlock.embedding_vector.is_not(None),
@@ -275,6 +201,40 @@ async def _find_same_item_blocks(
     result = await db.execute(
         select(IdeaBlock)
         .where(IdeaBlock.id.in_(idea_block_ids))
+        .order_by(IdeaBlock.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def _find_same_poster_item_blocks(
+    idea_block: IdeaBlock,
+    task_item_keys: list[tuple[str, str, str]],
+    db: AsyncSession,
+) -> list[IdeaBlock]:
+    candidate_ids: set[int] = set()
+    for poster_component, action, advanced_action in task_item_keys:
+        result = await db.execute(
+            select(distinct(IdeaBlock.id))
+            .join(PosterIdeaBlockTaskItem, PosterIdeaBlockTaskItem.idea_block_id == IdeaBlock.id)
+            .where(
+                IdeaBlock.session_name == idea_block.session_name,
+                IdeaBlock.task_name == idea_block.task_name,
+                IdeaBlock.user_id != idea_block.user_id,
+                IdeaBlock.id != idea_block.id,
+                IdeaBlock.embedding_vector.is_not(None),
+                PosterIdeaBlockTaskItem.poster_component == poster_component,
+                PosterIdeaBlockTaskItem.action == action,
+                PosterIdeaBlockTaskItem.advanced_action == advanced_action,
+            )
+        )
+        candidate_ids.update(result.scalars().all())
+
+    if not candidate_ids:
+        return []
+
+    result = await db.execute(
+        select(IdeaBlock)
+        .where(IdeaBlock.id.in_(candidate_ids))
         .order_by(IdeaBlock.id.desc())
     )
     return list(result.scalars().all())
@@ -304,6 +264,7 @@ async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required for similarity detection")
 
+    system_prompt = get_task_prompt_config(idea_block.task_name).similarity_system_prompt
     ideas_list = "\n".join(
         f"- ID: {candidate.id}\n  Summary: {candidate.summary}"
         for candidate in candidates
@@ -325,13 +286,13 @@ Summary: {idea_block.summary}
         "similarity_detection_llm_request idea_block_id=%s candidate_ids=%s prompt_chars=%s",
         idea_block.id,
         [candidate.id for candidate in candidates],
-        len(SIMILARITY_SYSTEM_PROMPT) + len(user_prompt),
+        len(system_prompt) + len(user_prompt),
     )
     completion = await openai_client.chat.completions.create(
         model=OPENAI_MODEL,
         temperature=0,
         messages=[
-            {"role": "system", "content": SIMILARITY_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     )

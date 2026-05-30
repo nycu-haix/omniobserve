@@ -9,6 +9,7 @@ from ..config import logger
 from ..db import SessionLocal
 from ..models import IdeaBlock, IdeaBlockToTranscript, Similarity, TaskItem, Transcript
 from ..schemas import ApiError, IdeaBlockCreate, IdeaBlockUpdate
+from ..task_config.registry import normalize_task_name
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
 from .idea_block_similarity_context import attach_similarity_reason_flags
@@ -21,15 +22,17 @@ async def create_idea_block_from_content(
     *,
     session_name: str,
     user_id: int,
+    task_name: str,
     content: str,
     transcript_id: int | None,
     db: AsyncSession,
 ) -> IdeaBlock:
+    task_name = normalize_task_name(task_name)
     normalized_content = content.strip()
     if not normalized_content:
         raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
 
-    generated_blocks = await build_idea_blocks_with_llm(normalized_content)
+    generated_blocks = await build_idea_blocks_with_llm(normalized_content, task_name=task_name)
     if not generated_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
 
@@ -43,6 +46,7 @@ async def create_idea_block_from_content(
         IdeaBlockCreate(
             session_name=session_name,
             user_id=user_id,
+            task_name=task_name,
             title=_title_from_content(generated_content or summary),
             summary=summary,
             transcript_id=transcript_id,
@@ -52,6 +56,7 @@ async def create_idea_block_from_content(
 
 
 async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaBlock:
+    normalize_task_name(payload.task_name)
     if payload.transcript_id is not None and await db.get(Transcript, payload.transcript_id) is None:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
@@ -61,6 +66,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         db,
         session_name=payload.session_name,
         user_id=payload.user_id,
+        task_name=payload.task_name,
         title=payload.title,
         summary=payload.summary,
         embedding_vector=idea_block_data["embedding_vector"],
@@ -321,6 +327,10 @@ async def _refresh_task_items_and_detect_similarity(
     db: AsyncSession,
 ) -> None:
     try:
+        idea_block = await db.get(IdeaBlock, idea_block_id)
+        if idea_block is None:
+            logger.info("similarity_detection_task_item_refresh_skipped idea_block_id=%s reason=not_found", idea_block_id)
+            return
         logger.info(
             "similarity_detection_task_item_refresh_start idea_block_id=%s summary_chars=%s",
             idea_block_id,
@@ -330,6 +340,7 @@ async def _refresh_task_items_and_detect_similarity(
             db,
             idea_block_id=idea_block_id,
             text=summary,
+            task_name=idea_block.task_name,
         )
         await db.commit()
         logger.info(

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, WebSocket
+from ..task_config.registry import DEFAULT_TASK_NAME
 
 from ..services.realtime import (
     handle_admin_websocket,
@@ -82,11 +83,13 @@ async def audio_stream_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
+    task_name: str = Query(DEFAULT_TASK_NAME),
 ) -> None:
     await handle_audio_stream_websocket(
         websocket,
         session_name=session_name,
         participant_id=participant_id,
+        task_name=task_name,
     )
 
 
@@ -95,9 +98,11 @@ async def transcript_segments_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
+    task_name: str = Query(DEFAULT_TASK_NAME),
 ) -> None:
     await handle_transcript_segments_websocket(
         websocket,
         session_name=session_name,
         participant_id=participant_id,
+        task_name=task_name,
     )

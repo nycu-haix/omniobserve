@@ -12,6 +12,7 @@ from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
+from ..task_config.registry import DEFAULT_TASK_NAME, normalize_task_name
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .participant_status import mark_audio_disconnected, update_audio_status
@@ -117,7 +118,9 @@ async def handle_audio_stream_websocket(
     *,
     session_name: str,
     participant_id: str,
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> None:
+    task_name = normalize_task_name(task_name)
     await websocket.accept()
 
     stream_context: StreamContext | None = None
@@ -215,6 +218,7 @@ async def handle_audio_stream_websocket(
                             transcript=saved_segment,
                             is_final=False,
                             visibility=stream_context.scope,
+                            task_name=task_name,
                         )
                         await send_ws_json_safe(
                             websocket,
@@ -337,6 +341,7 @@ async def handle_audio_stream_websocket(
                                 transcript=None,
                                 is_final=True,
                                 visibility=stream_context.scope,
+                                task_name=task_name,
                                 on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
                                     websocket,
                                     session_name=session_name,
@@ -454,7 +459,9 @@ async def handle_transcript_segments_websocket(
     *,
     session_name: str,
     participant_id: str,
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> None:
+    task_name = normalize_task_name(task_name)
     await websocket.accept()
     logger.info(
         "pipeline_ws_connected session_name=%s participant_id=%s",
@@ -668,6 +675,7 @@ async def handle_transcript_segments_websocket(
                         transcript=saved_segment,
                         is_final=True,
                         visibility=visibility,
+                        task_name=task_name,
                         on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
                             websocket,
                             session_name=session_name,

@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
-from ..config import IDEA_BLOCK_SYSTEM_PROMPT, LLM_TOPIC_DESCRIPTION, OPENAI_MODEL, logger
+from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
+from ..task_config.registry import DEFAULT_TASK_NAME, get_task_prompt_config, normalize_task_name
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
 
@@ -44,7 +45,8 @@ def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any]]:
+async def build_idea_blocks_with_llm(transcript_text: str, *, task_name: str = DEFAULT_TASK_NAME) -> list[dict[str, Any]]:
+    task_config = get_task_prompt_config(task_name)
     mock_blocks = _build_mock_idea_blocks(transcript_text)
     if mock_blocks:
         logger.info(
@@ -64,7 +66,7 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
         )
 
     system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(
-        topic_description=LLM_TOPIC_DESCRIPTION,
+        topic_description=task_config.idea_block_topic_context,
         transcript_text=transcript_text,
     )
     user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
@@ -164,8 +166,10 @@ async def generate_and_save_idea_blocks(
     visibility: Visibility,
     source_transcript_ids: list[str],
     transcript_text: str,
+    task_name: str = DEFAULT_TASK_NAME,
 ) -> list[IdeaBlock]:
-    generated_blocks = await build_idea_blocks_with_llm(transcript_text)
+    task_name = normalize_task_name(task_name)
+    generated_blocks = await build_idea_blocks_with_llm(transcript_text, task_name=task_name)
 
     idea_blocks: list[IdeaBlock] = []
     user_id = _participant_id_to_int(participant_id)
@@ -199,6 +203,7 @@ async def generate_and_save_idea_blocks(
         idea_block = IdeaBlock(
             user_id=user_id,
             session_name=session_name,
+            task_name=task_name,
             title=title,
             summary=summary,
             transcript_id=None,

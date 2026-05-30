@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from .chat_messages import router as chat_messages_router
 from .idea_block_to_transcript import router as idea_block_to_transcript_router
 from .idea_blocks import router as idea_blocks_router
+from .poster_task_items import router as poster_task_items_router
 from .ranking_moves import router as ranking_moves_router
 from .similarities import router as similarities_router
 from .task_items import router as task_items_router
@@ -16,4 +17,5 @@ router.include_router(ranking_moves_router)
 router.include_router(idea_blocks_router)
 router.include_router(similarities_router)
 router.include_router(task_items_router)
+router.include_router(poster_task_items_router)
 router.include_router(idea_block_to_transcript_router)
