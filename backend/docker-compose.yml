@@ -1,3 +1,5 @@
+name: ${COMPOSE_PROJECT_NAME:-omniobserve}
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -19,8 +21,8 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
-    ports:
-      - "127.0.0.1:11434:11434"
+    expose:
+      - "11434"
     deploy:
       resources:
         reservations:
@@ -28,7 +30,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
 
   backend:
     build:
@@ -49,8 +50,8 @@ services:
       LLM_MOCK: ${LLM_MOCK:-0}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
       CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-0}
-    ports:
-      - "${BACKEND_PORT:-8000}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test:
         [
