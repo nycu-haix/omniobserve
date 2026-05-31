@@ -1,11 +1,13 @@
+name: ${COMPOSE_PROJECT_NAME:-omniobserve-vad}
+
 services:
   frontend:
     image: python:3.11-slim
     restart: unless-stopped
     working_dir: /site
     command: python -m http.server 3000 --bind 0.0.0.0
-    ports:
-      - "3001:3000"
+    expose:
+      - "3000"
     volumes:
       - .:/site:ro
     depends_on:
@@ -18,21 +20,21 @@ services:
       context: ./vad-backend
     restart: unless-stopped
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8001:8000"
+    expose:
+      - "8000"
 
     labels:
-    - "traefik.enable=true"
-    - "traefik.docker.network=dokploy-network"
+      - "traefik.enable=true"
+      - "traefik.docker.network=dokploy-network"
 
-    - "traefik.http.routers.vad-audio.rule=Host(`api.omni.elvismao.com`) && PathPrefix(`/sessions`)"
-    - "traefik.http.routers.vad-audio.entrypoints=websecure"
-    - "traefik.http.routers.vad-audio.tls=true"
-    - "traefik.http.routers.vad-audio.tls.certresolver=letsencrypt"
-    - "traefik.http.routers.vad-audio.priority=10000"
-    - "traefik.http.routers.vad-audio.service=vad-audio"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.rule=Host(`${VAD_API_DOMAIN:-api.omni.elvismao.com}`) && PathPrefix(`${VAD_PATH_PREFIX:-/sessions}`)"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.priority=10000"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.service=${VAD_SERVICE_NAME:-vad-audio}"
 
-    - "traefik.http.services.vad-audio.loadbalancer.server.port=8000"
+      - "traefik.http.services.${VAD_SERVICE_NAME:-vad-audio}.loadbalancer.server.port=8000"
 
     volumes:
       - model-cache:/root/.cache
