@@ -9,22 +9,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, Similarity, TaskItem
-from ..task_config import SIMILARITY_TASK_CONTEXT
+from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session
 from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
 
-SIMILARITY_SYSTEM_PROMPT = f"""
+def _build_similarity_system_prompt(session_name: str) -> str:
+    task_config = get_task_config_for_session(session_name=session_name)
+    task_context = get_similarity_task_context_for_session(session_name=session_name)
+    return f"""
 # Role
-You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a Lost at Sea group ranking discussion.
+You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a {task_config["title"]} group ranking discussion.
 
 Your goal is not to detect duplicate wording or shared item mentions. Your goal is to find ideas that could help participants notice a shared ranking intuition and feel invited to join the discussion.
 
 # Task Context
-{SIMILARITY_TASK_CONTEXT}
+{task_context}
 
-Participants are ranking the items by importance for surviving at sea while waiting for rescue. A useful similarity cue should support group consensus-building, not merely point out that two people mentioned the same item.
+Participants are ranking task items by importance for the stated task goal. A useful similarity cue should support group consensus-building, not merely point out that two people mentioned the same item.
 
 # Core Similarity Definition
 A candidate idea is similar only when it shares a compatible ranking stance with the core idea.
@@ -65,20 +68,20 @@ The match would reasonably help a participant feel: "Someone else has a similar 
 After deciding that a candidate is similar, classify `is_same_reason`:
 
 - `true`: the ranking stance is similar AND the survival rationale, intended use, or reason is also similar.
-  Example: both rank the mirror high because it can reflect sunlight to signal rescuers.
+  Example: both rank the same task item high because it directly supports the central task goal.
   Use `true` when the main shared rationale is the same, even if one idea adds extra supporting reasons.
   Compare the primary shared rationale, not the full set of all reasons.
   Also use `true` when one idea is more detailed, but its main rationale overlaps with the other.
 
 - `false`: the ranking stance is similar BUT the survival rationale, intended use, or reason is different.
-  Example: both rank the waterproof sheet high, but one focuses on collecting rainwater while the other focuses on shade or protection.
+  Example: both rank the same task item high, but one focuses on clarity while the other focuses on credibility.
   Use `false` only when the primary rationale is genuinely different.
-  Use `false` only when the similar ranking stance comes from different survival mechanisms or intended uses.
+  Use `false` only when the similar ranking stance comes from different mechanisms, intended uses, or benefits.
 
 Examples:
-- "Mosquito net is useless because there are no mosquitoes" and "Mosquito net is useless because there are no mosquitoes and it may entangle me" => `is_same_reason: true`
-- "Waterproof sheet should rank high because it collects rainwater" and "Waterproof sheet should rank high because it provides shade" => `is_same_reason: false`
-- "Rum should rank high because it disinfects wounds" and "Rum should rank high because it provides calories" => `is_same_reason: false`
+- "This item should be low priority because it does not affect the task goal" and "This item is not worth prioritizing because it barely changes the outcome" => `is_same_reason: true`
+- "This item should rank high because it improves readability" and "This item should rank high because it strengthens evidence quality" => `is_same_reason: false`
+- "Item A should be above item B because it affects the first impression" and "Item A should be above item B because it reduces confusion later" => `is_same_reason: false`
 
 # Do NOT Mark As Similar
 Return `id: null` if any of the following apply:
@@ -321,17 +324,18 @@ Summary: {idea_block.summary}
 
 # Output (JSON Only)
 """.strip()
+    system_prompt = _build_similarity_system_prompt(idea_block.session_name)
     logger.info(
         "similarity_detection_llm_request idea_block_id=%s candidate_ids=%s prompt_chars=%s",
         idea_block.id,
         [candidate.id for candidate in candidates],
-        len(SIMILARITY_SYSTEM_PROMPT) + len(user_prompt),
+        len(system_prompt) + len(user_prompt),
     )
     completion = await openai_client.chat.completions.create(
         model=OPENAI_MODEL,
         temperature=0,
         messages=[
-            {"role": "system", "content": SIMILARITY_SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     )

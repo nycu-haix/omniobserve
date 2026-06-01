@@ -866,7 +866,7 @@ export function AdminPage() {
 
 		const loadTaskConfig = async () => {
 			try {
-				const taskConfig = await fetchTaskConfig(abortController.signal);
+				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				setTaskItems(taskConfig.items);
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
@@ -879,7 +879,7 @@ export function AdminPage() {
 		void loadTaskConfig();
 
 		return () => abortController.abort();
-	}, []);
+	}, [roomName]);
 
 	useEffect(() => {
 		const handleResize = () => {

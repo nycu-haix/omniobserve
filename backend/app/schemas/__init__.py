@@ -10,6 +10,7 @@ from .board import (
     IdeaBlockUpdateResponse,
     TaskConfigItemResponse,
     TaskConfigResponse,
+    TaskTemplateResponse,
     TopicDescriptionResponse,
 )
 from .chat_message import ChatMessageCreate, ChatMessageCreateRequest, ChatMessageResponse
@@ -70,6 +71,7 @@ __all__ = [
     "TaskItemResponse",
     "TaskConfigItemResponse",
     "TaskConfigResponse",
+    "TaskTemplateResponse",
     "TopicDescriptionResponse",
     "TranscriptCreate",
     "TranscriptCreateRequest",

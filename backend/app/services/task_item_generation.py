@@ -8,16 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
-from ..models import TaskItem
+from ..models import IdeaBlock, TaskItem
 from ..schemas import ApiError
-from ..task_config import RANKING_ITEMS, TASK_CONFIG
+from ..task_config import get_ranking_items_for_session, get_task_config_for_session
 
 
-TASK_ITEM_CONFIGS_BY_ID = {item["id"]: item for item in TASK_CONFIG["items"]}
+async def build_task_item_ids_with_llm(text: str, *, session_name: str | None = None) -> list[int]:
+    ranking_items = get_ranking_items_for_session(session_name=session_name)
+    task_config = get_task_config_for_session(session_name=session_name)
+    task_item_configs_by_id = {item["id"]: item for item in task_config["items"]}
 
-
-async def build_task_item_ids_with_llm(text: str) -> list[int]:
-    mock_ids = _build_mock_task_item_ids()
+    mock_ids = _build_mock_task_item_ids(ranking_items)
     if mock_ids is not None:
         logger.info(
             "task_item_llm_mock_used text_chars=%s task_item_ids=%s",
@@ -36,11 +37,11 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
         )
 
     item_lines = "\n".join(
-        _format_ranking_item_line(index, item)
-        for index, item in enumerate(RANKING_ITEMS, start=1)
+        _format_ranking_item_line(index, item, task_item_configs_by_id)
+        for index, item in enumerate(ranking_items, start=1)
     )
     system_prompt = (
-        "You classify user text for the Lost at Sea ranking task.\n"
+        f"You classify user text for the {task_config['title']} ranking task.\n"
         "Use only this exact TASK_ITEMS list. The number at the start of each line is the "
         "1-based task_item_id that must be returned:\n"
         f"{item_lines}\n\n"
@@ -49,8 +50,6 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
         "Match against config_id, Chinese label, English label, and aliases. "
         "Return every matching item mentioned or clearly referred to in the input; "
         "do not limit the answer to only the most important or most recent item. "
-        "If the user says medical alcohol, high-proof alcohol, disinfectant alcohol, "
-        "or alcohol for disinfection, map it to the current TASK_ITEMS entry for rum. "
         "Do not invent items, do not return zero-based indices, and do not return config_id strings. "
         'Return only JSON in this exact shape: {"task_item_ids":[...]} . '
         'If unrelated, return {"task_item_ids":[]}.'
@@ -96,7 +95,7 @@ async def build_task_item_ids_with_llm(text: str) -> list[int]:
     if not isinstance(ids, list):
         raise ApiError(422, "TASK_ITEM_GENERATION_FAILED", "Task items could not be generated")
 
-    normalized_ids = _normalize_task_item_ids(ids)
+    normalized_ids = _normalize_task_item_ids(ids, ranking_items)
     logger.info(
         "task_item_llm_parsed task_item_ids=%s",
         normalized_ids,
@@ -108,9 +107,10 @@ async def generate_and_save_task_items_for_idea_block(
     db: AsyncSession,
     *,
     idea_block_id: int,
+    session_name: str | None = None,
     text: str,
 ) -> list[TaskItem]:
-    task_item_ids = await build_task_item_ids_with_llm(text)
+    task_item_ids = await build_task_item_ids_with_llm(text, session_name=session_name)
     logger.info(
         "task_item_ids_generated idea_block_id=%s task_item_ids=%s",
         idea_block_id,
@@ -141,9 +141,11 @@ async def replace_task_items_for_idea_block(
     db: AsyncSession,
     *,
     idea_block_id: int,
+    session_name: str | None = None,
     text: str,
 ) -> list[TaskItem]:
-    task_item_ids = await build_task_item_ids_with_llm(text)
+    resolved_session_name = session_name or await _get_idea_block_session_name(db, idea_block_id)
+    task_item_ids = await build_task_item_ids_with_llm(text, session_name=resolved_session_name)
     logger.info(
         "task_item_ids_rebuilt idea_block_id=%s task_item_ids=%s",
         idea_block_id,
@@ -165,13 +167,13 @@ async def replace_task_items_for_idea_block(
     return task_items
 
 
-def _normalize_task_item_ids(values: list[Any]) -> list[int]:
+def _normalize_task_item_ids(values: list[Any], ranking_items: list[str]) -> list[int]:
     normalized: list[int] = []
     seen: set[int] = set()
     for value in values:
         if not isinstance(value, int):
             continue
-        if value < 1 or value > len(RANKING_ITEMS):
+        if value < 1 or value > len(ranking_items):
             continue
         if value in seen:
             continue
@@ -180,8 +182,8 @@ def _normalize_task_item_ids(values: list[Any]) -> list[int]:
     return normalized
 
 
-def _format_ranking_item_line(index: int, item_id: str) -> str:
-    item = TASK_ITEM_CONFIGS_BY_ID[item_id]
+def _format_ranking_item_line(index: int, item_id: str, task_item_configs_by_id: dict[str, Any]) -> str:
+    item = task_item_configs_by_id[item_id]
     aliases = ", ".join(dict.fromkeys([item["label_en"], *item["aliases"]]))
     return (
         f'{index}. task_item_id={index}; config_id="{item_id}"; '
@@ -189,7 +191,7 @@ def _format_ranking_item_line(index: int, item_id: str) -> str:
     )
 
 
-def _build_mock_task_item_ids() -> list[int] | None:
+def _build_mock_task_item_ids(ranking_items: list[str]) -> list[int] | None:
     raw_value = os.getenv("TASK_ITEM_MOCK_IDS", "").strip()
     if not raw_value:
         return None
@@ -203,7 +205,12 @@ def _build_mock_task_item_ids() -> list[int] | None:
             values.append(int(item))
         except ValueError:
             continue
-    return _normalize_task_item_ids(values)
+    return _normalize_task_item_ids(values, ranking_items)
+
+
+async def _get_idea_block_session_name(db: AsyncSession, idea_block_id: int) -> str | None:
+    idea_block = await db.get(IdeaBlock, idea_block_id)
+    return idea_block.session_name if idea_block is not None else None
 
 
 def _parse_llm_json_payload(raw_content: str) -> Any:

@@ -117,6 +117,7 @@ class TaskConfigItemResponse(BaseModel):
     label: str
     label_zh: str
     label_en: str
+    description_zh: str | None = None
     aliases: list[str]
     image_title: str
     image_bg: str
@@ -127,6 +128,17 @@ class TaskConfigItemResponse(BaseModel):
 class TaskConfigResponse(BaseModel):
     task_id: str
     title: str
+    template_description: str | None = None
     topic_description: str
     task_detail: str
+    reference_image_src: str | None = None
+    reference_image_alt: str | None = None
     items: list[TaskConfigItemResponse]
+
+
+class TaskTemplateResponse(BaseModel):
+    task_id: str
+    title: str
+    session_prefix: str
+    description: str
+    is_default: bool

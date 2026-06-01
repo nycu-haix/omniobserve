@@ -13,7 +13,7 @@ from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import ChatMessageCreate
-from ..task_config import RANKING_ITEMS
+from ..task_config import get_ranking_items_for_session
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
@@ -28,8 +28,6 @@ from .participant_status import (
 from .ranking_move_service import create_ranking_move
 from .transcripts import save_ws_transcript_segment
 
-DEFAULT_RANKING_ITEMS = RANKING_ITEMS
-DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
 DUPLICATE_PARTICIPANT_MESSAGE = (
     "這個 participant ID 已經在此 session 中，不能重複進入。"
@@ -399,7 +397,13 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
     }
 
 
-def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
+def _get_default_ranking_items(session_id: str) -> list[str]:
+    return get_ranking_items_for_session(session_name=session_id)
+
+
+def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    default_ranking_items = _get_default_ranking_items(session_id)
+    default_ranking_item_set = set(default_ranking_items)
     current_items = state.get("items")
     if not isinstance(current_items, list):
         current_items = []
@@ -407,11 +411,11 @@ def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
         item
         for index, item in enumerate(current_items)
         if isinstance(item, str)
-        and item in DEFAULT_RANKING_ITEM_SET
+        and item in default_ranking_item_set
         and current_items.index(item) == index
     ]
     normalized_items.extend(
-        item for item in DEFAULT_RANKING_ITEMS if item not in normalized_items
+        item for item in default_ranking_items if item not in normalized_items
     )
     if normalized_items != current_items:
         state["items"] = normalized_items
@@ -419,26 +423,26 @@ def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def _create_ranking_state() -> dict[str, Any]:
+def _create_ranking_state(session_id: str) -> dict[str, Any]:
     return {
         "revision": 0,
-        "items": list(DEFAULT_RANKING_ITEMS),
+        "items": _get_default_ranking_items(session_id),
     }
 
 
 def _get_public_ranking_state(session_id: str) -> dict[str, Any]:
     if session_id not in public_ranking_state:
-        public_ranking_state[session_id] = _create_ranking_state()
+        public_ranking_state[session_id] = _create_ranking_state(session_id)
     else:
-        _normalize_ranking_state(public_ranking_state[session_id])
+        _normalize_ranking_state(session_id, public_ranking_state[session_id])
     return public_ranking_state[session_id]
 
 
 def _get_private_ranking_state(session_id: str, participant_id: str) -> dict[str, Any]:
     if participant_id not in private_ranking_state[session_id]:
-        private_ranking_state[session_id][participant_id] = _create_ranking_state()
+        private_ranking_state[session_id][participant_id] = _create_ranking_state(session_id)
     else:
-        _normalize_ranking_state(private_ranking_state[session_id][participant_id])
+        _normalize_ranking_state(session_id, private_ranking_state[session_id][participant_id])
     return private_ranking_state[session_id][participant_id]
 
 

@@ -1,10 +1,10 @@
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT, TOPIC_DESCRIPTION
+from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT
 from ..db import get_db
 from ..schemas import (
     ApiError,
@@ -18,9 +18,10 @@ from ..schemas import (
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
     TaskConfigResponse,
+    TaskTemplateResponse,
     TopicDescriptionResponse,
 )
-from ..task_config import serialize_task_config
+from ..task_config import serialize_task_config, serialize_task_templates
 from ..services.board_payloads import (
     serialize_frontend_board_idea_block,
     serialize_frontend_board_idea_block_update,
@@ -46,8 +47,23 @@ COMMON_ERROR_RESPONSES = {
     summary="Get Topic Description",
     description="Returns only the ranking task topic description for frontend display.",
 )
-async def get_topic_description() -> TopicDescriptionResponse:
-    return TopicDescriptionResponse(topic_description=TOPIC_DESCRIPTION)
+async def get_topic_description(
+    session_name: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+) -> TopicDescriptionResponse:
+    return TopicDescriptionResponse(
+        topic_description=serialize_task_config(session_name=session_name, task_id=task_id)["topic_description"]
+    )
+
+
+@router.get(
+    "/api/task-templates",
+    response_model=list[TaskTemplateResponse],
+    summary="List Task Templates",
+    description="Returns available task templates and their required session name prefixes.",
+)
+async def get_task_templates() -> list[dict[str, Any]]:
+    return serialize_task_templates()
 
 
 @router.get(
@@ -56,8 +72,11 @@ async def get_topic_description() -> TopicDescriptionResponse:
     summary="Get Task Config",
     description="Returns the active ranking task description and item definitions for frontend display.",
 )
-async def get_task_config() -> dict[str, Any]:
-    return serialize_task_config()
+async def get_task_config(
+    session_name: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    return serialize_task_config(session_name=session_name, task_id=task_id)
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:

@@ -447,12 +447,16 @@ function TaskWorkspace({
 	currentPhase,
 	taskTitle,
 	taskDetail,
+	referenceImageSrc,
+	referenceImageAlt,
 	renderPrivateRanking,
 	renderPublicRanking
 }: {
 	currentPhase: SessionPhase;
 	taskTitle: string;
 	taskDetail: string;
+	referenceImageSrc?: string;
+	referenceImageAlt?: string;
 	renderPrivateRanking: () => React.ReactNode;
 	renderPublicRanking: () => React.ReactNode;
 }) {
@@ -567,7 +571,8 @@ function TaskWorkspace({
 
 		return (
 			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
-				<div className="min-h-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
+				<div className="grid min-h-0 flex-1 gap-3 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
+					{referenceImageSrc && <img className="max-h-[60vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
 					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
 				</div>
 			</section>
@@ -817,6 +822,8 @@ export default function MeetingRoom() {
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
 	const [taskTitle, setTaskTitle] = useState("Lost at Sea");
 	const [taskDetail, setTaskDetail] = useState("");
+	const [taskReferenceImageSrc, setTaskReferenceImageSrc] = useState("");
+	const [taskReferenceImageAlt, setTaskReferenceImageAlt] = useState("");
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
@@ -900,13 +907,15 @@ export default function MeetingRoom() {
 
 		const loadTaskConfig = async () => {
 			try {
-				const taskConfig = await fetchTaskConfig(abortController.signal);
+				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				const nextTaskItemsById = Object.fromEntries(taskConfig.items.map(item => [item.id, item]));
 				const nextDefaultItemIds = taskConfig.items.map(item => item.id);
 				const nextItems = createInitialItems(taskConfig.items);
 
 				setTaskTitle(taskConfig.title);
 				setTaskDetail(taskConfig.task_detail);
+				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
+				setTaskReferenceImageAlt(taskConfig.reference_image_alt || taskConfig.title);
 				setTaskItems(taskConfig.items);
 				setPublicItems(current =>
 					current.length > 0
@@ -937,7 +946,7 @@ export default function MeetingRoom() {
 		void loadTaskConfig();
 
 		return () => abortController.abort();
-	}, []);
+	}, [roomName]);
 
 	const requestMicPermission = async () => {
 		try {
@@ -1275,6 +1284,8 @@ export default function MeetingRoom() {
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
 					taskDetail={taskDetail}
+					referenceImageSrc={taskReferenceImageSrc}
+					referenceImageAlt={taskReferenceImageAlt}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
 							title="Public 排序"
