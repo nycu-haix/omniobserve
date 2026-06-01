@@ -20,6 +20,8 @@ services:
       context: ./vad-backend
     restart: unless-stopped
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
+    # Dokploy routes this service through Traefik; avoid binding host port 8001,
+    # which can collide with other deployments on the shared server.
     expose:
       - "8000"
 
