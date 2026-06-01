@@ -15,8 +15,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.cuda-v100.txt ./requirements.cuda-v100.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.cuda-v100.txt
+RUN pip install --no-cache-dir -r requirements.cuda-v100.txt
 
 COPY . .
 
