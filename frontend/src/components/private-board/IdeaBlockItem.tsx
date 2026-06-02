@@ -170,7 +170,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
@@ -190,6 +190,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				onToggle(block.id);
 			}}
 		>
+			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{isGenerating ? (
 				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			) : isDeleted ? (

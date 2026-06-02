@@ -11,6 +11,7 @@ export interface IdeaBlock {
 	cueText?: string;
 	similarityIsSameReason?: boolean | null;
 	expanded?: boolean;
+	isUnread?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
 	createdAtMs?: number;

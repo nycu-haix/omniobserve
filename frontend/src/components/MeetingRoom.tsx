@@ -1546,6 +1546,8 @@ export default function MeetingRoom() {
 						currentPhase={currentPhase}
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
+						isCollapsed={isPrivateBoardCollapsed}
+						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
 					/>
 				</div>
 			</aside>
