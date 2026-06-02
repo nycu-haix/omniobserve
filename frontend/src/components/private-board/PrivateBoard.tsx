@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import type { UIEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
@@ -119,9 +119,14 @@ type AudioTranscriptMessage =
 	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+}
+
+function clampIdeaBlocksSplitRatio(ratio: number): number {
+	return Math.min(Math.max(ratio, MIN_IDEA_BLOCKS_SPLIT_RATIO), 100 - MIN_IDEA_BLOCKS_SPLIT_RATIO);
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -674,11 +679,14 @@ export function PrivateBoard({
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
+	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
+	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
+	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1106,6 +1114,60 @@ export function PrivateBoard({
 		shouldAutoScrollRef.current[tab] = isNearScrollBottom(event.currentTarget);
 	};
 
+	const handleIdeaBlocksSplitResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
+
+		const updateSplitRatio = (clientY: number) => {
+			const container = ideaBlocksSplitContainerRef.current;
+			if (!container) {
+				return;
+			}
+
+			const rect = container.getBoundingClientRect();
+			if (rect.height <= 0) {
+				return;
+			}
+
+			setIdeaBlocksSplitRatio(clampIdeaBlocksSplitRatio(((clientY - rect.top) / rect.height) * 100));
+		};
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			updateSplitRatio(moveEvent.clientY);
+		};
+
+		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			setResizeCursor(null);
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		updateSplitRatio(event.clientY);
+		setResizeCursor("row-resize");
+		document.body.style.cursor = "row-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+
+	const handleIdeaBlocksSplitResizeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowUp" ? -1 : 1;
+		setIdeaBlocksSplitRatio(current => clampIdeaBlocksSplitRatio(current + direction * 4));
+	};
+
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
 		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
@@ -1335,6 +1397,7 @@ export function PrivateBoard({
 
 	return (
 		<>
+			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex items-center gap-2">
@@ -1401,7 +1464,13 @@ export function PrivateBoard({
 				)}
 
 				{isIdeaBlocksTabActive && (
-					<div className="grid min-h-0 flex-1 grid-rows-2 gap-3 p-3">
+					<div
+						ref={ideaBlocksSplitContainerRef}
+						className="grid min-h-0 flex-1 p-3"
+						style={{
+							gridTemplateRows: `minmax(0, ${ideaBlocksSplitRatio}fr) 1rem minmax(0, ${100 - ideaBlocksSplitRatio}fr)`
+						}}
+					>
 						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
 							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
 							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleBoardScroll("transcript") }}>
@@ -1414,6 +1483,25 @@ export function PrivateBoard({
 								/>
 							</ScrollArea>
 						</section>
+
+						<div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+							<div />
+							<button
+								type="button"
+								className="group grid h-4 w-20 cursor-row-resize place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								aria-label="調整私人逐字稿與 Idea Blocks 高度"
+								aria-orientation="horizontal"
+								aria-valuemin={MIN_IDEA_BLOCKS_SPLIT_RATIO}
+								aria-valuemax={100 - MIN_IDEA_BLOCKS_SPLIT_RATIO}
+								aria-valuenow={Math.round(ideaBlocksSplitRatio)}
+								role="separator"
+								onPointerDown={handleIdeaBlocksSplitResizeStart}
+								onKeyDown={handleIdeaBlocksSplitResizeKeyDown}
+							>
+								<span className="h-0.5 w-20 rounded-full bg-border transition-colors group-hover:bg-primary/30" aria-hidden="true" />
+							</button>
+							<div />
+						</div>
 
 						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
 							<div className="border-b px-3 py-2 text-sm font-medium">Idea Blocks</div>
