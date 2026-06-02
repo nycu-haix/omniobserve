@@ -58,12 +58,12 @@ PRE_BUFFER_CHUNKS = int((PRE_BUFFER_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 
 RMS_SILENCE_THRESHOLD = 0.00005
 MIN_SAVE_DURATION_SEC = 0.8
-FINAL_RETRANSCRIBE_MAX_AUDIO_SEC = 60.0
 LIVE_TRANSCRIPT_REASON = "sliding_window"
 STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
 STREAM_STEP_SECONDS = float(os.getenv("STREAM_STEP_SECONDS", "2"))
 STREAM_WINDOW_SAMPLES = max(CHUNK_SIZE, int(round(STREAM_WINDOW_SECONDS * SAMPLE_RATE)))
 STREAM_STEP_CHUNKS = max(1, int(round(STREAM_STEP_SECONDS * SAMPLE_RATE / CHUNK_SIZE)))
+STREAM_MIN_LIVE_CHUNKS = max(MIN_SPEECH_CHUNKS, int(round(MIN_SAVE_DURATION_SEC * SAMPLE_RATE / CHUNK_SIZE)))
 
 SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
@@ -305,6 +305,26 @@ def save_transcript_jsonl(
 
     with TRANSCRIPT_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def merge_transcript_text(previous_text: str, next_text: str) -> str:
+    previous = previous_text.strip()
+    next_value = next_text.strip()
+    if not previous:
+        return next_value
+    if not next_value:
+        return previous
+    if previous.endswith(next_value) or next_value in previous:
+        return previous
+    if next_value.startswith(previous) or previous in next_value:
+        return next_value
+
+    max_overlap = min(len(previous), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if previous[-overlap:] == next_value[:overlap]:
+            return f"{previous}{next_value[overlap:]}"
+
+    return f"{previous}{next_value}"
 
 
 async def relay_transcript_to_pipeline(
@@ -648,6 +668,7 @@ async def transcribe_and_send(
     retranscribed_final: bool = False,
     save_transcript: bool = True,
     relay_to_pipeline: bool = True,
+    on_transcript=None,
 ):
     try:
         # print(f"Transcribing segment: {filename}")
@@ -677,6 +698,8 @@ async def transcribe_and_send(
             f"roomName={room_name}, participantId={participant_id or user_id}, "
             f"reason={reason}, chars={len(transcript)}, text={transcript}"
         )
+        if on_transcript is not None and transcript.strip():
+            on_transcript(transcript)
 
         if save_transcript:
             save_transcript_jsonl(
@@ -813,6 +836,7 @@ async def audio_ws(
     speech_start_time = None
     next_live_speech_chunk = 0
     live_window_count = 0
+    merged_live_transcript = ""
 
     pre_buffer = deque(maxlen=PRE_BUFFER_CHUNKS)
     segment_buffer = []
@@ -831,6 +855,7 @@ async def audio_ws(
         nonlocal max_speech_batch_start_time
         nonlocal next_live_speech_chunk
         nonlocal live_window_count
+        nonlocal merged_live_transcript
 
         if not speech_started or not segment_buffer:
             speech_started = False
@@ -839,6 +864,7 @@ async def audio_ws(
             speech_start_time = None
             next_live_speech_chunk = 0
             live_window_count = 0
+            merged_live_transcript = ""
             segment_buffer = []
             return
 
@@ -866,36 +892,35 @@ async def audio_ws(
         except Exception:
             print("Cannot send VAD end because websocket is closed")
 
-        if duration >= MIN_SAVE_DURATION_SEC:
+        if live_asr_tasks:
+            print(f"Waiting for {len(live_asr_tasks)} live ASR task(s) before finalizing segment...")
+            await asyncio.gather(*list(live_asr_tasks), return_exceptions=True)
+
+        final_transcript = merged_live_transcript.strip()
+
+        if duration >= MIN_SAVE_DURATION_SEC and final_transcript:
             segment_count += 1
-            asr_audio = segment_audio.copy()
             asr_start_time = start_time
             asr_end_time = end_time
             asr_duration = duration
-            retranscribed_final = False
 
             if end_reason == "max_speech_ms":
                 if max_speech_batch_start_time is None:
                     max_speech_batch_start_time = start_time
-                max_speech_batch_audio_segments.append(segment_audio.copy())
+                max_speech_batch_audio_segments.append(final_transcript)
             elif end_reason in PIPELINE_FINAL_REASONS and max_speech_batch_audio_segments:
-                combined_segments = [*max_speech_batch_audio_segments, segment_audio.copy()]
-                combined_audio = np.concatenate(combined_segments).astype(np.float32)
-                combined_duration = len(combined_audio) / SAMPLE_RATE
-                if combined_duration <= FINAL_RETRANSCRIBE_MAX_AUDIO_SEC:
-                    asr_audio = combined_audio
+                combined_segments = [*max_speech_batch_audio_segments, final_transcript]
+                combined_text = ""
+                for segment_text in combined_segments:
+                    combined_text = merge_transcript_text(combined_text, segment_text)
+                if combined_text:
+                    final_transcript = combined_text
                     asr_start_time = float(max_speech_batch_start_time if max_speech_batch_start_time is not None else start_time)
-                    asr_end_time = asr_start_time + combined_duration
-                    asr_duration = combined_duration
-                    retranscribed_final = True
+                    asr_end_time = end_time
+                    asr_duration = max(0.0, asr_end_time - asr_start_time)
                     print(
-                        "Retranscribing full max_speech batch: "
-                        f"duration={combined_duration:.2f}s, segments={len(combined_segments)}"
-                    )
-                else:
-                    print(
-                        "Skip full max_speech batch retranscribe: "
-                        f"duration={combined_duration:.2f}s exceeds {FINAL_RETRANSCRIBE_MAX_AUDIO_SEC:.2f}s"
+                        "Merged max_speech transcript batch without final ASR: "
+                        f"duration={asr_duration:.2f}s, segments={len(combined_segments)}"
                     )
                 max_speech_batch_audio_segments = []
                 max_speech_batch_start_time = None
@@ -941,16 +966,50 @@ async def audio_ws(
             except Exception:
                 print("Cannot send segment_saved because websocket is closed")
 
-            task = asyncio.create_task(
-                transcribe_and_send(
+            save_transcript_jsonl(
+                file=str(filename),
+                start=asr_start_time,
+                end=asr_end_time,
+                duration=asr_duration,
+                text=final_transcript,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                reason=end_reason,
+            )
+
+            try:
+                async with send_lock:
+                    await websocket.send_json({
+                        "type": "transcript",
+                        "source": source,
+                        "scope": scope,
+                        "agentType": agent_type,
+                        "roomName": room_name,
+                        "participantId": participant_id,
+                        "userId": user_id,
+                        "displayName": display_name,
+                        "file": str(filename),
+                        "start": round(asr_start_time, 2),
+                        "end": round(asr_end_time, 2),
+                        "duration": round(asr_duration, 2),
+                        "reason": end_reason,
+                        "text": final_transcript,
+                        "persisted": None,
+                        "retranscribedFinal": False,
+                    })
+            except Exception:
+                print("Cannot send final transcript because websocket is closed")
+
+            async with relay_lock:
+                await relay_transcript_to_pipeline(
                     websocket=websocket,
                     send_lock=send_lock,
-                    relay_lock=relay_lock,
-                    filename=filename,
-                    segment_audio=asr_audio.copy(),
-                    start_time=asr_start_time,
-                    end_time=asr_end_time,
-                    duration=asr_duration,
+                    text=final_transcript,
                     reason=end_reason,
                     source=source,
                     scope=scope,
@@ -959,15 +1018,17 @@ async def audio_ws(
                     participant_id=participant_id,
                     user_id=user_id,
                     display_name=display_name,
-                    retranscribed_final=retranscribed_final,
+                    start=asr_start_time,
+                    end=asr_end_time,
+                    duration=asr_duration,
+                    retranscribed_final=False,
                 )
-            )
-
-            asr_tasks.add(task)
-            task.add_done_callback(asr_tasks.discard)
 
         else:
-            print(f"Skipped short segment: duration={duration:.2f}s")
+            print(
+                "Skipped final segment: "
+                f"duration={duration:.2f}s, has_live_transcript={bool(final_transcript)}"
+            )
 
         speech_started = False
         speech_chunks = 0
@@ -975,20 +1036,25 @@ async def audio_ws(
         speech_start_time = None
         next_live_speech_chunk = 0
         live_window_count = 0
+        merged_live_transcript = ""
         segment_buffer = []
 
     def schedule_live_transcript(current_time: float) -> bool:
-        nonlocal live_window_count
+        nonlocal live_window_count, merged_live_transcript
+
+        def remember_live_transcript(transcript: str) -> None:
+            nonlocal merged_live_transcript
+            merged_live_transcript = merge_transcript_text(merged_live_transcript, transcript)
 
         if live_asr_tasks or not segment_buffer:
             return False
 
         segment_audio = np.concatenate(segment_buffer).astype(np.float32)
-        if len(segment_audio) < STREAM_WINDOW_SAMPLES:
+        if len(segment_audio) < STREAM_MIN_LIVE_CHUNKS * CHUNK_SIZE:
             return False
 
         live_window_count += 1
-        window_audio = segment_audio[-STREAM_WINDOW_SAMPLES:].copy()
+        window_audio = segment_audio[-STREAM_WINDOW_SAMPLES:].copy() if len(segment_audio) > STREAM_WINDOW_SAMPLES else segment_audio.copy()
         duration = len(window_audio) / SAMPLE_RATE
         end_time = current_time
         start_time = max(0.0, end_time - duration)
@@ -1027,6 +1093,7 @@ async def audio_ws(
                 display_name=display_name,
                 save_transcript=False,
                 relay_to_pipeline=False,
+                on_transcript=remember_live_transcript,
             )
         )
         asr_tasks.add(task)
@@ -1246,6 +1313,7 @@ async def audio_ws(
                         speech_chunks = 0
                         silence_chunks = 0
                         next_live_speech_chunk = 0
+                        merged_live_transcript = ""
                         speech_start_time = current_time
 
                         # Include pre-buffer to avoid cutting the first syllable
@@ -1271,7 +1339,7 @@ async def audio_ws(
                 speech_chunks += 1
                 segment_buffer.append(audio_chunk.copy())
 
-                if speech_chunks >= next_live_speech_chunk and len(segment_buffer) * CHUNK_SIZE >= STREAM_WINDOW_SAMPLES:
+                if speech_chunks >= next_live_speech_chunk and len(segment_buffer) * CHUNK_SIZE >= STREAM_MIN_LIVE_CHUNKS * CHUNK_SIZE:
                     if schedule_live_transcript(current_time):
                         next_live_speech_chunk = speech_chunks + STREAM_STEP_CHUNKS
 

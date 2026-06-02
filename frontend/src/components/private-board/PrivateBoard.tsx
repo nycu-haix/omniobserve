@@ -510,8 +510,31 @@ function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string,
 	return appendTranscriptLine(withoutDraft, finalLine);
 }
 
+function canMergeAdjacentPublicTranscriptLines(left: TranscriptLineType, right: TranscriptLineType): boolean {
+	return left.source === "public" && right.source === "public" && left.userId != null && right.userId != null && String(left.userId) === String(right.userId);
+}
+
+function mergeAdjacentPublicTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
+	return lines.reduce<TranscriptLineType[]>((mergedLines, line) => {
+		const previousLine = mergedLines[mergedLines.length - 1];
+		if (!previousLine || !canMergeAdjacentPublicTranscriptLines(previousLine, line)) {
+			mergedLines.push(line);
+			return mergedLines;
+		}
+
+		mergedLines[mergedLines.length - 1] = {
+			...previousLine,
+			displayName: previousLine.displayName ?? line.displayName,
+			text: mergeTranscriptText(previousLine.text, line.text),
+			timestampMs: previousLine.timestampMs ?? line.timestampMs,
+			linkedBlockId: previousLine.linkedBlockId ?? line.linkedBlockId
+		};
+		return mergedLines;
+	}, []);
+}
+
 function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
-	return [...lines].sort((left, right) => {
+	const sortedLines = [...lines].sort((left, right) => {
 		const leftTime = left.timestampMs ?? Number(left.id);
 		const rightTime = right.timestampMs ?? Number(right.id);
 
@@ -521,6 +544,7 @@ function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] 
 
 		return left.id.localeCompare(right.id, undefined, { numeric: true });
 	});
+	return mergeAdjacentPublicTranscriptLines(sortedLines);
 }
 
 function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicChatMessage): PublicChatMessage[] {
