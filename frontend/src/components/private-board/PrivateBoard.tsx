@@ -126,6 +126,7 @@ type AudioTranscriptMessage =
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS = 7000;
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
+const LIVE_TRANSCRIPT_REASON = "sliding_window";
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
@@ -387,7 +388,7 @@ function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): Tran
 	if (message.type === "transcript_update") {
 		return "private";
 	}
-	if (message.type === "transcript" && message.reason === MAX_SPEECH_TRANSCRIPT_REASON) {
+	if (message.type === "transcript" && (message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON)) {
 		return "private";
 	}
 	return undefined;
@@ -411,7 +412,7 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 
 function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): boolean {
 	if (message.type === "transcript") {
-		return message.persisted === false && message.reason === MAX_SPEECH_TRANSCRIPT_REASON && line.source === "private";
+		return message.persisted === false && (message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON) && line.source === "private";
 	}
 	if (message.type === "transcript_update" && message.persisted !== true) {
 		return false;
@@ -1184,11 +1185,14 @@ export function PrivateBoard({
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
 			if (shouldAppendAudioTranscriptToTranscriptTab(lastAudioMessage, transcriptLine, participantId)) {
-				const isMaxSpeechDraft = lastAudioMessage.type === "transcript" && lastAudioMessage.reason === MAX_SPEECH_TRANSCRIPT_REASON && lastAudioMessage.persisted === false;
+				const isLiveTranscriptDraft =
+					lastAudioMessage.type === "transcript" &&
+					(lastAudioMessage.reason === MAX_SPEECH_TRANSCRIPT_REASON || lastAudioMessage.reason === LIVE_TRANSCRIPT_REASON) &&
+					lastAudioMessage.persisted === false;
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
 
-				if (isMaxSpeechDraft) {
+				if (isLiveTranscriptDraft) {
 					const currentDraft =
 						activeMaxSpeechTranscriptDraftRef.current ??
 						{
