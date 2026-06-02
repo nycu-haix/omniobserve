@@ -679,7 +679,9 @@ export function PrivateBoard({
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
-	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -694,8 +696,10 @@ export function PrivateBoard({
 	});
 	const isSavingManualIdea = manualIdeaPendingCount > 0;
 
+	const isPrivateWorkspaceActive = visibleActiveTab === "transcript" || (canShowIdeaBlocks && visibleActiveTab === "ideablock");
+
 	const focusActiveComposer = useCallback(() => {
-		if (canShowIdeaBlocks && visibleActiveTab === "ideablock") {
+		if (canShowIdeaBlocks && isPrivateWorkspaceActive) {
 			manualIdeaTextareaRef.current?.focus();
 			return true;
 		}
@@ -706,7 +710,7 @@ export function PrivateBoard({
 		}
 
 		return false;
-	}, [canShowIdeaBlocks, visibleActiveTab]);
+	}, [canShowIdeaBlocks, isPrivateWorkspaceActive, visibleActiveTab]);
 
 	useEffect(() => {
 		const handleComposerShortcutKeyDown = (event: KeyboardEvent) => {
@@ -716,17 +720,11 @@ export function PrivateBoard({
 
 			if (event.code === "Digit1") {
 				event.preventDefault();
-				setActiveTab("transcript");
+				setActiveTab(canShowIdeaBlocks ? "ideablock" : "transcript");
 				return;
 			}
 
-			if (event.code === "Digit2" && canShowIdeaBlocks) {
-				event.preventDefault();
-				setActiveTab("ideablock");
-				return;
-			}
-
-			if (event.code === "Digit3") {
+			if (event.code === "Digit2") {
 				event.preventDefault();
 				setActiveTab("public-chat");
 				return;
@@ -1098,29 +1096,49 @@ export function PrivateBoard({
 		return transcriptIds.length > 0;
 	};
 
-	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
-		shouldAutoScrollRef.current[visibleActiveTab] = isNearScrollBottom(event.currentTarget);
+	const handleBoardScroll = (tab: BoardTab) => (event: UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current[tab] = isNearScrollBottom(event.currentTarget);
 	};
 
 	useLayoutEffect(() => {
-		const viewport = scrollViewportRef.current;
-		const didEnterTranscript = lastVisibleActiveTabRef.current !== "transcript" && visibleActiveTab === "transcript";
+		const transcriptViewport = transcriptScrollViewportRef.current;
+		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
+		const publicChatViewport = publicChatScrollViewportRef.current;
+		const didEnterPrivateWorkspace =
+			(lastVisibleActiveTabRef.current === "public-chat" || (!canShowIdeaBlocks && lastVisibleActiveTabRef.current === "ideablock")) && isPrivateWorkspaceActive;
+		const didEnterPublicChat = lastVisibleActiveTabRef.current !== "public-chat" && visibleActiveTab === "public-chat";
 		lastVisibleActiveTabRef.current = visibleActiveTab;
 
-		if (didEnterTranscript) {
+		if (didEnterPrivateWorkspace) {
 			shouldAutoScrollRef.current.transcript = true;
-			if (viewport) {
-				viewport.scrollTop = viewport.scrollHeight;
+			shouldAutoScrollRef.current.ideablock = true;
+			if (transcriptViewport) {
+				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			}
+			if (ideaBlocksViewport) {
+				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
 			}
 			return;
 		}
 
-		if (!viewport || !shouldAutoScrollRef.current[visibleActiveTab]) {
+		if (isPrivateWorkspaceActive) {
+			if (transcriptViewport && shouldAutoScrollRef.current.transcript) {
+				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			}
+			if (ideaBlocksViewport && shouldAutoScrollRef.current.ideablock) {
+				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
+			}
 			return;
 		}
 
-		viewport.scrollTop = viewport.scrollHeight;
-	}, [visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
+		if (didEnterPublicChat) {
+			shouldAutoScrollRef.current["public-chat"] = true;
+		}
+
+		if (publicChatViewport && shouldAutoScrollRef.current["public-chat"]) {
+			publicChatViewport.scrollTop = publicChatViewport.scrollHeight;
+		}
+	}, [canShowIdeaBlocks, isPrivateWorkspaceActive, visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id && !block.isDeleted ? { ...block, expanded: !block.expanded } : block)));
@@ -1297,6 +1315,8 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
+	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
+
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
@@ -1309,29 +1329,16 @@ export function PrivateBoard({
 						)}
 						<div className="flex rounded-lg bg-muted p-1">
 							<Button
-								aria-pressed={visibleActiveTab === "transcript"}
+								aria-pressed={isPrivateWorkspaceActive}
 								className={cn(
 									"transition-all active:translate-y-px active:scale-[0.98]",
-									visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+									isPrivateWorkspaceActive && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
-								variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
-								onClick={() => setActiveTab("transcript")}
+								variant={isPrivateWorkspaceActive ? "default" : "ghost"}
+								onClick={() => setActiveTab(canShowIdeaBlocks ? "ideablock" : "transcript")}
 							>
-								逐字稿
+								私人逐字稿 / Idea Blocks
 							</Button>
-							{canShowIdeaBlocks && (
-								<Button
-									aria-pressed={activeTab === "ideablock"}
-									className={cn(
-										"transition-all active:translate-y-px active:scale-[0.98]",
-										activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
-									)}
-									variant={activeTab === "ideablock" ? "default" : "ghost"}
-									onClick={() => setActiveTab("ideablock")}
-								>
-									Idea Blocks
-								</Button>
-							)}
 							<Button
 								aria-pressed={visibleActiveTab === "public-chat"}
 								className={cn(
@@ -1352,44 +1359,59 @@ export function PrivateBoard({
 					</div>
 				</header>
 
-				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
-					{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
-						<div className="grid gap-2 pb-3">
-							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
-							{ideaBlocks.map(block => (
-								<div
-									key={block.id}
-									ref={node => {
-										blockRefs.current[block.id] = node;
-									}}
-								>
-									<IdeaBlockItem
-										block={block}
-										isHighlighted={highlightedBlockId === block.id}
-										onToggle={toggleBlock}
-										onSave={saveIdeaBlock}
-										onDelete={deleteIdeaBlock}
-										onJumpToTranscript={jumpToTranscript}
-										canJumpToTranscript={canJumpToTranscript(block)}
-										currentPhase={visiblePhase}
-									/>
-								</div>
-							))}
-						</div>
-					)}
-					{visibleActiveTab === "transcript" && (
-						<TranscriptLines
-							lines={transcriptLines}
-							emptyText="尚無逐字稿"
-							onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
-							onTranscriptRef={setTranscriptRef}
-							highlightedTranscriptId={highlightedTranscriptId}
-						/>
-					)}
-					{visibleActiveTab === "public-chat" && <PublicChatMessages messages={publicChatMessages} />}
-				</ScrollArea>
+				{isPrivateWorkspaceActive && (
+					<div className={cn("grid min-h-0 flex-1 gap-3 p-3", canShowIdeaBlocks ? "grid-rows-2" : "grid-rows-1")}>
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleBoardScroll("transcript") }}>
+								<TranscriptLines
+									lines={privateTranscriptLines}
+									emptyText="尚無逐字稿"
+									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+									onTranscriptRef={setTranscriptRef}
+									highlightedTranscriptId={highlightedTranscriptId}
+								/>
+							</ScrollArea>
+						</section>
 
-				{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
+						{canShowIdeaBlocks && (
+							<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+								<div className="border-b px-3 py-2 text-sm font-medium">Idea Blocks</div>
+								<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleBoardScroll("ideablock") }}>
+									<div className="grid gap-2 pb-3">
+										{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
+										{ideaBlocks.map(block => (
+											<div
+												key={block.id}
+												ref={node => {
+													blockRefs.current[block.id] = node;
+												}}
+											>
+												<IdeaBlockItem
+													block={block}
+													isHighlighted={highlightedBlockId === block.id}
+													onToggle={toggleBlock}
+													onSave={saveIdeaBlock}
+													onDelete={deleteIdeaBlock}
+													onJumpToTranscript={jumpToTranscript}
+													canJumpToTranscript={canJumpToTranscript(block)}
+													currentPhase={visiblePhase}
+												/>
+											</div>
+										))}
+									</div>
+								</ScrollArea>
+							</section>
+						)}
+					</div>
+				)}
+				{visibleActiveTab === "public-chat" && (
+					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={publicChatScrollViewportRef} viewportProps={{ onScroll: handleBoardScroll("public-chat") }}>
+						<PublicChatMessages messages={publicChatMessages} />
+					</ScrollArea>
+				)}
+
+				{canShowIdeaBlocks && isPrivateWorkspaceActive && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<div className="flex items-end gap-2">
