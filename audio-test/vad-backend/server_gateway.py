@@ -47,7 +47,7 @@ END_THRESHOLD = 0.15
 
 MIN_SILENCE_MS = 1200
 MIN_SPEECH_MS = 1000
-MAX_SPEECH_MS = 20000
+MAX_SPEECH_MS = 10000
 
 MIN_SILENCE_CHUNKS = int((MIN_SILENCE_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 MIN_SPEECH_CHUNKS = int((MIN_SPEECH_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
@@ -58,6 +58,7 @@ PRE_BUFFER_CHUNKS = int((PRE_BUFFER_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 
 RMS_SILENCE_THRESHOLD = 0.00005
 MIN_SAVE_DURATION_SEC = 0.8
+FINAL_RETRANSCRIBE_MAX_AUDIO_SEC = 60.0
 
 SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
@@ -317,6 +318,7 @@ async def relay_transcript_to_pipeline(
     start: float,
     end: float,
     duration: float,
+    retranscribed_final: bool = False,
 ) -> list[dict]:
     if not PIPELINE_WS_BASE_URL:
         print("Pipeline relay skipped: PIPELINE_WS_BASE_URL is empty")
@@ -355,6 +357,7 @@ async def relay_transcript_to_pipeline(
         "displayName": display_name,
         "source": source,
         "agentType": agent_type,
+        "retranscribedFinal": retranscribed_final,
     }
     terminal_types = (
         {"task_items_update", "pipeline_error"}
@@ -637,6 +640,7 @@ async def transcribe_and_send(
     participant_id: Optional[str],
     user_id: Optional[str],
     display_name: Optional[str],
+    retranscribed_final: bool = False,
 ):
     try:
         # print(f"Transcribing segment: {filename}")
@@ -701,11 +705,12 @@ async def transcribe_and_send(
                     "file": str(filename),
                     "start": round(start_time, 2),
                     "end": round(end_time, 2),
-                    "duration": round(duration, 2),
-                    "reason": reason,
-                    "text": transcript,
-                    # "text": traditional_transcript,
-                })
+                "duration": round(duration, 2),
+                "reason": reason,
+                "text": transcript,
+                "retranscribedFinal": retranscribed_final,
+                # "text": traditional_transcript,
+            })
         except Exception:
             print("Cannot send transcript because websocket is closed")
 
@@ -725,6 +730,7 @@ async def transcribe_and_send(
                 start=start_time,
                 end=end_time,
                 duration=duration,
+                retranscribed_final=retranscribed_final,
             )
 
     except Exception as e:
@@ -784,6 +790,8 @@ async def audio_ws(
 
     # Per-connection audio state
     pending_audio = np.zeros(0, dtype=np.float32)
+    max_speech_batch_audio_segments = []
+    max_speech_batch_start_time = None
 
     chunk_count = 0
     segment_count = 0
@@ -806,6 +814,8 @@ async def audio_ws(
         nonlocal speech_start_time
         nonlocal segment_buffer
         nonlocal segment_count
+        nonlocal max_speech_batch_audio_segments
+        nonlocal max_speech_batch_start_time
 
         if not speech_started or not segment_buffer:
             speech_started = False
@@ -841,6 +851,37 @@ async def audio_ws(
 
         if duration >= MIN_SAVE_DURATION_SEC:
             segment_count += 1
+            asr_audio = segment_audio.copy()
+            asr_start_time = start_time
+            asr_end_time = end_time
+            asr_duration = duration
+            retranscribed_final = False
+
+            if end_reason == "max_speech_ms":
+                if max_speech_batch_start_time is None:
+                    max_speech_batch_start_time = start_time
+                max_speech_batch_audio_segments.append(segment_audio.copy())
+            elif end_reason in PIPELINE_FINAL_REASONS and max_speech_batch_audio_segments:
+                combined_segments = [*max_speech_batch_audio_segments, segment_audio.copy()]
+                combined_audio = np.concatenate(combined_segments).astype(np.float32)
+                combined_duration = len(combined_audio) / SAMPLE_RATE
+                if combined_duration <= FINAL_RETRANSCRIBE_MAX_AUDIO_SEC:
+                    asr_audio = combined_audio
+                    asr_start_time = float(max_speech_batch_start_time if max_speech_batch_start_time is not None else start_time)
+                    asr_end_time = asr_start_time + combined_duration
+                    asr_duration = combined_duration
+                    retranscribed_final = True
+                    print(
+                        "Retranscribing full max_speech batch: "
+                        f"duration={combined_duration:.2f}s, segments={len(combined_segments)}"
+                    )
+                else:
+                    print(
+                        "Skip full max_speech batch retranscribe: "
+                        f"duration={combined_duration:.2f}s exceeds {FINAL_RETRANSCRIBE_MAX_AUDIO_SEC:.2f}s"
+                    )
+                max_speech_batch_audio_segments = []
+                max_speech_batch_start_time = None
 
             safe_scope = sanitize_filename_part(scope)
             safe_room = sanitize_filename_part(room_name)
@@ -889,10 +930,10 @@ async def audio_ws(
                     send_lock=send_lock,
                     relay_lock=relay_lock,
                     filename=filename,
-                    segment_audio=segment_audio.copy(),
-                    start_time=start_time,
-                    end_time=end_time,
-                    duration=duration,
+                    segment_audio=asr_audio.copy(),
+                    start_time=asr_start_time,
+                    end_time=asr_end_time,
+                    duration=asr_duration,
                     reason=end_reason,
                     source=source,
                     scope=scope,
@@ -901,6 +942,7 @@ async def audio_ws(
                     participant_id=participant_id,
                     user_id=user_id,
                     display_name=display_name,
+                    retranscribed_final=retranscribed_final,
                 )
             )
 

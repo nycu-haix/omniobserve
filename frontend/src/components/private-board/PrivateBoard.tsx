@@ -119,6 +119,7 @@ type AudioTranscriptMessage =
 	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
@@ -350,6 +351,12 @@ function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): Tran
 	if (source === "public" || source === "private") {
 		return source;
 	}
+	if (message.type === "transcript_update") {
+		return "private";
+	}
+	if (message.type === "transcript" && message.reason === MAX_SPEECH_TRANSCRIPT_REASON) {
+		return "private";
+	}
 	return undefined;
 }
 
@@ -370,13 +377,34 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 }
 
 function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): boolean {
-	if (message.persisted === false) {
+	if (message.type === "transcript") {
+		return message.persisted === false && message.reason === MAX_SPEECH_TRANSCRIPT_REASON && line.source === "private";
+	}
+	if (message.type === "transcript_update" && message.persisted !== true) {
 		return false;
 	}
 	if (line.source !== "private") {
 		return false;
 	}
 	return line.userId == null || isOwnTranscriptUser(line.userId, participantId);
+}
+
+function mergeTranscriptText(previousText: string, nextText: string): string {
+	const previous = previousText.trim();
+	const next = nextText.trim();
+	if (!previous) {
+		return next;
+	}
+	if (!next) {
+		return previous;
+	}
+	if (previous.endsWith(next)) {
+		return previous;
+	}
+	if (next.startsWith(previous)) {
+		return next;
+	}
+	return `${previous}${next}`;
 }
 
 function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
@@ -680,6 +708,7 @@ export function PrivateBoard({
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const activeMaxSpeechTranscriptDraftRef = useRef<{ id: string; text: string } | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -996,7 +1025,37 @@ export function PrivateBoard({
 		const timer = window.setTimeout(() => {
 			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
 			if (shouldAppendAudioTranscriptToTranscriptTab(lastAudioMessage, transcriptLine, participantId)) {
-				const signature = audioTranscriptDisplaySignature(lastAudioMessage, transcriptLine);
+				const isMaxSpeechDraft = lastAudioMessage.type === "transcript" && lastAudioMessage.reason === MAX_SPEECH_TRANSCRIPT_REASON && lastAudioMessage.persisted === false;
+				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
+				let displayLine = transcriptLine;
+
+				if (isMaxSpeechDraft) {
+					const currentDraft =
+						activeMaxSpeechTranscriptDraftRef.current ??
+						{
+							id: `live-batch-${transcriptLine.userId ?? participantId}-${Date.now()}`,
+							text: ""
+						};
+					const mergedText = mergeTranscriptText(currentDraft.text, transcriptLine.text);
+					activeMaxSpeechTranscriptDraftRef.current = {
+						id: currentDraft.id,
+						text: mergedText
+					};
+					displayLine = {
+						...transcriptLine,
+						id: currentDraft.id,
+						text: mergedText
+					};
+				} else if (isPersistedFinal && activeMaxSpeechTranscriptDraftRef.current) {
+					displayLine = {
+						...transcriptLine,
+						id: activeMaxSpeechTranscriptDraftRef.current.id,
+						text: transcriptLine.text
+					};
+					activeMaxSpeechTranscriptDraftRef.current = null;
+				}
+
+				const signature = audioTranscriptDisplaySignature(lastAudioMessage, displayLine);
 				const displayed = lastDisplayedAudioTranscriptRef.current;
 				const now = Date.now();
 				if (displayed && displayed.signature === signature && now - displayed.displayedAt < 2000) {
@@ -1006,9 +1065,9 @@ export function PrivateBoard({
 				setTranscriptLines(prev =>
 					linkTranscriptLinesToBlocks(
 						appendTranscriptLine(prev, {
-							...transcriptLine,
-							displayName: transcriptLine.displayName ?? displayName,
-							isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId)
+							...displayLine,
+							displayName: displayLine.displayName ?? displayName,
+							isOwn: displayLine.userId == null ? true : isOwnTranscriptUser(displayLine.userId, participantId)
 						}),
 						ideaBlocks
 					)

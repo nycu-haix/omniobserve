@@ -496,6 +496,7 @@ async def handle_transcript_segments_websocket(
                 text = str(payload.get("text") or "").strip()
                 reason = str(payload.get("reason") or "").strip().lower()
                 visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
+                retranscribed_final = payload.get("retranscribedFinal") is True
                 if not text:
                     logger.info(
                         "pipeline_ws_skip_empty_transcript session_name=%s participant_id=%s reason=%s",
@@ -586,14 +587,19 @@ async def handle_transcript_segments_websocket(
                         continue
 
                     if reason in FINAL_TRANSCRIPT_REASONS:
-                        _pending_transcript_batch_texts[batch_key].append(text)
-                        batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
-                        batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
+                        if retranscribed_final:
+                            batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                            batch_text = text
+                        else:
+                            _pending_transcript_batch_texts[batch_key].append(text)
+                            batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                            batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
                         logger.info(
-                            "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s batch_segments=%s batch_chars=%s",
+                            "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s retranscribed_final=%s batch_segments=%s batch_chars=%s",
                             session_name,
                             participant_id,
                             reason,
+                            retranscribed_final,
                             len(batch_texts),
                             len(batch_text),
                         )
