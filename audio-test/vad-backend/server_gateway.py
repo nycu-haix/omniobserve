@@ -59,6 +59,11 @@ PRE_BUFFER_CHUNKS = int((PRE_BUFFER_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 RMS_SILENCE_THRESHOLD = 0.00005
 MIN_SAVE_DURATION_SEC = 0.8
 FINAL_RETRANSCRIBE_MAX_AUDIO_SEC = 60.0
+LIVE_TRANSCRIPT_REASON = "sliding_window"
+STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
+STREAM_STEP_SECONDS = float(os.getenv("STREAM_STEP_SECONDS", "2"))
+STREAM_WINDOW_SAMPLES = max(CHUNK_SIZE, int(round(STREAM_WINDOW_SECONDS * SAMPLE_RATE)))
+STREAM_STEP_CHUNKS = max(1, int(round(STREAM_STEP_SECONDS * SAMPLE_RATE / CHUNK_SIZE)))
 
 SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
@@ -641,6 +646,8 @@ async def transcribe_and_send(
     user_id: Optional[str],
     display_name: Optional[str],
     retranscribed_final: bool = False,
+    save_transcript: bool = True,
+    relay_to_pipeline: bool = True,
 ):
     try:
         # print(f"Transcribing segment: {filename}")
@@ -671,22 +678,23 @@ async def transcribe_and_send(
             f"reason={reason}, chars={len(transcript)}, text={transcript}"
         )
 
-        save_transcript_jsonl(
-            file=str(filename),
-            start=start_time,
-            end=end_time,
-            duration=duration,
-            text=transcript,
-            # text=traditional_transcript,
-            source=source,
-            scope=scope,
-            agent_type=agent_type,
-            room_name=room_name,
-            participant_id=participant_id,
-            user_id=user_id,
-            display_name=display_name,
-            reason=reason,
-        )
+        if save_transcript:
+            save_transcript_jsonl(
+                file=str(filename),
+                start=start_time,
+                end=end_time,
+                duration=duration,
+                text=transcript,
+                # text=traditional_transcript,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                reason=reason,
+            )
 
         try:
             # print("[ASR raw]", raw_transcript)
@@ -708,30 +716,32 @@ async def transcribe_and_send(
                 "duration": round(duration, 2),
                 "reason": reason,
                 "text": transcript,
+                "persisted": False if not relay_to_pipeline else None,
                 "retranscribedFinal": retranscribed_final,
                 # "text": traditional_transcript,
             })
         except Exception:
             print("Cannot send transcript because websocket is closed")
 
-        async with relay_lock:
-            await relay_transcript_to_pipeline(
-                websocket=websocket,
-                send_lock=send_lock,
-                text=transcript,
-                reason=reason,
-                source=source,
-                scope=scope,
-                agent_type=agent_type,
-                room_name=room_name,
-                participant_id=participant_id,
-                user_id=user_id,
-                display_name=display_name,
-                start=start_time,
-                end=end_time,
-                duration=duration,
-                retranscribed_final=retranscribed_final,
-            )
+        if relay_to_pipeline:
+            async with relay_lock:
+                await relay_transcript_to_pipeline(
+                    websocket=websocket,
+                    send_lock=send_lock,
+                    text=transcript,
+                    reason=reason,
+                    source=source,
+                    scope=scope,
+                    agent_type=agent_type,
+                    room_name=room_name,
+                    participant_id=participant_id,
+                    user_id=user_id,
+                    display_name=display_name,
+                    start=start_time,
+                    end=end_time,
+                    duration=duration,
+                    retranscribed_final=retranscribed_final,
+                )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")
@@ -773,6 +783,7 @@ async def audio_ws(
     send_lock = asyncio.Lock()
     relay_lock = asyncio.Lock()
     asr_tasks = set()
+    live_asr_tasks = set()
 
     # Metadata from URL first, then start message can override it
     source = "unknown"
@@ -800,6 +811,8 @@ async def audio_ws(
     speech_chunks = 0
     silence_chunks = 0
     speech_start_time = None
+    next_live_speech_chunk = 0
+    live_window_count = 0
 
     pre_buffer = deque(maxlen=PRE_BUFFER_CHUNKS)
     segment_buffer = []
@@ -816,12 +829,16 @@ async def audio_ws(
         nonlocal segment_count
         nonlocal max_speech_batch_audio_segments
         nonlocal max_speech_batch_start_time
+        nonlocal next_live_speech_chunk
+        nonlocal live_window_count
 
         if not speech_started or not segment_buffer:
             speech_started = False
             speech_chunks = 0
             silence_chunks = 0
             speech_start_time = None
+            next_live_speech_chunk = 0
+            live_window_count = 0
             segment_buffer = []
             return
 
@@ -956,7 +973,67 @@ async def audio_ws(
         speech_chunks = 0
         silence_chunks = 0
         speech_start_time = None
+        next_live_speech_chunk = 0
+        live_window_count = 0
         segment_buffer = []
+
+    def schedule_live_transcript(current_time: float) -> bool:
+        nonlocal live_window_count
+
+        if live_asr_tasks or not segment_buffer:
+            return False
+
+        segment_audio = np.concatenate(segment_buffer).astype(np.float32)
+        if len(segment_audio) < STREAM_WINDOW_SAMPLES:
+            return False
+
+        live_window_count += 1
+        window_audio = segment_audio[-STREAM_WINDOW_SAMPLES:].copy()
+        duration = len(window_audio) / SAMPLE_RATE
+        end_time = current_time
+        start_time = max(0.0, end_time - duration)
+
+        safe_reason = sanitize_filename_part(LIVE_TRANSCRIPT_REASON)
+        filename = SEGMENT_DIR / (
+            f"live_{live_window_count:03d}_"
+            f"{round(start_time, 2)}_"
+            f"{round(end_time, 2)}_"
+            f"{safe_reason}.wav"
+        )
+
+        print(
+            "Live ASR window scheduled: "
+            f"roomName={room_name}, participantId={participant_id or user_id}, "
+            f"start={start_time:.2f}, end={end_time:.2f}, duration={duration:.2f}s"
+        )
+
+        task = asyncio.create_task(
+            transcribe_and_send(
+                websocket=websocket,
+                send_lock=send_lock,
+                relay_lock=relay_lock,
+                filename=filename,
+                segment_audio=window_audio,
+                start_time=start_time,
+                end_time=end_time,
+                duration=duration,
+                reason=LIVE_TRANSCRIPT_REASON,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                save_transcript=False,
+                relay_to_pipeline=False,
+            )
+        )
+        asr_tasks.add(task)
+        live_asr_tasks.add(task)
+        task.add_done_callback(asr_tasks.discard)
+        task.add_done_callback(live_asr_tasks.discard)
+        return True
 
     try:
         while True:
@@ -1168,6 +1245,7 @@ async def audio_ws(
                         speech_started = True
                         speech_chunks = 0
                         silence_chunks = 0
+                        next_live_speech_chunk = 0
                         speech_start_time = current_time
 
                         # Include pre-buffer to avoid cutting the first syllable
@@ -1192,6 +1270,10 @@ async def audio_ws(
                 # Already in speech
                 speech_chunks += 1
                 segment_buffer.append(audio_chunk.copy())
+
+                if speech_chunks >= next_live_speech_chunk and len(segment_buffer) * CHUNK_SIZE >= STREAM_WINDOW_SAMPLES:
+                    if schedule_live_transcript(current_time):
+                        next_live_speech_chunk = speech_chunks + STREAM_STEP_CHUNKS
 
                 if effective_prob < END_THRESHOLD:
                     silence_chunks += 1

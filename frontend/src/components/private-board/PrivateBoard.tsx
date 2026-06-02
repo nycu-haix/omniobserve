@@ -127,6 +127,7 @@ const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS = 7000;
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
+const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
@@ -412,7 +413,11 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 
 function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): boolean {
 	if (message.type === "transcript") {
-		return message.persisted === false && (message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON) && line.source === "private";
+		return (
+			line.source === "private" &&
+			(message.persisted === false || message.persisted == null) &&
+			(message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON || FINAL_TRANSCRIPT_REASONS.has(String(message.reason ?? "")))
+		);
 	}
 	if (message.type === "transcript_update" && message.persisted !== true) {
 		return false;
@@ -437,6 +442,18 @@ function mergeTranscriptText(previousText: string, nextText: string): string {
 	}
 	if (next.startsWith(previous)) {
 		return next;
+	}
+	if (previous.includes(next)) {
+		return previous;
+	}
+	if (next.includes(previous)) {
+		return next;
+	}
+	const maxOverlap = Math.min(previous.length, next.length);
+	for (let overlap = maxOverlap; overlap > 1; overlap -= 1) {
+		if (previous.slice(-overlap) === next.slice(0, overlap)) {
+			return `${previous}${next.slice(overlap)}`;
+		}
 	}
 	return `${previous}${next}`;
 }
@@ -486,6 +503,11 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
 	return nextLines.reduce((lines, line) => appendTranscriptLine(lines, line), baseLines);
+}
+
+function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string, finalLine: TranscriptLineType): TranscriptLineType[] {
+	const withoutDraft = lines.filter(line => line.id !== draftLineId || line.id === finalLine.id);
+	return appendTranscriptLine(withoutDraft, finalLine);
 }
 
 function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
@@ -757,7 +779,7 @@ export function PrivateBoard({
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const activeMaxSpeechTranscriptDraftRef = useRef<{ id: string; text: string } | null>(null);
+	const activeMaxSpeechTranscriptDraftRef = useRef<{ id: string; text: string; isFinal?: boolean } | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1188,13 +1210,20 @@ export function PrivateBoard({
 				const isLiveTranscriptDraft =
 					lastAudioMessage.type === "transcript" &&
 					(lastAudioMessage.reason === MAX_SPEECH_TRANSCRIPT_REASON || lastAudioMessage.reason === LIVE_TRANSCRIPT_REASON) &&
-					lastAudioMessage.persisted === false;
+					(lastAudioMessage.persisted === false || lastAudioMessage.persisted == null);
+				const isTranscriptFinal =
+					lastAudioMessage.type === "transcript" &&
+					FINAL_TRANSCRIPT_REASONS.has(String(lastAudioMessage.reason ?? "")) &&
+					(lastAudioMessage.persisted === false || lastAudioMessage.persisted == null);
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
+				let replaceDraftLineId: string | null = null;
 
 				if (isLiveTranscriptDraft) {
 					const currentDraft =
-						activeMaxSpeechTranscriptDraftRef.current ??
+						activeMaxSpeechTranscriptDraftRef.current && !activeMaxSpeechTranscriptDraftRef.current.isFinal
+							? activeMaxSpeechTranscriptDraftRef.current
+							:
 						{
 							id: `live-batch-${transcriptLine.userId ?? participantId}-${Date.now()}`,
 							text: ""
@@ -1209,10 +1238,22 @@ export function PrivateBoard({
 						id: currentDraft.id,
 						text: mergedText
 					};
-				} else if (isPersistedFinal && activeMaxSpeechTranscriptDraftRef.current) {
+				} else if (isTranscriptFinal && activeMaxSpeechTranscriptDraftRef.current) {
+					replaceDraftLineId = activeMaxSpeechTranscriptDraftRef.current.id;
+					activeMaxSpeechTranscriptDraftRef.current = {
+						id: replaceDraftLineId,
+						text: transcriptLine.text,
+						isFinal: true
+					};
 					displayLine = {
 						...transcriptLine,
-						id: activeMaxSpeechTranscriptDraftRef.current.id,
+						id: replaceDraftLineId,
+						text: transcriptLine.text
+					};
+				} else if (isPersistedFinal && activeMaxSpeechTranscriptDraftRef.current) {
+					replaceDraftLineId = activeMaxSpeechTranscriptDraftRef.current.id;
+					displayLine = {
+						...transcriptLine,
 						text: transcriptLine.text
 					};
 					activeMaxSpeechTranscriptDraftRef.current = null;
@@ -1226,14 +1267,17 @@ export function PrivateBoard({
 				}
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
 				setTranscriptLines(prev =>
-					linkTranscriptLinesToBlocks(
-						appendTranscriptLine(prev, {
+					{
+						const nextLine = {
 							...displayLine,
 							displayName: displayLine.displayName ?? displayName,
 							isOwn: displayLine.userId == null ? true : isOwnTranscriptUser(displayLine.userId, participantId)
-						}),
-						ideaBlocks
-					)
+						};
+						return linkTranscriptLinesToBlocks(
+							replaceDraftLineId ? replaceTranscriptLine(prev, replaceDraftLineId, nextLine) : appendTranscriptLine(prev, nextLine),
+							ideaBlocks
+						);
+					}
 				);
 			}
 		}, 0);
