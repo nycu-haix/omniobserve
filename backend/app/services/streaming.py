@@ -167,6 +167,7 @@ async def handle_audio_stream_websocket(
                             transcript_text=transcript_text,
                             started_at=chunk_started_at,
                             ended_at=chunk_ended_at,
+                            display_name=str(stream_context.start_message.get("displayName") or "").strip() or None,
                         )
                         segment_id = saved_segment.segment_id if saved_segment else None
                         await send_ws_json_safe(
@@ -205,6 +206,7 @@ async def handle_audio_stream_websocket(
                         transcript_text=transcript_text,
                         started_at=chunk_started_at,
                         ended_at=chunk_ended_at,
+                        display_name=str(stream_context.start_message.get("displayName") or "").strip() or None,
                     )
                     if saved_segment:
                         transcript_segments.append(saved_segment)
@@ -534,6 +536,7 @@ async def handle_transcript_segments_websocket(
                             transcript_text=text,
                             started_at=timestamp,
                             ended_at=timestamp,
+                            display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
                         )
                         segment_id = saved_segment.segment_id if saved_segment else None
                     await send_ws_json_safe(
@@ -621,6 +624,7 @@ async def handle_transcript_segments_websocket(
                     transcript_text=batch_text,
                     started_at=timestamp,
                     ended_at=timestamp,
+                    display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
                 )
 
                 if saved_segment is None:

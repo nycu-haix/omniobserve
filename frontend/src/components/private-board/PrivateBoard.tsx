@@ -50,6 +50,7 @@ interface TranscriptResponse {
 	id: number;
 	user_id: number;
 	session_name: string;
+	display_name?: string | null;
 	visibility?: string;
 	time_stamp: string;
 	transcript: string;
@@ -251,6 +252,7 @@ function transcriptResponseToLine(item: TranscriptResponse, participantId: strin
 		source,
 		origin: "history",
 		userId: String(item.user_id),
+		displayName: item.display_name ?? undefined,
 		isOwn: isOwnTranscriptUser(item.user_id, participantId),
 		time: formatTranscriptTime(item.time_stamp),
 		timestampMs: Number.isNaN(timestampMs) ? undefined : timestampMs,
@@ -322,6 +324,24 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		isDeleted: item.is_deleted ?? false,
 		createdAtMs,
 		status: "ready"
+	};
+}
+
+function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityCueData | null {
+	if (!block.hasCue || block.isDeleted) {
+		return null;
+	}
+
+	const blockSummary = block.cueText || block.aiSummary || block.summary;
+	if (!blockSummary.trim()) {
+		return null;
+	}
+
+	return {
+		id: `block-cue-${block.id}`,
+		blockId: block.id,
+		blockSummary,
+		isSameReason: block.similarityIsSameReason ?? undefined
 	};
 }
 
@@ -538,8 +558,8 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 								...block,
 								...nextBlock,
 								expanded: block.expanded,
-								isUnread: block.isUnread || nextBlock.isUnread,
-								cueText: block.cueText,
+								isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
+								cueText: nextBlock.cueText ?? block.cueText,
 								hasCue: block.hasCue || nextBlock.hasCue,
 								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
 								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
@@ -711,6 +731,7 @@ export function PrivateBoard({
 	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
 	const [unreadPublicChatMessages, setUnreadPublicChatMessages] = useState<PublicChatMessage[]>([]);
 	const [isPublicChatNotificationVisible, setIsPublicChatNotificationVisible] = useState(false);
+	const [publicChatNotificationMessageId, setPublicChatNotificationMessageId] = useState<string | null>(null);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
@@ -743,14 +764,57 @@ export function PrivateBoard({
 	});
 	const isSavingManualIdea = manualIdeaPendingCount > 0;
 	const unreadIdeaBlockCount = ideaBlocks.filter(block => block.isUnread && !block.isDeleted).length;
-	const firstUnreadPublicChatMessage = unreadPublicChatMessages[0] ?? null;
+	const publicChatNotificationMessage = publicChatNotificationMessageId ? unreadPublicChatMessages.find(message => message.id === publicChatNotificationMessageId) ?? null : unreadPublicChatMessages[0] ?? null;
+	const firstUnreadPublicChatMessage = publicChatNotificationMessage ?? unreadPublicChatMessages[0] ?? null;
 	const hasMultipleUnreadPublicChatMessages = unreadPublicChatMessages.length > 1;
 	const firstUnreadPublicChatSenderName = firstUnreadPublicChatMessage ? formatParticipantDisplayName(firstUnreadPublicChatMessage.userId, firstUnreadPublicChatMessage.displayName) || "聊天室" : "";
 
 	const clearPublicChatNotification = useCallback(() => {
 		setUnreadPublicChatMessages([]);
 		setIsPublicChatNotificationVisible(false);
+		setPublicChatNotificationMessageId(null);
 	}, []);
+
+	const queueSimilarityCueFromBlock = useCallback(
+		(block: IdeaBlock) => {
+			if (cueCondition !== "experimental") {
+				console.info("[private-board] similarity cue fallback skipped", {
+					reason: "cue_condition",
+					cueCondition,
+					blockId: block.id
+				});
+				return;
+			}
+
+			const cue = ideaBlockToSimilarityCue(block);
+			if (!cue) {
+				console.info("[private-board] similarity cue fallback skipped", {
+					reason: "missing_cue_payload",
+					blockId: block.id,
+					hasCue: block.hasCue,
+					isDeleted: block.isDeleted
+				});
+				return;
+			}
+
+			const currentBlock = ideaBlocksRef.current.find(item => item.id === block.id);
+			if (!currentBlock?.expanded) {
+				unreadIdeaBlockIdsFromRefreshRef.current.add(block.id);
+			}
+
+			setCues(prev => {
+				const alreadyQueued = prev.some(item => item.id === cue.id || item.blockId === cue.blockId);
+				console.info("[private-board] similarity cue fallback detected", {
+					blockId: cue.blockId,
+					isSameReason: cue.isSameReason,
+					alreadyQueued,
+					currentBlockExpanded: !!currentBlock?.expanded
+				});
+				return alreadyQueued ? prev : [...prev, cue];
+			});
+		},
+		[cueCondition]
+	);
 
 	const openPublicChatTab = useCallback(() => {
 		setActiveTab("public-chat");
@@ -927,6 +991,18 @@ export function PrivateBoard({
 					const block = ideaBlockResponseToBlock(item);
 					return unreadIdsFromRefresh.has(block.id) ? { ...block, isUnread: true } : block;
 				});
+				const previousBlocksById = new Map(ideaBlocksRef.current.map(block => [block.id, block]));
+				const newlyCuedBlocks = ideaBlocksFromDb.filter(block => {
+					const previousBlock = previousBlocksById.get(block.id);
+					return !!previousBlock && !!block.hasCue && !previousBlock.hasCue;
+				});
+				console.info("[private-board] similarity cue refresh check", {
+					sessionId,
+					participantId,
+					newlyCuedBlockIds: newlyCuedBlocks.map(block => block.id),
+					cuedBlockIds: ideaBlocksFromDb.filter(block => block.hasCue).map(block => block.id)
+				});
+				newlyCuedBlocks.forEach(queueSimilarityCueFromBlock);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
 				ideaBlocksFromDb.forEach(block => unreadIdsFromRefresh.delete(block.id));
 			} catch (error) {
@@ -940,7 +1016,7 @@ export function PrivateBoard({
 		void loadIdeaBlocks();
 
 		return () => controller.abort();
-	}, [ideaBlockRefreshKey, participantId, sessionId]);
+	}, [ideaBlockRefreshKey, participantId, queueSimilarityCueFromBlock, sessionId]);
 
 	useEffect(() => {
 		ideaBlocksRef.current = ideaBlocks;
@@ -1052,7 +1128,7 @@ export function PrivateBoard({
 					ideaBlockId: lastMessage.payload.blockId,
 					isSameReason: lastMessage.payload.isSameReason
 				});
-				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
+				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id || cue.blockId === lastMessage.payload.blockId) ? prev : [...prev, lastMessage.payload]));
 				const cueTargetBlock = ideaBlocksRef.current.find(block => block.id === lastMessage.payload.blockId);
 				if (!cueTargetBlock?.expanded) {
 					unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.blockId);
@@ -1079,13 +1155,14 @@ export function PrivateBoard({
 				setPublicChatMessages(prev => appendPublicChatMessage(prev, chatMessage));
 				if (isCollapsed || visibleActiveTab !== "public-chat") {
 					setUnreadPublicChatMessages(prev => appendUnreadPublicChatMessage(prev, chatMessage));
+					setPublicChatNotificationMessageId(current => (isPublicChatNotificationVisible ? current ?? chatMessage.id : chatMessage.id));
 					setIsPublicChatNotificationVisible(true);
 				}
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [cueCondition, isCollapsed, lastMessage, participantId, sessionId, visibleActiveTab, visiblePhase]);
+	}, [cueCondition, isCollapsed, isPublicChatNotificationVisible, lastMessage, participantId, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -1159,10 +1236,21 @@ export function PrivateBoard({
 
 		const timer = window.setTimeout(() => {
 			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
-				const existingBlockIds = new Set(ideaBlocksRef.current.map(block => block.id));
+				const previousBlocksById = new Map(ideaBlocksRef.current.map(block => [block.id, block]));
+				const existingBlockIds = new Set(previousBlocksById.keys());
 				const updatedBlocks = lastAudioMessage.idea_blocks.map(item => {
 					const block = ideaBlockResponseToBlock(item);
 					return existingBlockIds.has(block.id) ? block : { ...block, isUnread: true };
+				});
+				updatedBlocks
+					.filter(block => {
+						const previousBlock = previousBlocksById.get(block.id);
+						return !!previousBlock && !!block.hasCue && !previousBlock.hasCue;
+					})
+					.forEach(queueSimilarityCueFromBlock);
+				console.info("[private-board] similarity cue audio update check", {
+					updatedBlockIds: updatedBlocks.map(block => block.id),
+					cuedBlockIds: updatedBlocks.filter(block => block.hasCue).map(block => block.id)
 				});
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
@@ -1179,7 +1267,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage]);
+	}, [lastAudioMessage, queueSimilarityCueFromBlock]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -1403,8 +1491,7 @@ export function PrivateBoard({
 			}
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
-			setIdeaBlocks(prev => mergeIdeaBlocks(prev, [savedBlock]));
-			jumpToBlock(savedBlock.id);
+			setIdeaBlocks(prev => mergeIdeaBlocks(prev, [{ ...savedBlock, isUnread: true }], { markNewUnread: true }));
 			setIdeaBlockRefreshKey(current => current + 1);
 		} catch (error) {
 			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");
@@ -1438,18 +1525,18 @@ export function PrivateBoard({
 			<button
 				type="button"
 				className={cn(
-					"grid gap-1 rounded-lg border bg-card px-3 py-2 text-left text-card-foreground shadow-lg ring-1 ring-black/5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-					isStackedAboveCue ? "w-full" : "fixed bottom-20 right-6 z-[60] w-[min(22rem,calc(100vw-2rem))]"
+					"grid gap-0.5 rounded-lg border bg-card px-3 py-1.5 text-left text-card-foreground shadow-lg ring-1 ring-black/5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+					isStackedAboveCue ? "w-full" : "fixed bottom-20 right-4 z-[60] w-[min(360px,calc(100vw-2rem))]"
 				)}
 				aria-label="開啟聊天室新留言"
 				onClick={openPublicChatFromNotification}
 			>
-				<div className="flex items-center justify-between gap-3">
-					<span className="text-xs font-semibold text-muted-foreground">聊天室有新留言</span>
-					{hasMultipleUnreadPublicChatMessages && <span className="shrink-0 text-xs font-medium text-destructive">多則留言</span>}
+				<div>
+					<span className="text-xs font-semibold leading-4 text-muted-foreground">聊天室有新留言</span>
 				</div>
-				<div className="truncate text-sm font-medium">{firstUnreadPublicChatSenderName}</div>
-				<div className="line-clamp-2 text-sm leading-5 text-muted-foreground">{firstUnreadPublicChatMessage.message}</div>
+				<div className="truncate text-sm font-medium leading-5">{firstUnreadPublicChatSenderName}</div>
+				<div className="line-clamp-1 text-xs leading-4 text-muted-foreground">{firstUnreadPublicChatMessage.message}</div>
+				{hasMultipleUnreadPublicChatMessages && <div className="justify-self-end text-xs font-medium leading-4 text-muted-foreground">多則留言</div>}
 			</button>
 		) : null;
 	const standalonePublicChatNotification = hasVisibleSimilarityCues ? null : renderPublicChatNotification(false);
