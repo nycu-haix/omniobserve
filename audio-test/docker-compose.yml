@@ -46,6 +46,7 @@ services:
       HF_HOME: /root/.cache/huggingface
       ASR_DEVICE: ${ASR_DEVICE:-auto}
       FUNASR_DISABLE_PUNC: ${FUNASR_DISABLE_PUNC:-0}
+      PIPELINE_WS_BASE_URL: ${PIPELINE_WS_BASE_URL:-wss://api.omni.elvismao.com}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
