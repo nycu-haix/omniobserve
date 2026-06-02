@@ -679,6 +679,7 @@ export function PrivateBoard({
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
+	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
 	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
 	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -705,6 +706,12 @@ export function PrivateBoard({
 	const isSavingManualIdea = manualIdeaPendingCount > 0;
 
 	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
+
+	useEffect(() => {
+		if (isIdeaBlocksTabActive) {
+			setUnreadIdeaBlockCount(0);
+		}
+	}, [isIdeaBlocksTabActive]);
 
 	const focusActiveComposer = useCallback(() => {
 		if (isIdeaBlocksTabActive) {
@@ -936,6 +943,9 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "new_idea_block") {
+				if (visibleActiveTab !== "ideablock") {
+					setUnreadIdeaBlockCount(current => current + 1);
+				}
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
@@ -997,7 +1007,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [cueCondition, lastMessage, participantId, sessionId, visiblePhase]);
+	}, [cueCondition, lastMessage, participantId, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -1044,7 +1054,12 @@ export function PrivateBoard({
 				const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
+					const existingActiveBlockIds = new Set(prev.filter(block => !block.isDeleted).map(block => block.id));
 					mergedBlocksSnapshot = mergeIdeaBlocks(prev, updatedBlocks);
+					const newActiveBlockCount = mergedBlocksSnapshot.filter(block => !block.isDeleted && !existingActiveBlockIds.has(block.id)).length;
+					if (newActiveBlockCount > 0 && visibleActiveTab !== "ideablock") {
+						setUnreadIdeaBlockCount(current => current + newActiveBlockCount);
+					}
 					ideaBlocksRef.current = mergedBlocksSnapshot;
 					return mergedBlocksSnapshot;
 				});
@@ -1057,7 +1072,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage]);
+	}, [lastAudioMessage, visibleActiveTab]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -1394,8 +1409,7 @@ export function PrivateBoard({
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
-	const activeIdeaBlockCount = ideaBlocks.filter(block => !block.isDeleted).length;
-	const ideaBlockCountLabel = activeIdeaBlockCount > 99 ? "99+" : String(activeIdeaBlockCount);
+	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 
 	return (
 		<>
@@ -1428,15 +1442,18 @@ export function PrivateBoard({
 										visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 									)}
 									variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
-									onClick={() => setActiveTab("ideablock")}
+									onClick={() => {
+										setUnreadIdeaBlockCount(0);
+										setActiveTab("ideablock");
+									}}
 								>
 									Idea Blocks
-									{activeIdeaBlockCount > 0 && (
+									{unreadIdeaBlockCount > 0 && (
 										<span
 											className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
-											aria-label={`${activeIdeaBlockCount} idea blocks`}
+											aria-label={`${unreadIdeaBlockCount} unread idea blocks`}
 										>
-											{ideaBlockCountLabel}
+											{unreadIdeaBlockCountLabel}
 										</span>
 									)}
 								</Button>
