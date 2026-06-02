@@ -1394,6 +1394,8 @@ export function PrivateBoard({
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
+	const activeIdeaBlockCount = ideaBlocks.filter(block => !block.isDeleted).length;
+	const ideaBlockCountLabel = activeIdeaBlockCount > 99 ? "99+" : String(activeIdeaBlockCount);
 
 	return (
 		<>
@@ -1422,13 +1424,21 @@ export function PrivateBoard({
 								<Button
 									aria-pressed={visibleActiveTab === "ideablock"}
 									className={cn(
-										"transition-all active:translate-y-px active:scale-[0.98]",
+										"relative transition-all active:translate-y-px active:scale-[0.98]",
 										visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 									)}
 									variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
 									onClick={() => setActiveTab("ideablock")}
 								>
 									Idea Blocks
+									{activeIdeaBlockCount > 0 && (
+										<span
+											className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
+											aria-label={`${activeIdeaBlockCount} idea blocks`}
+										>
+											{ideaBlockCountLabel}
+										</span>
+									)}
 								</Button>
 							)}
 							<Button
