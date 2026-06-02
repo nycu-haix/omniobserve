@@ -365,6 +365,29 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 
 	return (
 		<section className="grid h-full min-h-0 content-start gap-4 overflow-y-auto pr-1" aria-label="Private Phase 1 task items">
+			<div className="grid gap-2" aria-label="Private Phase 1 priority list">
+				<div className="flex items-center justify-between gap-3">
+					<h3 className="text-sm font-semibold">優先改善 Task Items</h3>
+					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{items.length}</span>
+				</div>
+				{isLoading && <div className="grid min-h-24 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">載入中</div>}
+				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無 task items</div>}
+				{!isLoading &&
+					sortPrivatePhaseTaskItems(items).map((item, index, sortedItems) => (
+						<PrivatePhaseTaskItemRow
+							key={item.id}
+							item={item}
+							index={index}
+							isFirst={index === 0}
+							isLast={index === sortedItems.length - 1}
+							isMoving={movingItemId === item.id}
+							onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
+							onEdit={editTaskItem}
+							onDelete={itemId => void deleteTaskItem(itemId)}
+						/>
+					))}
+			</div>
+
 			<div className="grid gap-3 rounded-md border bg-background p-3" aria-label="建立 Private Phase 1 task item">
 				<DndContext sensors={keywordSensors} onDragEnd={handleKeywordDragEnd}>
 					<div className="grid gap-3 sm:grid-cols-2">
@@ -439,29 +462,6 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					</div>
 				</DndContext>
 				{error && <p className="text-xs text-destructive">{error}</p>}
-			</div>
-
-			<div className="grid gap-2" aria-label="Private Phase 1 priority list">
-				<div className="flex items-center justify-between gap-3">
-					<h3 className="text-sm font-semibold">優先改善 Task Items</h3>
-					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{items.length}</span>
-				</div>
-				{isLoading && <div className="grid min-h-24 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">載入中</div>}
-				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無 task items</div>}
-				{!isLoading &&
-					sortPrivatePhaseTaskItems(items).map((item, index, sortedItems) => (
-						<PrivatePhaseTaskItemRow
-							key={item.id}
-							item={item}
-							index={index}
-							isFirst={index === 0}
-							isLast={index === sortedItems.length - 1}
-							isMoving={movingItemId === item.id}
-							onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
-							onEdit={editTaskItem}
-							onDelete={itemId => void deleteTaskItem(itemId)}
-						/>
-					))}
 			</div>
 		</section>
 	);
