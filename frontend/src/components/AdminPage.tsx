@@ -2,6 +2,16 @@ import { AlertCircle, Check, ClipboardList, Clock, Copy, Download, FileText, Lig
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
+import {
+	DEFAULT_SESSION_PHASE,
+	DEFAULT_SESSION_PHASE_OPTIONS,
+	getSessionPhaseLabel,
+	isGroupPhase,
+	normalizeSessionPhase,
+	normalizeSessionPhaseOptions,
+	type SessionPhase,
+	type SessionPhaseOption
+} from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
 import type { ParticipantPresence } from "../services/presence";
@@ -121,7 +131,6 @@ interface PublicChatMessagePayload {
 	isDeleted?: boolean;
 }
 
-type SessionPhase = "private" | "group";
 type CueCondition = "experimental" | "control";
 type AdminTab = "ranking" | "transcript" | "chat";
 
@@ -150,10 +159,6 @@ function clampAdminLeftSidebarWidth(width: number, rightSidebarWidth: number) {
 function clampAdminRightSidebarWidth(width: number, leftSidebarWidth: number) {
 	const maxWidth = Math.max(MIN_ADMIN_RIGHT_SIDEBAR_WIDTH, getAdminAvailableLayoutWidth() - leftSidebarWidth - MIN_ADMIN_CENTER_COLUMN_WIDTH);
 	return Math.min(Math.max(width, MIN_ADMIN_RIGHT_SIDEBAR_WIDTH), maxWidth);
-}
-
-function normalizeSessionPhase(value: unknown): SessionPhase | null {
-	return value === "private" || value === "group" ? value : null;
 }
 
 function normalizeCueCondition(value: unknown): CueCondition | null {
@@ -652,7 +657,8 @@ export function AdminPage() {
 	const [isCreatingManualCue, setIsCreatingManualCue] = useState(false);
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
-	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
+	const [taskPhases, setTaskPhases] = useState<SessionPhaseOption[]>(DEFAULT_SESSION_PHASE_OPTIONS);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [countdownDurationMinutes, setCountdownDurationMinutes] = useState("15");
@@ -868,6 +874,9 @@ export function AdminPage() {
 			try {
 				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				setTaskItems(taskConfig.items);
+				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
+				setTaskPhases(nextTaskPhases);
+				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
 					return;
@@ -1070,7 +1079,7 @@ export function AdminPage() {
 	};
 
 	const isExperimentalCondition = cueCondition === "experimental";
-	const isSimilarityCueActive = isExperimentalCondition && currentPhase === "group";
+	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -1266,18 +1275,17 @@ export function AdminPage() {
 						<div className="grid gap-3">
 							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
 								<div className="min-w-0">
-									<div className="font-medium">{currentPhase === "group" ? "Group Phase" : "Private Phase"}</div>
+									<div className="font-medium">{getSessionPhaseLabel(currentPhase, taskPhases)}</div>
 									<div className="text-xs text-muted-foreground">Current phase</div>
 								</div>
-								<Badge variant={currentPhase === "group" ? "secondary" : "outline"}>{currentPhase}</Badge>
+								<Badge variant={isGroupPhase(currentPhase) ? "secondary" : "outline"}>{currentPhase}</Badge>
 							</div>
-							<div className="grid grid-cols-2 gap-2">
-								<Button type="button" variant={currentPhase === "private" ? "default" : "outline"} onClick={() => switchPhase("private")}>
-									Private Phase
-								</Button>
-								<Button type="button" variant={currentPhase === "group" ? "default" : "outline"} onClick={() => switchPhase("group")}>
-									Group Phase
-								</Button>
+							<div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+								{taskPhases.map(phase => (
+									<Button key={phase.id} type="button" variant={currentPhase === phase.id ? "default" : "outline"} onClick={() => switchPhase(phase.id)}>
+										{phase.label}
+									</Button>
+								))}
 							</div>
 						</div>
 					</section>

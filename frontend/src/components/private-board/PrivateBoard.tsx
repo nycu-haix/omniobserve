@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -34,12 +35,11 @@ type BoardMessage =
 	| { type: "similarity_cue"; payload: SimilarityCueData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
-	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
-	| { type: "countdown_changed"; current_phase?: SessionPhase; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
-	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number; cue_condition?: CueCondition }
+	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
+	| { type: "countdown_changed"; current_phase?: unknown; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
+	| { type: "board_state"; current_phase?: unknown; timer_end_time_ms?: number; cue_condition?: CueCondition }
 	| { type: "cue_condition_changed"; cue_condition?: CueCondition; condition?: CueCondition };
 
-type SessionPhase = "private" | "group";
 type CueCondition = "experimental" | "control";
 
 interface TranscriptResponse {
@@ -654,7 +654,7 @@ export function PrivateBoard({
 	onCollapse
 }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
-	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState<number>(0);
 	const visiblePhase = controlledPhase ?? currentPhase;
@@ -867,7 +867,8 @@ export function PrivateBoard({
 
 		if (lastMessage.type === "phase_changed") {
 			const timer = window.setTimeout(() => {
-				setCurrentPhase(lastMessage.phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -875,7 +876,8 @@ export function PrivateBoard({
 
 		if (lastMessage.type === "countdown_changed") {
 			const timer = window.setTimeout(() => {
-				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.timer_end_time_ms ?? lastMessage.end_time_ms ?? 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -883,7 +885,8 @@ export function PrivateBoard({
 
 		if (lastMessage.type === "board_state") {
 			const timer = window.setTimeout(() => {
-				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				if (typeof lastMessage.timer_end_time_ms === "number") setTimerEndTime(lastMessage.timer_end_time_ms);
 				if (lastMessage.cue_condition) setCueCondition(lastMessage.cue_condition);
 			}, 0);
@@ -1442,18 +1445,18 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{canShowIdeaBlocks && visiblePhase === "group" && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
+			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
 		</>
 	);
 }
 
 function PhaseBadge({ phase }: { phase: SessionPhase }) {
-	const label = phase === "group" ? "Group Phase" : "Private Phase";
+	const label = getSessionPhaseLabel(phase);
 	return (
 		<div
 			className={cn(
 				"rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
-				phase === "group" ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
+				isGroupPhase(phase) ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
 			)}
 		>
 			{label}

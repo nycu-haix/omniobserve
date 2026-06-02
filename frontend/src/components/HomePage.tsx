@@ -12,14 +12,14 @@ const fallbackTaskTemplates: TaskTemplate[] = [
 	{
 		task_id: "lost-at-sea",
 		title: "Lost at Sea",
-		session_prefix: "lost-at-sea-",
+		session_prefix: "lost-at-sea",
 		description: "海上求生物品排序任務。",
 		is_default: true
 	},
 	{
 		task_id: "enhance-the-poster",
 		title: "Enhance the Poster",
-		session_prefix: "enhance-the-poster-",
+		session_prefix: "enhance-the-poster",
 		description: "海報改善面向排序任務。",
 		is_default: false
 	}

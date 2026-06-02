@@ -276,12 +276,30 @@ SIMILARITY_TASK_CONTEXT = (
     + "。"
 )
 
+PRIVATE_RANKING_LAYOUT = {
+    "type": "leaf",
+    "content": "private-ranking",
+}
+PUBLIC_RANKING_COMPARISON_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 50,
+    "first": {"type": "leaf", "content": "public-ranking"},
+    "second": {"type": "leaf", "content": "private-ranking"},
+}
+
+TASK_PHASES = [
+    {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
+    {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
+]
+
 TASK_CONFIG = {
     "task_id": TASK_ID,
     "title": TASK_TITLE,
     "template_description": TEMPLATE_DESCRIPTION,
     "topic_description": TOPIC_DESCRIPTION,
     "task_detail": TASK_TOPIC_DETAIL,
+    "phases": TASK_PHASES,
     "items": TASK_ITEMS,
 }
 
@@ -293,6 +311,7 @@ def serialize_task_config() -> dict[str, Any]:
         "template_description": TEMPLATE_DESCRIPTION,
         "topic_description": TOPIC_DESCRIPTION,
         "task_detail": TASK_TOPIC_DETAIL,
+        "phases": TASK_PHASES,
         "items": [
             {
                 "id": item["id"],

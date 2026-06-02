@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -125,6 +125,28 @@ class TaskConfigItemResponse(BaseModel):
     image_mark: str
 
 
+class Phase1BuilderOptionResponse(BaseModel):
+    id: str
+    label_zh: str
+    label_en: str | None = None
+    description_zh: str | None = None
+    template_zh: str | None = None
+
+
+class Phase1BuilderResponse(BaseModel):
+    enabled: bool = True
+    title: str | None = None
+    detail_placeholder: str | None = None
+    components: list[Phase1BuilderOptionResponse]
+    actions: list[Phase1BuilderOptionResponse]
+
+
+class TaskPhaseResponse(BaseModel):
+    id: str
+    label: str
+    default_layout: dict[str, Any] | None = None
+
+
 class TaskConfigResponse(BaseModel):
     task_id: str
     title: str
@@ -133,6 +155,8 @@ class TaskConfigResponse(BaseModel):
     task_detail: str
     reference_image_src: str | None = None
     reference_image_alt: str | None = None
+    phases: list[TaskPhaseResponse] = Field(default_factory=list)
+    phase1_builder: Phase1BuilderResponse | None = None
     items: list[TaskConfigItemResponse]
 
 
@@ -140,5 +164,6 @@ class TaskTemplateResponse(BaseModel):
     task_id: str
     title: str
     session_prefix: str
+    phases: list[TaskPhaseResponse] = Field(default_factory=list)
     description: str
     is_default: bool

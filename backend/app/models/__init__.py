@@ -2,6 +2,7 @@ from .base import Base
 from .chat_message import ChatMessage
 from .idea_block import IdeaBlock
 from .idea_block_to_transcript import IdeaBlockToTranscript
+from .private_phase_task_item import PrivatePhaseTaskItem
 from .ranking_move import RankingMove
 from .similarity import Similarity
 from .task_item import TaskItem
@@ -13,6 +14,7 @@ __all__ = [
     "ChatMessage",
     "IdeaBlock",
     "IdeaBlockToTranscript",
+    "PrivatePhaseTaskItem",
     "RankingMove",
     "Similarity",
     "TaskItem",

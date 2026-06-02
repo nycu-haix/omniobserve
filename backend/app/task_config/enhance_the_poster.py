@@ -15,15 +15,15 @@ class TaskItemConfig(TypedDict):
 
 TASK_ID = "enhance-the-poster"
 TASK_TITLE = "Enhance the Poster"
-TEMPLATE_DESCRIPTION = "針對淨灘活動招募海報，排序最需要優先改善的 15 個面向。"
+TEMPLATE_DESCRIPTION = "針對淨灘活動招募海報，建立並排序優先改善的 task items。"
 REFERENCE_IMAGE_SRC = "/task-assets/beach-cleanup-poster.png"
 REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
 
 TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
 
-你們的任務是：**依照下列改善面向對「提升這張淨灘活動海報的招募效果」的重要性進行排序。**
+你們的任務是：**先各自建立最值得優先改善的 task items，再於小組討論時整合成共同優先順序。**
 
-請將最應該優先改善的面向標為 **1**，第二重要的標為 **2**，依此類推，直到最不需要優先處理的面向標為 **15**。排序時請考慮：路過的人能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易被注意並掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。"""
+Private Phase 1 請從預設的海報元件與改善動作中組合 task item，並依照優先改善順序排列。排序時請考慮：路過的人能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易被注意並掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。"""
 
 TASK_ITEMS: list[TaskItemConfig] = [
     {
@@ -193,6 +193,170 @@ TASK_ITEMS: list[TaskItemConfig] = [
     },
 ]
 
+PHASE1_POSTER_COMPONENTS = [
+    {
+        "id": "headline",
+        "label_zh": "主標語",
+        "label_en": "headline",
+        "description_zh": "「一起來淨灘吧!」與活動主題文字。",
+    },
+    {
+        "id": "date_time",
+        "label_zh": "日期與時間",
+        "label_en": "date and time",
+        "description_zh": "「3/6 15:00」及集合時間相關資訊。",
+    },
+    {
+        "id": "location",
+        "label_zh": "地點與集合資訊",
+        "label_en": "location and meeting point",
+        "description_zh": "地址、集合點、交通或地標資訊。",
+    },
+    {
+        "id": "signup_qr",
+        "label_zh": "報名 QR Code",
+        "label_en": "registration QR code",
+        "description_zh": "底部 QR Code、掃描提示與周圍留白。",
+    },
+    {
+        "id": "supplies_note",
+        "label_zh": "用品準備說明",
+        "label_en": "supplies note",
+        "description_zh": "「所有用具皆已備妥」等準備資訊。",
+    },
+    {
+        "id": "call_to_action",
+        "label_zh": "報名行動指引",
+        "label_en": "call to action",
+        "description_zh": "立即報名、掃描 QR Code、截止時間等行動提示。",
+    },
+    {
+        "id": "main_illustration",
+        "label_zh": "主視覺插圖",
+        "label_en": "main illustration",
+        "description_zh": "上方淨灘人物插圖與海灘情境。",
+    },
+    {
+        "id": "organizer_contact",
+        "label_zh": "主辦與聯絡資訊",
+        "label_en": "organizer and contact information",
+        "description_zh": "主辦單位、聯絡方式或社群帳號。",
+    },
+    {
+        "id": "safety_weather",
+        "label_zh": "注意事項與安全提醒",
+        "label_en": "safety and weather reminders",
+        "description_zh": "天候、穿著、防曬、飲水或安全注意事項。",
+    },
+    {
+        "id": "overall_layout",
+        "label_zh": "整體版面與視覺層次",
+        "label_en": "overall layout and hierarchy",
+        "description_zh": "資訊區塊排序、視線動線、留白與重點層次。",
+    },
+    {
+        "id": "typography",
+        "label_zh": "字體與可讀性",
+        "label_en": "typography and readability",
+        "description_zh": "字級、行距、字重、對齊與閱讀清楚度。",
+    },
+    {
+        "id": "color_contrast",
+        "label_zh": "色彩與對比",
+        "label_en": "color and contrast",
+        "description_zh": "文字、插圖、背景之間的色彩與對比。",
+    },
+]
+
+PHASE1_ACTION_ITEMS = [
+    {
+        "id": "increase_size",
+        "label_zh": "放大",
+        "label_en": "increase size",
+        "template_zh": "放大「{component}」",
+    },
+    {
+        "id": "decrease_size",
+        "label_zh": "縮小",
+        "label_en": "decrease size",
+        "template_zh": "縮小「{component}」",
+    },
+    {
+        "id": "move_higher",
+        "label_zh": "往上移",
+        "label_en": "move higher",
+        "template_zh": "將「{component}」往上移",
+    },
+    {
+        "id": "move_lower",
+        "label_zh": "往下移",
+        "label_en": "move lower",
+        "template_zh": "將「{component}」往下移",
+    },
+    {
+        "id": "place_near_related_info",
+        "label_zh": "移到相關資訊旁",
+        "label_en": "place near related information",
+        "template_zh": "把「{component}」移到相關資訊旁",
+    },
+    {
+        "id": "increase_contrast",
+        "label_zh": "強化對比",
+        "label_en": "increase contrast",
+        "template_zh": "強化「{component}」的對比",
+    },
+    {
+        "id": "change_color",
+        "label_zh": "調整顏色",
+        "label_en": "change color",
+        "template_zh": "調整「{component}」的顏色",
+    },
+    {
+        "id": "rewrite_shorter",
+        "label_zh": "改成更短更清楚",
+        "label_en": "rewrite shorter and clearer",
+        "template_zh": "將「{component}」改成更短更清楚",
+    },
+    {
+        "id": "add_label",
+        "label_zh": "加上標籤",
+        "label_en": "add label",
+        "template_zh": "為「{component}」加上標籤",
+    },
+    {
+        "id": "add_detail",
+        "label_zh": "補充細節",
+        "label_en": "add details",
+        "template_zh": "為「{component}」補充細節",
+    },
+    {
+        "id": "align_layout",
+        "label_zh": "重新對齊",
+        "label_en": "realign",
+        "template_zh": "重新對齊「{component}」",
+    },
+    {
+        "id": "adjust_spacing",
+        "label_zh": "調整留白",
+        "label_en": "adjust spacing",
+        "template_zh": "調整「{component}」周圍留白",
+    },
+    {
+        "id": "simplify",
+        "label_zh": "刪減或簡化",
+        "label_en": "remove or simplify",
+        "template_zh": "刪減或簡化「{component}」",
+    },
+]
+
+PHASE1_BUILDER_CONFIG = {
+    "enabled": True,
+    "title": "Private Phase 1 Task Items",
+    "detail_placeholder": "補充限制或目標，例如：讓路過的人 3 秒內看懂、加上集合地標、保留 QR Code 留白",
+    "components": PHASE1_POSTER_COMPONENTS,
+    "actions": PHASE1_ACTION_ITEMS,
+}
+
 RANKING_ITEMS = [item["id"] for item in TASK_ITEMS]
 RANKING_ITEM_DISPLAY_NAMES = {
     item["id"]: (
@@ -206,21 +370,21 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 
 ## 任務流程
 
-### 第一階段：個人排序
+### 第一階段：個人建立 task items
 
 請先獨立檢視海報草稿，不要和其他人討論。
 
-根據你自己的判斷，將 15 個改善面向依照優先順序排序。
+根據你自己的判斷，從預設的海報元件與改善動作中組合出最值得優先改善的 task items，並依照優先順序排列。
 
 請注意：
 
-你的目標不是重新設計整張海報，而是判斷**最值得優先投入討論與修改的方向**，讓這張淨灘活動海報更能吸引人報名並降低參與不確定性。
+你的目標不是重新設計整張海報，而是建立**具體、可討論、可排序的改善項目**，讓這張淨灘活動海報更能吸引人報名並降低參與不確定性。
 
 ### 第二階段：小組共識排序
 
 完成個人排序後，請和小組成員討論。
 
-你們需要共同產生一份小組排序。小組排序不一定要完全符合任何一位成員的個人排序，但每個成員的意見都應該被聽見。你們需要透過討論、說服、妥協，形成一份大家都能接受的共同排序。
+你們需要共同產生一份小組優先改善清單。小組清單不一定要完全符合任何一位成員的個人清單，但每個成員的意見都應該被聽見。你們需要透過討論、說服、妥協，形成一份大家都能接受的共同排序。
 
 ---
 
@@ -231,8 +395,8 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 TASK_TOPIC_DETAIL = (
     "你們正在檢視一張淨灘活動招募海報。海報目前包含淨灘插圖、主標語「一起來淨灘吧!」、"
     "日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、用品說明與報名 QR Code。"
-    "請針對 15 個改善面向排序：第 1 名代表最應該優先改善，第 15 名代表相對最不需要優先處理。"
-    "排序時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、"
+    "Private Phase 1 請從預設的海報元件與改善動作中建立具體 task items，並將最應該優先改善的項目排在前面。"
+    "建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、"
     "視覺層次是否有效，以及資訊是否足以讓人安心參與。"
 )
 
@@ -243,15 +407,49 @@ SIMILARITY_TASK_CONTEXT = (
     + "。"
 )
 
+PHASE1_TASK_ITEM_BUILDER_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 58,
+    "first": {"type": "leaf", "content": "phase-task-items"},
+    "second": {"type": "leaf", "content": "task-instructions"},
+}
+PRIVATE_RANKING_LAYOUT = {
+    "type": "leaf",
+    "content": "private-ranking",
+}
+PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 58,
+    "first": {"type": "leaf", "content": "private-ranking"},
+    "second": {"type": "leaf", "content": "task-instructions"},
+}
+PUBLIC_RANKING_COMPARISON_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 50,
+    "first": {"type": "leaf", "content": "public-ranking"},
+    "second": {"type": "leaf", "content": "private-ranking"},
+}
+
+TASK_PHASES = [
+    {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PHASE1_TASK_ITEM_BUILDER_LAYOUT},
+    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
+    {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
+]
+
 TASK_CONFIG = {
     "task_id": TASK_ID,
     "title": TASK_TITLE,
     "template_description": TEMPLATE_DESCRIPTION,
     "topic_description": TOPIC_DESCRIPTION,
     "task_detail": TASK_TOPIC_DETAIL,
+    "phases": TASK_PHASES,
     "items": TASK_ITEMS,
     "reference_image_src": REFERENCE_IMAGE_SRC,
     "reference_image_alt": REFERENCE_IMAGE_ALT,
+    "phase1_builder": PHASE1_BUILDER_CONFIG,
 }
 
 
@@ -264,6 +462,8 @@ def serialize_task_config() -> dict[str, Any]:
         "task_detail": TASK_TOPIC_DETAIL,
         "reference_image_src": REFERENCE_IMAGE_SRC,
         "reference_image_alt": REFERENCE_IMAGE_ALT,
+        "phases": TASK_PHASES,
+        "phase1_builder": PHASE1_BUILDER_CONFIG,
         "items": [
             {
                 "id": item["id"],
