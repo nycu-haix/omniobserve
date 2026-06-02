@@ -1,6 +1,6 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { formatLocalDate, getDefaultRoomName } from "../lib/defaultRoomName";
 import { getDefaultParticipantName, getNextAvailableParticipantId, isValidParticipantId, normalizeParticipantId } from "../lib/participantDefaults";
 import { cn } from "../lib/utils";
 import { fetchTaskTemplates, type TaskTemplate } from "../services/api";
@@ -8,6 +8,7 @@ import { fetchSessionParticipants } from "../services/presence";
 import { Button } from "./ui/Button";
 
 const defaultSessionName = getDefaultRoomName();
+const defaultSessionSuffix = formatLocalDate(new Date());
 const fallbackTaskTemplates: TaskTemplate[] = [
 	{
 		task_id: "lost-at-sea",
@@ -39,19 +40,21 @@ function getSessionSuffix(sessionName: string, taskTemplates: TaskTemplate[]) {
 	const normalizedSessionName = trimmedSessionName.toLowerCase();
 	const matchedTaskId = getTemplateTaskIds(taskTemplates).find(taskId => normalizedSessionName === taskId || normalizedSessionName.startsWith(`${taskId}-`));
 	if (!matchedTaskId) {
-		return trimmedSessionName;
+		return "";
 	}
 	return trimmedSessionName.slice(matchedTaskId.length).replace(/^-+/, "");
 }
 
 function buildSessionNameForTemplate(taskId: string, currentSessionName: string, taskTemplates: TaskTemplate[]) {
-	const suffix = getSessionSuffix(currentSessionName, taskTemplates) || defaultSessionName.replace(/^lost-at-sea-?/, "") || "session";
+	const suffix = getSessionSuffix(currentSessionName, taskTemplates) || defaultSessionSuffix;
 	return `${taskId}-${suffix}`;
 }
 
+const defaultGeneratedSessionName = buildSessionNameForTemplate(fallbackTaskTemplates[0].task_id, defaultSessionName, fallbackTaskTemplates);
+
 function buildMeetingUrl(sessionName: string, participantId: string, displayName: string) {
 	const params = new URLSearchParams();
-	params.set("room_name", sessionName.trim() || defaultSessionName);
+	params.set("room_name", sessionName.trim() || defaultGeneratedSessionName);
 	params.set("id", normalizeParticipantId(participantId));
 	params.set("name", displayName.trim() || "User");
 
@@ -59,7 +62,7 @@ function buildMeetingUrl(sessionName: string, participantId: string, displayName
 }
 
 export function HomePage() {
-	const [sessionName, setSessionName] = useState(defaultSessionName);
+	const [sessionName, setSessionName] = useState(defaultGeneratedSessionName);
 	const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>(fallbackTaskTemplates);
 	const [participantId, setParticipantId] = useState("1");
 	const [displayName, setDisplayName] = useState(getDefaultParticipantName("1"));
@@ -225,7 +228,7 @@ export function HomePage() {
 									setParticipantIdError("");
 									setSessionName(event.target.value);
 								}}
-								placeholder={defaultSessionName}
+								placeholder={defaultGeneratedSessionName}
 							/>
 						</label>
 
