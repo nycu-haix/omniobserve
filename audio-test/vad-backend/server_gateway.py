@@ -63,7 +63,7 @@ SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
 
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
-DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").rstrip("/")
+DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").strip().rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -77,7 +77,15 @@ def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
 
     parsed = urlparse(candidate)
     hostname = parsed.hostname or ""
-    if parsed.scheme not in {"ws", "wss"} or not (
+    has_clean_base_url = not (
+        parsed.username
+        or parsed.password
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    )
+    if parsed.scheme not in {"ws", "wss"} or not has_clean_base_url or not (
         hostname == "api.omni.elvismao.com" or hostname.endswith(".api.omni.elvismao.com")
     ):
         print(
@@ -341,7 +349,7 @@ async def relay_transcript_to_pipeline(
     pipeline_base_url = normalize_pipeline_ws_base_url(pipeline_ws_base_url)
 
     if not pipeline_base_url:
-        print("Pipeline relay skipped: PIPELINE_WS_BASE_URL is empty")
+        print("Pipeline relay skipped: pipeline_base_url is empty")
         return []
 
     if not text.strip() or not room_name:
@@ -988,7 +996,9 @@ async def audio_ws(
                     next_encoding = msg.get("encoding", msg.get("format", encoding))
                     next_channels = int(msg.get("channels", channels))
                     next_pipeline_ws_base_url = normalize_pipeline_ws_base_url(
-                        msg.get("pipelineWsBaseUrl", msg.get("pipeline_ws_base_url", connection_pipeline_ws_base_url))
+                        msg.get("pipelineWsBaseUrl")
+                        or msg.get("pipeline_ws_base_url")
+                        or connection_pipeline_ws_base_url
                     )
 
                     current_stream_key = (
