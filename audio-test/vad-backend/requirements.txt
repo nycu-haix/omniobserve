@@ -1,5 +1,4 @@
 fastapi
-funasr
 numpy
 opencc-python-reimplemented
 torch

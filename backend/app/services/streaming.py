@@ -733,6 +733,8 @@ async def handle_transcript_segments_websocket(
                     {
                         "type": "transcript_update",
                         "transcript_segment_id": saved_segment.segment_id,
+                        "participant_id": participant_id,
+                        "scope": visibility.value,
                         "text": saved_segment.text,
                         "is_final": True,
                         "reason": reason,

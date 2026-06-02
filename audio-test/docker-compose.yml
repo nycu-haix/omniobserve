@@ -20,6 +20,8 @@ services:
       context: ./vad-backend
     restart: unless-stopped
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - whisperlivekit
     expose:
       - "8000"
 
@@ -34,6 +36,15 @@ services:
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.priority=10000"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.service=${VAD_SERVICE_NAME:-vad-audio}"
 
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.rule=Host(`${VAD_API_DOMAIN:-api.omni.elvismao.com}`) && PathPrefix(`${VAD_STRIP_PREFIX:-/asr}${VAD_PATH_PREFIX:-/sessions}`)"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.priority=10001"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.middlewares=${VAD_ROUTER_NAME:-vad-audio}-strip"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.service=${VAD_SERVICE_NAME:-vad-audio}"
+      - "traefik.http.middlewares.${VAD_ROUTER_NAME:-vad-audio}-strip.stripprefix.prefixes=${VAD_STRIP_PREFIX:-/asr}"
+
       - "traefik.http.services.${VAD_SERVICE_NAME:-vad-audio}.loadbalancer.server.port=8000"
 
     volumes:
@@ -44,9 +55,53 @@ services:
       TORCH_HOME: /root/.cache/torch
       MODELSCOPE_CACHE: /root/.cache/modelscope
       HF_HOME: /root/.cache/huggingface
-      ASR_DEVICE: ${ASR_DEVICE:-auto}
-      FUNASR_DISABLE_PUNC: ${FUNASR_DISABLE_PUNC:-0}
+      ASR_ENGINE: ${ASR_ENGINE:-whisperlivekit}
+      WHISPERLIVEKIT_WS_URL: ${WHISPERLIVEKIT_WS_URL:-ws://whisperlivekit:8000/asr}
+      WHISPERLIVEKIT_MODE: ${WHISPERLIVEKIT_MODE:-full}
+      WHISPERLIVEKIT_FINAL_SILENCE_SEC: ${WHISPERLIVEKIT_FINAL_SILENCE_SEC:-2.0}
       PIPELINE_WS_BASE_URL: ${PIPELINE_WS_BASE_URL:-wss://api.omni.elvismao.com}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 600s
+    networks:
+      - dokploy-network
+
+  whisperlivekit:
+    build:
+      context: ./whisperlivekit
+    restart: unless-stopped
+    # Keep WhisperLiveKit VAD enabled; silent audio is filtered before encoder work.
+    # SimulStreaming uses AlignAtt and a growing audio buffer instead of fixed windows.
+    # PyTorch cu121 plus NVIDIA runtime lets the whisper backend use GPU/fp16 on CUDA 12.2-era drivers.
+    command:
+      - "--backend"
+      - "whisper"
+      - "--model-path"
+      - "${WHISPERLIVEKIT_MODEL_PATH:-MediaTek-Research/Breeze-ASR-25}"
+      - "--language"
+      - "zh"
+      - "--backend-policy"
+      - "simulstreaming"
+      - "--frame-threshold"
+      - "${WHISPERLIVEKIT_FRAME_THRESHOLD:-15}"
+      - "--pcm-input"
+    expose:
+      - "8000"
+    volumes:
+      - ${BREEZE_ASR_25_MODEL_PATH:-../models/Breeze-ASR-25}:/models/Breeze-ASR-25:ro
+      - model-cache:/root/.cache
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HF_HOME: /root/.cache/huggingface
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
@@ -55,7 +110,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
         ]
       interval: 10s
       timeout: 5s

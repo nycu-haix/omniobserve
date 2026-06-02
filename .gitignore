@@ -1,6 +1,8 @@
 *.pyc
 __pycache__/
 .venv/
+venv/
+venv_*/
 node_modules/
 .pnpm-store/
 /audio-test/vad-backend/segments

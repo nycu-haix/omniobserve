@@ -107,6 +107,7 @@ type AudioTranscriptMessage =
 			local_mic_mode?: string | null;
 			reason?: string | null;
 			persisted?: boolean | null;
+			replaceDraft?: boolean | null;
 	  }
 	| {
 			type: "transcript";
@@ -121,6 +122,7 @@ type AudioTranscriptMessage =
 			local_mic_mode?: string | null;
 			reason?: string | null;
 			persisted?: boolean | null;
+			replaceDraft?: boolean | null;
 	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
@@ -414,7 +416,7 @@ function audioTranscriptMessageToLine(message: AudioTranscriptMessage): Transcri
 function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): boolean {
 	if (message.type === "transcript") {
 		return (
-			line.source === "private" &&
+			(line.source === "private" || line.source === "public") &&
 			(message.persisted === false || message.persisted == null) &&
 			(message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON || FINAL_TRANSCRIPT_REASONS.has(String(message.reason ?? "")))
 		);
@@ -510,8 +512,20 @@ function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string,
 	return appendTranscriptLine(withoutDraft, finalLine);
 }
 
+function transcriptDraftTargetKey(line: TranscriptLineType, participantId: string): string {
+	return [line.source ?? "unknown", line.userId ?? participantId].join("|");
+}
+
 function canMergeAdjacentPublicTranscriptLines(left: TranscriptLineType, right: TranscriptLineType): boolean {
-	return left.source === "public" && right.source === "public" && left.userId != null && right.userId != null && String(left.userId) === String(right.userId);
+	return (
+		left.source === "public" &&
+		right.source === "public" &&
+		!left.isDraft &&
+		!right.isDraft &&
+		left.userId != null &&
+		right.userId != null &&
+		String(left.userId) === String(right.userId)
+	);
 }
 
 function mergeAdjacentPublicTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
@@ -803,7 +817,7 @@ export function PrivateBoard({
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const activeMaxSpeechTranscriptDraftRef = useRef<{ id: string; text: string; isFinal?: boolean } | null>(null);
+	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; isFinal?: boolean }>>(new Map());
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1242,45 +1256,68 @@ export function PrivateBoard({
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
 				let replaceDraftLineId: string | null = null;
+				const draftKey = transcriptDraftTargetKey(transcriptLine, participantId);
+				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
+				const matchingFinalDraft =
+					isTranscriptFinal && matchingDraft && !matchingDraft.isFinal
+						? matchingDraft
+						: null;
 
 				if (isLiveTranscriptDraft) {
+					const draftUserId = transcriptLine.userId ?? participantId;
 					const currentDraft =
-						activeMaxSpeechTranscriptDraftRef.current && !activeMaxSpeechTranscriptDraftRef.current.isFinal
-							? activeMaxSpeechTranscriptDraftRef.current
+						matchingDraft &&
+						!matchingDraft.isFinal &&
+						matchingDraft.source === transcriptLine.source &&
+						matchingDraft.userId === draftUserId
+							? matchingDraft
 							:
 						{
-							id: `live-batch-${transcriptLine.userId ?? participantId}-${Date.now()}`,
-							text: ""
+							id: `live-batch-${draftUserId}-${transcriptLine.source ?? "unknown"}-${Date.now()}`,
+							text: "",
+							source: transcriptLine.source,
+							userId: draftUserId
 						};
 					const mergedText = mergeTranscriptText(currentDraft.text, transcriptLine.text);
-					activeMaxSpeechTranscriptDraftRef.current = {
+					const draftText = lastAudioMessage.replaceDraft === true ? transcriptLine.text : mergedText;
+					activeTranscriptDraftsRef.current.set(draftKey, {
 						id: currentDraft.id,
-						text: mergedText
-					};
+						text: draftText,
+						source: transcriptLine.source,
+						userId: draftUserId
+					});
 					displayLine = {
 						...transcriptLine,
 						id: currentDraft.id,
-						text: mergedText
+						text: draftText,
+						isDraft: true
 					};
-				} else if (isTranscriptFinal && activeMaxSpeechTranscriptDraftRef.current) {
-					replaceDraftLineId = activeMaxSpeechTranscriptDraftRef.current.id;
-					activeMaxSpeechTranscriptDraftRef.current = {
+				} else if (matchingFinalDraft) {
+					replaceDraftLineId = matchingFinalDraft.id;
+					activeTranscriptDraftsRef.current.set(draftKey, {
 						id: replaceDraftLineId,
 						text: transcriptLine.text,
+						source: transcriptLine.source,
+						userId: transcriptLine.userId ?? participantId,
 						isFinal: true
-					};
+					});
 					displayLine = {
 						...transcriptLine,
 						id: replaceDraftLineId,
-						text: transcriptLine.text
+						text: transcriptLine.text,
+						isDraft: false
 					};
-				} else if (isPersistedFinal && activeMaxSpeechTranscriptDraftRef.current) {
-					replaceDraftLineId = activeMaxSpeechTranscriptDraftRef.current.id;
+				} else if (isPersistedFinal) {
+					if (matchingDraft) {
+						replaceDraftLineId = matchingDraft.id;
+						activeTranscriptDraftsRef.current.delete(draftKey);
+					}
 					displayLine = {
 						...transcriptLine,
-						text: transcriptLine.text
+						text: transcriptLine.text,
+						origin: "history",
+						isDraft: false
 					};
-					activeMaxSpeechTranscriptDraftRef.current = null;
 				}
 
 				const signature = audioTranscriptDisplaySignature(lastAudioMessage, displayLine);

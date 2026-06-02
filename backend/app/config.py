@@ -35,6 +35,7 @@ STREAM_CHUNK_SAMPLES = 16000
 STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
 STREAM_STEP_SECONDS = float(os.getenv("STREAM_STEP_SECONDS", "2"))
 STREAM_MIN_FINAL_SECONDS = float(os.getenv("STREAM_MIN_FINAL_SECONDS", "0.8"))
+ENABLE_BUILTIN_AUDIO_STREAM = os.getenv("ENABLE_BUILTIN_AUDIO_STREAM", "").lower() in {"1", "true", "yes", "on"}
 FRONTEND_MOCK_TRANSCRIPT_LINES = [
     "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
     "20L 飲用水一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",

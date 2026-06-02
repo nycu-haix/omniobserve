@@ -1,22 +1,31 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import math
 import os
+import re
 import time
 import wave
 from collections import deque
 from pathlib import Path
-from typing import Optional
-from urllib.parse import quote
+from typing import Any, Optional
+from urllib.parse import quote, urlencode
 
 import numpy as np
-import torch
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
-# from funasr import AutoModel
 # from transcript_normalizer import to_traditional
+
+ASR_ENGINE = os.getenv("ASR_ENGINE", "whisperlivekit").strip().lower()
+if ASR_ENGINE == "local":
+    import torch
+    from transformers import WhisperProcessor, WhisperForConditionalGeneration
+else:
+    torch = None
+    WhisperProcessor = None
+    WhisperForConditionalGeneration = None
 
 app = FastAPI()
 
@@ -74,14 +83,25 @@ PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
 ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
+WHISPERLIVEKIT_WS_URL = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:8000/asr").strip()
+WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
+WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
+ASR_MARKER_PATTERN = re.compile(
+    r"\s*(?:"
+    r"\[(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声)\]"
+    r"|[（(](?:台語|臺語|台语|閩南語|闽南语|客語|客家話|粵語|粤语|廣東話|广东话|英文|英語|中文|普通話|國語|国语|日語|韓語)[）)]"
+    r")\s*"
+)
 
 
 @app.get("/asr-status")
 async def asr_status():
     return {
+        "engine": ASR_ENGINE,
         "mock": ASR_MOCK,
         "model": ASR_MODEL_NAME,
-        "device": str(asr_device),
+        "device": str(asr_device) if ASR_ENGINE == "local" else None,
+        "whisperlivekit_ws_url": WHISPERLIVEKIT_WS_URL if ASR_ENGINE != "local" else None,
     }
 
 # Clear old wav / transcript files on backend startup
@@ -122,18 +142,23 @@ clear_output_files()
 # Load Silero VAD
 # =========================
 
-print("Loading Silero VAD model...")
+if ASR_ENGINE == "local":
+    print("Loading Silero VAD model...")
 
-vad_model, vad_utils = torch.hub.load(
-    repo_or_dir="snakers4/silero-vad",
-    model="silero_vad",
-    force_reload=False,
-    trust_repo=True,
-)
+    vad_model, vad_utils = torch.hub.load(
+        repo_or_dir="snakers4/silero-vad",
+        model="silero_vad",
+        force_reload=False,
+        trust_repo=True,
+    )
 
-vad_model.eval()
+    vad_model.eval()
 
-print("Silero VAD loaded")
+    print("Silero VAD loaded")
+else:
+    vad_model = None
+    vad_utils = None
+    print(f"ASR_ENGINE={ASR_ENGINE}. Local Silero VAD loading is skipped.")
 
 # =========================
 # Load Breeze ASR
@@ -150,7 +175,12 @@ def resolve_asr_device() -> torch.device:
 
     return torch.device(configured_device)
 
-if ASR_MOCK:
+if ASR_ENGINE != "local":
+    asr_device = "whisperlivekit"
+    asr_processor = None
+    asr_model = None
+    print("Local Breeze ASR model loading is skipped; using WhisperLiveKit proxy.")
+elif ASR_MOCK:
     asr_device = torch.device("cpu")
     asr_processor = None
     asr_model = None
@@ -212,30 +242,6 @@ else:
 #     except Exception as e:
 #         print(f"Failed to inspect CUDA device: {e}")
 
-
-# =========================
-# Load FunASR
-# =========================
-
-# log_torch_runtime()
-
-# asr_device = resolve_asr_device()
-# punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
-
-# print(f"Loading FunASR on {asr_device}...")
-
-# asr_model = AutoModel(
-#     model="paraformer-zh",
-#     punc_model=punc_model,
-#     device=asr_device,
-#     disable_update=True,
-#     hub="hf",
-# )
-
-# print(f"FunASR loaded on {asr_device}")
-
-# # Avoid multiple ASR tasks using FunASR at the same time.
-# ASR_GLOBAL_LOCK = asyncio.Lock()
 
 # =========================
 # Utility functions
@@ -325,6 +331,11 @@ def merge_transcript_text(previous_text: str, next_text: str) -> str:
             return f"{previous}{next_value[overlap:]}"
 
     return f"{previous}{next_value}"
+
+
+def clean_asr_transcript_text(text: str) -> str:
+    cleaned = ASR_MARKER_PATTERN.sub("", text)
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 async def relay_transcript_to_pipeline(
@@ -599,55 +610,6 @@ def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
 
     return text.strip()
 
-# def extract_funasr_text(result) -> str:
-#     """
-#     Extract text from FunASR generate() result.
-#     Common output:
-#       [{'key': '...', 'text': '...'}]
-#     """
-#     if not result:
-#         return ""
-
-#     if isinstance(result, list):
-#         if len(result) == 0:
-#             return ""
-#         item = result[0]
-#     else:
-#         item = result
-
-#     if isinstance(item, dict):
-#         return str(item.get("text", "")).strip()
-
-#     return str(item).strip()
-
-
-# def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
-#     """
-#     Transcribe saved wav segment using FunASR.
-#     The segment has already been saved as 16kHz mono wav.
-#     """
-#     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
-
-#     if len(audio_float32) == 0:
-#         return ""
-
-#     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
-
-#     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
-
-#     if segment_rms < 0.0008:
-#         print("Skip ASR: segment rms too low")
-#         return ""
-
-#     result = asr_model.generate(
-#         input=str(filename),
-#         language="zh",
-#         use_itn=True,
-#         batch_size_s=20,
-#     )
-
-#     return extract_funasr_text(result)
-
 async def transcribe_and_send(
     websocket: WebSocket,
     send_lock: asyncio.Lock,
@@ -688,6 +650,14 @@ async def transcribe_and_send(
             #     filename,
             #     segment_audio,
             # )
+
+        transcript = clean_asr_transcript_text(transcript)
+        if not transcript:
+            print(
+                "ASR transcript skipped after marker cleanup: "
+                f"roomName={room_name}, participantId={participant_id or user_id}, reason={reason}"
+            )
+            return
 
         # raw_transcript = transcript
         # traditional_transcript = to_traditional(raw_transcript)
@@ -784,6 +754,414 @@ async def transcribe_and_send(
 # WebSocket endpoint
 # =========================
 
+def build_whisperlivekit_ws_url() -> str:
+    query = {
+        "language": "zh",
+        "mode": WHISPERLIVEKIT_MODE or "full",
+    }
+    separator = "&" if "?" in WHISPERLIVEKIT_WS_URL else "?"
+    return f"{WHISPERLIVEKIT_WS_URL}{separator}{urlencode(query)}"
+
+
+def encode_pcm_s16le(audio: np.ndarray) -> bytes:
+    audio = np.asarray(audio, dtype=np.float32)
+    if len(audio) == 0:
+        return b""
+    audio = np.clip(audio, -1.0, 1.0)
+    return (audio * 32767).astype("<i2").tobytes()
+
+
+def parse_whisperlivekit_timestamp(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    if not isinstance(value, str):
+        return 0.0
+    parts = value.strip().split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        if len(parts) == 1 and parts[0]:
+            return float(parts[0])
+    except ValueError:
+        return 0.0
+    return 0.0
+
+
+async def handle_whisperlivekit_audio_ws(
+    websocket: WebSocket,
+    *,
+    session_id: Optional[str],
+    participant_id: Optional[str],
+) -> None:
+    send_lock = asyncio.Lock()
+    relay_lock = asyncio.Lock()
+    wlk_url = build_whisperlivekit_ws_url()
+
+    source = "unknown"
+    scope = "unknown"
+    agent_type = "unknown"
+    room_name = session_id
+    user_id = participant_id
+    display_name = participant_id
+    input_sample_rate = SAMPLE_RATE
+    encoding = "float32"
+    channels = 1
+
+    latest_buffer_text = ""
+    current_draft_text = ""
+    current_segment_index = 1
+    finalized_silence_keys: set[str] = set()
+    last_finalized_state_line_count = 0
+    state_lines: list[dict[str, Any]] = []
+    pending_silence_task: asyncio.Task | None = None
+    pending_silence_key: str | None = None
+    session_started = False
+
+    async def send_client_json(payload: dict[str, Any]) -> None:
+        try:
+            async with send_lock:
+                await websocket.send_json(payload)
+        except Exception:
+            print("Cannot send WhisperLiveKit proxy payload because websocket is closed")
+
+    def whisperlivekit_line_text(line: dict[str, Any]) -> str:
+        return clean_asr_transcript_text(str(line.get("text") or line.get("transcription") or ""))
+
+    def whisperlivekit_line_is_silence(line: dict[str, Any]) -> bool:
+        return line.get("speaker") == -2
+
+    def whisperlivekit_line_start(line: dict[str, Any]) -> float:
+        return parse_whisperlivekit_timestamp(line.get("start", line.get("beg")))
+
+    def whisperlivekit_line_end(line: dict[str, Any]) -> float:
+        return parse_whisperlivekit_timestamp(line.get("end"))
+
+    def whisperlivekit_line_key(line: dict[str, Any], line_index: int, text: str = "") -> str:
+        start_time = whisperlivekit_line_start(line)
+        end_time = whisperlivekit_line_end(line)
+        return f"{line_index}|{start_time:.2f}|{end_time:.2f}|{text}"
+
+    def latest_speech_line(lines: list[dict[str, Any]]) -> tuple[int, dict[str, Any]] | None:
+        for line_index in range(len(lines), 0, -1):
+            line = lines[line_index - 1]
+            if isinstance(line, dict) and not whisperlivekit_line_is_silence(line) and whisperlivekit_line_text(line):
+                return line_index, line
+        return None
+
+    def build_live_text(lines: list[dict[str, Any]], buffer_text: str) -> str:
+        latest = latest_speech_line(lines)
+        latest_line_text = whisperlivekit_line_text(latest[1]) if latest else ""
+
+        normalized_buffer = buffer_text.strip()
+        if latest_line_text and normalized_buffer:
+            return merge_transcript_text(latest_line_text, normalized_buffer)
+        return latest_line_text or normalized_buffer
+
+    def active_state_lines() -> list[dict[str, Any]]:
+        return state_lines[last_finalized_state_line_count:]
+
+    def finalized_tail_silence_key() -> str | None:
+        if not state_lines:
+            return None
+        tail_index = len(state_lines)
+        if tail_index <= last_finalized_state_line_count:
+            return None
+        tail_line = state_lines[-1]
+        if not isinstance(tail_line, dict) or not whisperlivekit_line_is_silence(tail_line):
+            return None
+        return whisperlivekit_line_key(tail_line, tail_index)
+
+    async def forward_draft(text: str) -> None:
+        nonlocal latest_buffer_text, current_draft_text
+        normalized_text = clean_asr_transcript_text(text)
+        if not normalized_text or normalized_text == latest_buffer_text:
+            return
+        latest_buffer_text = normalized_text
+        current_draft_text = normalized_text
+        await send_client_json({
+            "type": "transcript",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": f"wlk-live-{participant_id or user_id or 'unknown'}-{current_segment_index}",
+            "start": 0,
+            "end": 0,
+            "duration": 0,
+            "reason": LIVE_TRANSCRIPT_REASON,
+            "text": normalized_text,
+            "persisted": False,
+            "replaceDraft": True,
+        })
+
+    async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
+        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key
+        text = clean_asr_transcript_text(text)
+        if not text:
+            return
+        start_time = whisperlivekit_line_start(line) if line else 0.0
+        end_time = whisperlivekit_line_end(line) if line else 0.0
+        duration = max(0.0, end_time - start_time)
+        latest_buffer_text = ""
+        current_draft_text = ""
+        pending_silence_key = None
+        line_id = f"wlk-final-{participant_id or user_id or 'unknown'}-{current_segment_index}"
+        current_segment_index += 1
+        payload = {
+            "type": "transcript",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": line_id,
+            "start": round(start_time, 2),
+            "end": round(end_time, 2),
+            "duration": round(duration, 2),
+            "reason": "silence",
+            "text": text,
+            "persisted": None,
+            "retranscribedFinal": False,
+        }
+        await send_client_json(payload)
+        save_transcript_jsonl(
+            file=line_id,
+            start=start_time,
+            end=end_time,
+            duration=duration,
+            text=text,
+            source=source,
+            scope=scope,
+            agent_type=agent_type,
+            room_name=room_name,
+            participant_id=participant_id,
+            user_id=user_id,
+            display_name=display_name,
+            reason="silence",
+        )
+        async with relay_lock:
+            await relay_transcript_to_pipeline(
+                websocket=websocket,
+                send_lock=send_lock,
+                text=text,
+                reason="silence",
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                start=start_time,
+                end=end_time,
+                duration=duration,
+                retranscribed_final=False,
+            )
+
+    async def finalize_current_draft_from_silence(silence_key: str) -> None:
+        nonlocal last_finalized_state_line_count
+        if not state_lines:
+            return
+        tail_index = len(state_lines)
+        if tail_index <= last_finalized_state_line_count:
+            return
+        tail_line = state_lines[-1]
+        if not isinstance(tail_line, dict) or not whisperlivekit_line_is_silence(tail_line):
+            return
+
+        if silence_key in finalized_silence_keys:
+            return
+
+        latest = latest_speech_line(state_lines[last_finalized_state_line_count:-1])
+        source_line = latest[1] if latest else None
+        if not current_draft_text:
+            return
+
+        finalized_silence_keys.add(silence_key)
+        last_finalized_state_line_count = tail_index
+        await forward_final_text(current_draft_text, source_line)
+
+    def cancel_pending_silence_finalize() -> None:
+        nonlocal pending_silence_task, pending_silence_key
+        if pending_silence_task and not pending_silence_task.done():
+            pending_silence_task.cancel()
+        pending_silence_task = None
+        pending_silence_key = None
+
+    def schedule_silence_finalize(silence_key: str) -> None:
+        nonlocal pending_silence_task, pending_silence_key
+        if not current_draft_text or silence_key in finalized_silence_keys:
+            return
+        if pending_silence_key == silence_key and pending_silence_task and not pending_silence_task.done():
+            return
+
+        cancel_pending_silence_finalize()
+        pending_silence_key = silence_key
+
+        async def delayed_finalize() -> None:
+            try:
+                await asyncio.sleep(WHISPERLIVEKIT_FINAL_SILENCE_SEC)
+                if pending_silence_key != silence_key:
+                    return
+                await finalize_current_draft_from_silence(silence_key)
+            except asyncio.CancelledError:
+                return
+
+        pending_silence_task = asyncio.create_task(delayed_finalize())
+
+    async def handle_wlk_message(raw_message: str) -> None:
+        nonlocal state_lines
+        try:
+            message = json.loads(raw_message)
+        except Exception:
+            return
+        if not isinstance(message, dict):
+            return
+
+        message_type = message.get("type")
+        if message_type == "config":
+            print("WhisperLiveKit config:", message)
+            return
+        if message_type == "ready_to_stop":
+            cancel_pending_silence_finalize()
+            if current_draft_text:
+                latest = latest_speech_line(state_lines)
+                await forward_final_text(current_draft_text, latest[1] if latest else None)
+            print("WhisperLiveKit ready_to_stop")
+            return
+        if message.get("error"):
+            await send_client_json({"type": "asr_error", "error": str(message.get("error"))})
+            return
+
+        if message_type == "snapshot":
+            state_lines = list(message.get("lines") or [])
+        elif message_type == "diff":
+            pruned = int(message.get("lines_pruned") or 0)
+            if pruned > 0:
+                state_lines = state_lines[pruned:]
+            state_lines.extend(list(message.get("new_lines") or []))
+        elif "lines" in message:
+            state_lines = list(message.get("lines") or [])
+
+        buffer_text = str(message.get("buffer_transcription") or "")
+        tail_silence_key = finalized_tail_silence_key()
+        if tail_silence_key is None:
+            cancel_pending_silence_finalize()
+            await forward_draft(build_live_text(active_state_lines(), buffer_text))
+        elif tail_silence_key not in finalized_silence_keys:
+            await forward_draft(build_live_text(active_state_lines()[:-1], buffer_text))
+            schedule_silence_finalize(tail_silence_key)
+
+    try:
+        wlk_ws = None
+        for attempt in range(1, 11):
+            try:
+                wlk_ws = await websockets.connect(wlk_url, max_size=None)
+                break
+            except OSError as exc:
+                if attempt >= 10:
+                    raise
+                wait_seconds = min(attempt, 5)
+                print(
+                    "WhisperLiveKit proxy connect failed "
+                    f"(attempt {attempt}/10): {exc}; retrying in {wait_seconds}s"
+                )
+                await asyncio.sleep(wait_seconds)
+
+        if wlk_ws is None:
+            raise RuntimeError("WhisperLiveKit proxy connection was not created")
+
+        try:
+            print(f"Connected to WhisperLiveKit: {wlk_url}")
+
+            async def receive_wlk_messages() -> None:
+                async for raw_message in wlk_ws:
+                    if isinstance(raw_message, str):
+                        await handle_wlk_message(raw_message)
+
+            receiver_task = asyncio.create_task(receive_wlk_messages())
+            try:
+                while True:
+                    data = await websocket.receive()
+                    if data.get("type") == "websocket.disconnect":
+                        await wlk_ws.send(b"")
+                        break
+
+                    raw_text = data.get("text")
+                    if raw_text is not None:
+                        try:
+                            msg = json.loads(raw_text)
+                        except Exception:
+                            continue
+                        if not isinstance(msg, dict):
+                            continue
+
+                        msg_type = msg.get("type")
+                        if msg_type == "start":
+                            source = msg.get("source", source)
+                            scope = msg.get("scope", scope)
+                            agent_type = msg.get("agentType", agent_type)
+                            room_name = msg.get("roomName", room_name)
+                            user_id = msg.get("userId", user_id)
+                            display_name = msg.get("displayName", display_name)
+                            input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
+                            encoding = msg.get("encoding", msg.get("format", encoding))
+                            channels = int(msg.get("channels", channels))
+                            session_started = True
+                            await send_client_json({
+                                "type": "joined",
+                                "session_name": room_name,
+                                "participant_id": participant_id,
+                                "engine": "whisperlivekit",
+                            })
+                            continue
+                        if msg_type == "stop":
+                            await wlk_ws.send(b"")
+                            break
+                        if msg_type == "reset_outputs":
+                            result = clear_output_files()
+                            await send_client_json({"type": "reset_outputs_done", **result})
+                            continue
+                        continue
+
+                    pcm_bytes = data.get("bytes")
+                    if pcm_bytes is None or not session_started:
+                        continue
+
+                    try:
+                        decoded_audio = decode_audio_bytes(
+                            pcm_bytes,
+                            encoding=encoding,
+                            input_sample_rate=input_sample_rate,
+                        )
+                    except Exception as exc:
+                        print(f"WhisperLiveKit proxy decode error: {exc}")
+                        continue
+                    if channels != 1:
+                        print(f"Warning: channels={channels}. WhisperLiveKit proxy expects mono PCM.")
+                    encoded_audio = encode_pcm_s16le(decoded_audio)
+                    if encoded_audio:
+                        await wlk_ws.send(encoded_audio)
+            finally:
+                try:
+                    await asyncio.wait_for(receiver_task, timeout=15)
+                except Exception:
+                    receiver_task.cancel()
+                    await asyncio.gather(receiver_task, return_exceptions=True)
+        finally:
+            cancel_pending_silence_finalize()
+            await wlk_ws.close()
+    except Exception as exc:
+        print(f"WhisperLiveKit proxy error: {exc}")
+        await send_client_json({"type": "asr_error", "error": str(exc), "engine": "whisperlivekit"})
+
 @app.websocket("/ws/audio")
 @app.websocket("/sessions/{session_id}/audio-stream")
 async def audio_ws(
@@ -792,6 +1170,14 @@ async def audio_ws(
     participant_id: Optional[str] = Query(None),
 ):
     await websocket.accept()
+
+    if ASR_ENGINE != "local":
+        await handle_whisperlivekit_audio_ws(
+            websocket,
+            session_id=session_id,
+            participant_id=participant_id,
+        )
+        return
 
     url_participant_id = participant_id
 

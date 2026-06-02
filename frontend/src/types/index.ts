@@ -28,6 +28,7 @@ export interface TranscriptLine {
 	userId?: string;
 	displayName?: string;
 	isOwn?: boolean;
+	isDraft?: boolean;
 	linkedBlockId?: string;
 }
 

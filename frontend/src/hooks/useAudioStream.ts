@@ -195,26 +195,15 @@ export function useAudioStream(
 		});
 	}, []);
 
-	const stopAudioStream = useCallback(
-		async (keepAudioResources = false) => {
-			stoppingRef.current = true;
-
-			const socket = socketRef.current;
-			const meta = activeMetaRef.current;
-
-			socketRef.current = null;
-			activeMetaRef.current = null;
-
+	const drainAudioSocket = useCallback(
+		async (socket: WebSocket, meta: ActiveAudioMeta | null, pendingSamples: Float32Array) => {
 			try {
-				if (socket && socket.readyState === WebSocket.OPEN) {
-					const pending = pendingSamplesRef.current;
-					if (pending.length > 0) {
-						let offset = 0;
-						while (offset < pending.length) {
-							const chunk = pending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
-							offset += OUTPUT_CHUNK_SIZE;
-							socket.send(chunk.buffer);
-						}
+				if (socket.readyState === WebSocket.OPEN) {
+					let offset = 0;
+					while (offset < pendingSamples.length) {
+						const chunk = pendingSamples.slice(offset, offset + OUTPUT_CHUNK_SIZE);
+						offset += OUTPUT_CHUNK_SIZE;
+						socket.send(chunk.buffer);
 					}
 
 					if (meta) {
@@ -238,7 +227,39 @@ export function useAudioStream(
 				console.warn("[audio-ws] failed to send final audio or stop message", error);
 			}
 
-			pendingSamplesRef.current = new Float32Array(0);
+			await waitForAudioStopAck(socket);
+
+			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+				try {
+					socket.close(1000, "client_stop");
+				} catch (error) {
+					console.warn("[audio-ws] failed to close socket", error);
+				}
+			}
+		},
+		[waitForAudioStopAck]
+	);
+
+	const drainActiveAudioSocket = useCallback((): Promise<void> => {
+		const socket = socketRef.current;
+		const meta = activeMetaRef.current;
+		const pendingSamples = pendingSamplesRef.current;
+
+		socketRef.current = null;
+		activeMetaRef.current = null;
+		pendingSamplesRef.current = new Float32Array(0);
+
+		if (!socket) {
+			return Promise.resolve();
+		}
+
+		return drainAudioSocket(socket, meta, pendingSamples);
+	}, [drainAudioSocket]);
+
+	const stopAudioStream = useCallback(
+		async (keepAudioResources = false) => {
+			stoppingRef.current = true;
+			const drainPromise = drainActiveAudioSocket();
 
 			if (!keepAudioResources) {
 				cleanupAudioResources();
@@ -246,20 +267,9 @@ export function useAudioStream(
 
 			setIsAudioConnected(false);
 			setIsAudioStreaming(false);
-
-			if (socket) {
-				await waitForAudioStopAck(socket);
-
-				if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-					try {
-						socket.close(1000, "client_stop");
-					} catch (error) {
-						console.warn("[audio-ws] failed to close socket", error);
-					}
-				}
-			}
+			await drainPromise;
 		},
-		[cleanupAudioResources, waitForAudioStopAck]
+		[cleanupAudioResources, drainActiveAudioSocket]
 	);
 
 	const sendAudioSamples = useCallback((samples: Float32Array) => {
@@ -319,7 +329,7 @@ export function useAudioStream(
 			}
 
 			const hasExistingAudio = !!mediaStreamRef.current;
-			void stopAudioStream(true);
+			void drainActiveAudioSocket();
 
 			stoppingRef.current = false;
 			setAudioError(null);
@@ -503,7 +513,7 @@ export function useAudioStream(
 				setIsAudioStreaming(false);
 			}
 		},
-		[cleanupAudioResources, displayName, participantId, sendAudioSamples, sessionId, stopAudioStream]
+		[cleanupAudioResources, displayName, drainActiveAudioSocket, participantId, sendAudioSamples, sessionId]
 	);
 
 	useEffect(() => {
