@@ -1187,7 +1187,11 @@ async def handle_audio_websocket(
             if aligned_size <= 0:
                 return
             chunk = raw_bytes[:aligned_size]
-            transcript_text = await transcribe_ws_chunk(chunk)
+            transcript_text = await transcribe_ws_chunk(
+                pcm16_bytes=chunk,
+                sample_rate=state.sample_rate,
+                channels=1,
+            )
             if not transcript_text:
                 return
             if state.mic_mode != "private":

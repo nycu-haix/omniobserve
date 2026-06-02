@@ -291,12 +291,20 @@ function publicChatPayloadToMessage(payload: PublicChatMessagePayload, participa
 }
 
 async function fetchTranscriptHistory(url: string, signal: AbortSignal): Promise<TranscriptResponse[]> {
-	const response = await fetch(url, { signal });
-	if (!response.ok) {
-		console.warn("[private-board] failed transcript history response", response.status, url);
+	try {
+		const response = await fetch(url, { signal });
+		if (!response.ok) {
+			console.warn("[private-board] failed transcript history response", response.status, url);
+			return [];
+		}
+		return (await response.json()) as TranscriptResponse[];
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "AbortError") {
+			throw error;
+		}
+		console.warn("[private-board] failed transcript history fetch", url, error);
 		return [];
 	}
-	return (await response.json()) as TranscriptResponse[];
 }
 
 async function fetchChatMessageHistory(url: string, signal: AbortSignal): Promise<ChatMessageResponse[]> {
