@@ -186,6 +186,16 @@ const createDraftIdeaBlock = (): IdeaBlock => ({
 	status: "ready"
 });
 
+const createGeneratingIdeaBlock = (content: string): IdeaBlock => ({
+	id: `manual-generating-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	summary: "正在生成...",
+	aiSummary: content,
+	transcript: "",
+	expanded: false,
+	createdAtMs: Date.now(),
+	status: "generating"
+});
+
 function getTranscriptUserId(participantId: string): number {
 	const userId = Number(participantId);
 	return Number.isInteger(userId) ? userId : 0;
@@ -532,6 +542,9 @@ function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 }
 
 function ideaBlockDedupKey(block: IdeaBlock): string {
+	if (block.status === "generating") {
+		return "";
+	}
 	return normalizeIdeaBlockText(block.aiSummary || block.summary);
 }
 
@@ -674,7 +687,6 @@ export function PrivateBoard({
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
-	const [manualIdeaPendingCount, setManualIdeaPendingCount] = useState(0);
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
@@ -705,8 +717,6 @@ export function PrivateBoard({
 		ideablock: true,
 		"public-chat": true
 	});
-	const isSavingManualIdea = manualIdeaPendingCount > 0;
-
 	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
 
 	const selectBoardTab = useCallback((tab: BoardTab) => {
@@ -1369,9 +1379,14 @@ export function PrivateBoard({
 		}
 
 		setManualIdeaText("");
-		setManualIdeaPendingCount(current => current + 1);
 		setManualIdeaError(null);
 		window.requestAnimationFrame(() => manualIdeaTextareaRef.current?.focus());
+		const generatingBlock = createGeneratingIdeaBlock(normalizedContent);
+		setIdeaBlocks(prev => {
+			const nextBlocks = sortIdeaBlocks([...prev, generatingBlock]);
+			ideaBlocksRef.current = nextBlocks;
+			return nextBlocks;
+		});
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 				const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
@@ -1384,7 +1399,11 @@ export function PrivateBoard({
 					expanded: false,
 					isDraft: false
 				};
-				setIdeaBlocks(prev => sortIdeaBlocks([...prev, newBlock]));
+				setIdeaBlocks(prev => {
+					const nextBlocks = sortIdeaBlocks(prev.map(block => (block.id === generatingBlock.id ? newBlock : block)));
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
 				if (lastVisibleActiveTabRef.current === "ideablock") {
 					setHighlightedBlockId(newBlock.id);
 				} else {
@@ -1407,7 +1426,12 @@ export function PrivateBoard({
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
 			const isNewActiveBlock = !savedBlock.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === savedBlock.id);
-			setIdeaBlocks(prev => mergeIdeaBlocks(prev, [savedBlock]));
+			setIdeaBlocks(prev => {
+				const withoutGeneratingBlock = prev.filter(block => block.id !== generatingBlock.id);
+				const nextBlocks = mergeIdeaBlocks(withoutGeneratingBlock, [savedBlock]);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
 			if (lastVisibleActiveTabRef.current === "ideablock") {
 				setHighlightedBlockId(savedBlock.id);
 			} else if (isNewActiveBlock) {
@@ -1415,9 +1439,12 @@ export function PrivateBoard({
 			}
 			setIdeaBlockRefreshKey(current => current + 1);
 		} catch (error) {
+			setIdeaBlocks(prev => {
+				const nextBlocks = prev.filter(block => block.id !== generatingBlock.id);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
 			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");
-		} finally {
-			setManualIdeaPendingCount(current => Math.max(0, current - 1));
 		}
 	};
 
@@ -1627,7 +1654,7 @@ export function PrivateBoard({
 									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 								</div>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim()}>
-									{isSavingManualIdea ? "正在生成" : "新增"}
+									新增
 								</Button>
 							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
