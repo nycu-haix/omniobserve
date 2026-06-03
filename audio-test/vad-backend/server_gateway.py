@@ -86,6 +86,7 @@ ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").
 WHISPERLIVEKIT_WS_URL = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:8000/asr").strip()
 WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
 WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
+WHISPERLIVEKIT_GATEWAY_SILENCE_RMS = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SILENCE_RMS", "0.0015"))
 ASR_MARKER_PATTERN = re.compile(
     r"\s*(?:"
     r"\[(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声)\]"
@@ -355,6 +356,7 @@ async def relay_transcript_to_pipeline(
     end: float,
     duration: float,
     retranscribed_final: bool = False,
+    client_segment_id: Optional[str] = None,
 ) -> list[dict]:
     if not PIPELINE_WS_BASE_URL:
         print("Pipeline relay skipped: PIPELINE_WS_BASE_URL is empty")
@@ -436,6 +438,9 @@ async def relay_transcript_to_pipeline(
                     "task_items_update",
                     "pipeline_error",
                 }:
+                    if client_segment_id and message_type == "transcript_update":
+                        message["client_segment_id"] = client_segment_id
+                        message["replace_segment_id"] = client_segment_id
                     pipeline_messages.append(message)
                     try:
                         async with send_lock:
@@ -817,6 +822,10 @@ async def handle_whisperlivekit_audio_ws(
     state_lines: list[dict[str, Any]] = []
     pending_silence_task: asyncio.Task | None = None
     pending_silence_key: str | None = None
+    pending_audio_silence_segment_id: str | None = None
+    audio_stream_time = 0.0
+    audio_silence_started_at: float | None = None
+    awaiting_new_speech_after_final = False
     session_started = False
 
     async def send_client_json(payload: dict[str, Any]) -> None:
@@ -862,6 +871,9 @@ async def handle_whisperlivekit_audio_ws(
     def active_state_lines() -> list[dict[str, Any]]:
         return state_lines[last_finalized_state_line_count:]
 
+    def current_client_segment_id() -> str:
+        return f"wlk-live-{participant_id or user_id or 'unknown'}-{current_segment_index}"
+
     def finalized_tail_silence_key() -> str | None:
         if not state_lines:
             return None
@@ -889,7 +901,7 @@ async def handle_whisperlivekit_audio_ws(
             "participantId": participant_id,
             "userId": user_id,
             "displayName": display_name,
-            "segment_id": f"wlk-live-{participant_id or user_id or 'unknown'}-{current_segment_index}",
+            "segment_id": current_client_segment_id(),
             "start": 0,
             "end": 0,
             "duration": 0,
@@ -900,7 +912,7 @@ async def handle_whisperlivekit_audio_ws(
         })
 
     async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
-        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key
+        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final
         text = clean_asr_transcript_text(text)
         if not text:
             return
@@ -910,8 +922,9 @@ async def handle_whisperlivekit_audio_ws(
         latest_buffer_text = ""
         current_draft_text = ""
         pending_silence_key = None
-        line_id = f"wlk-final-{participant_id or user_id or 'unknown'}-{current_segment_index}"
+        line_id = current_client_segment_id()
         current_segment_index += 1
+        awaiting_new_speech_after_final = True
         payload = {
             "type": "transcript",
             "source": source,
@@ -928,6 +941,8 @@ async def handle_whisperlivekit_audio_ws(
             "reason": "silence",
             "text": text,
             "persisted": None,
+            "client_segment_id": line_id,
+            "replace_segment_id": line_id,
             "retranscribedFinal": False,
         }
         await send_client_json(payload)
@@ -963,6 +978,7 @@ async def handle_whisperlivekit_audio_ws(
                 end=end_time,
                 duration=duration,
                 retranscribed_final=False,
+                client_segment_id=line_id,
             )
 
     async def finalize_current_draft_from_silence(silence_key: str) -> None:
@@ -987,6 +1003,25 @@ async def handle_whisperlivekit_audio_ws(
         finalized_silence_keys.add(silence_key)
         last_finalized_state_line_count = tail_index
         await forward_final_text(current_draft_text, source_line)
+
+    async def finalize_current_draft_from_audio_silence(segment_id: str) -> None:
+        nonlocal last_finalized_state_line_count, pending_audio_silence_segment_id
+        if segment_id != current_client_segment_id() or not current_draft_text:
+            return
+
+        latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
+        last_finalized_state_line_count = len(state_lines)
+        pending_audio_silence_segment_id = segment_id
+        await forward_final_text(current_draft_text, latest[1] if latest else None)
+
+    def schedule_audio_silence_finalize() -> None:
+        nonlocal pending_audio_silence_segment_id
+        segment_id = current_client_segment_id()
+        if not current_draft_text or pending_audio_silence_segment_id == segment_id:
+            return
+
+        pending_audio_silence_segment_id = segment_id
+        asyncio.create_task(finalize_current_draft_from_audio_silence(segment_id))
 
     def cancel_pending_silence_finalize() -> None:
         nonlocal pending_silence_task, pending_silence_key
@@ -1055,6 +1090,8 @@ async def handle_whisperlivekit_audio_ws(
 
         buffer_text = str(message.get("buffer_transcription") or "")
         tail_silence_key = finalized_tail_silence_key()
+        if awaiting_new_speech_after_final:
+            return
         if tail_silence_key is None:
             cancel_pending_silence_finalize()
             await forward_draft(build_live_text(active_state_lines(), buffer_text))
@@ -1149,6 +1186,20 @@ async def handle_whisperlivekit_audio_ws(
                         continue
                     if channels != 1:
                         print(f"Warning: channels={channels}. WhisperLiveKit proxy expects mono PCM.")
+
+                    audio_duration = len(decoded_audio) / float(SAMPLE_RATE)
+                    audio_stream_time += audio_duration
+                    rms, _ = get_audio_stats(decoded_audio)
+                    if rms < WHISPERLIVEKIT_GATEWAY_SILENCE_RMS:
+                        if current_draft_text:
+                            if audio_silence_started_at is None:
+                                audio_silence_started_at = max(0.0, audio_stream_time - audio_duration)
+                            if audio_stream_time - audio_silence_started_at >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
+                                schedule_audio_silence_finalize()
+                    else:
+                        audio_silence_started_at = None
+                        awaiting_new_speech_after_final = False
+
                     encoded_audio = encode_pcm_s16le(decoded_audio)
                     if encoded_audio:
                         await wlk_ws.send(encoded_audio)

@@ -108,6 +108,8 @@ type AudioTranscriptMessage =
 			reason?: string | null;
 			persisted?: boolean | null;
 			replaceDraft?: boolean | null;
+			client_segment_id?: string | number | null;
+			replace_segment_id?: string | number | null;
 	  }
 	| {
 			type: "transcript";
@@ -123,6 +125,8 @@ type AudioTranscriptMessage =
 			reason?: string | null;
 			persisted?: boolean | null;
 			replaceDraft?: boolean | null;
+			client_segment_id?: string | number | null;
+			replace_segment_id?: string | number | null;
 	  };
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
@@ -517,8 +521,16 @@ function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string,
 	return appendTranscriptLine(withoutDraft, finalLine);
 }
 
-function transcriptDraftTargetKey(line: TranscriptLineType, participantId: string): string {
-	return [line.source ?? "unknown", line.userId ?? participantId].join("|");
+function audioTranscriptDraftSegmentId(message: AudioTranscriptMessage): string | undefined {
+	const segmentId =
+		message.replace_segment_id ??
+		message.client_segment_id ??
+		(message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id);
+	return segmentId == null ? undefined : String(segmentId);
+}
+
+function transcriptDraftTargetKey(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): string {
+	return [line.source ?? "unknown", line.userId ?? participantId, audioTranscriptDraftSegmentId(message) ?? "active"].join("|");
 }
 
 function canMergeAdjacentPublicTranscriptLines(left: TranscriptLineType, right: TranscriptLineType): boolean {
@@ -1261,7 +1273,7 @@ export function PrivateBoard({
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
 				let replaceDraftLineId: string | null = null;
-				const draftKey = transcriptDraftTargetKey(transcriptLine, participantId);
+				const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
 				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
 				const matchingFinalDraft =
 					isTranscriptFinal && matchingDraft && !matchingDraft.isFinal
