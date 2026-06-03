@@ -20,6 +20,8 @@ from .transcript_pipeline import handle_transcript_segment, serialize_idea_block
 from .transcripts import save_ws_transcript_segment
 
 LIVE_TRANSCRIPT_REASON = "sliding_window"
+_SILENCE_ENERGY_THRESHOLD = 300.0  # int16 RMS (0-32768 scale)
+_SILENCE_DURATION_SECONDS = 2.0
 
 
 def _bounded_stream_seconds(value: float, *, default: float, minimum: float) -> float:
@@ -175,6 +177,9 @@ async def handle_audio_stream_websocket(
     last_sent_live_text = ""
     final_transcript_saved = False
     stop_received = False
+    silence_start_at: datetime | None = None
+    segment_started_at: datetime | None = None
+    segment_index = 0
 
     async with SessionLocal() as db:
 
@@ -306,6 +311,74 @@ async def handle_audio_stream_websocket(
                 transcript_segments.append(saved_segment)
             return saved_segment
 
+        async def finalize_silence_segment() -> StreamTranscript | None:
+            nonlocal merged_transcript_text, last_sent_live_text, next_window_start_sample
+            nonlocal silence_start_at, segment_started_at, segment_index
+
+            await process_audio_buffer(force=True)
+            final_text = merged_transcript_text.strip()
+            seg_started_at = segment_started_at or first_audio_received_at or utc_now()
+            ended_at = utc_now()
+
+            # Reset state for next segment before any awaits that could interleave
+            merged_transcript_text = ""
+            last_sent_live_text = ""
+            next_window_start_sample = buffer_start_sample + int16_buffer.size
+            trim_processed_audio()
+            silence_start_at = None
+            segment_started_at = None
+
+            if not final_text or stream_context is None:
+                return None
+
+            visibility = stream_context.scope if stream_context.scope == Visibility.PRIVATE else Visibility.PUBLIC
+            saved_segment = await save_ws_transcript_segment(
+                db,
+                session_name=session_name,
+                participant_id=participant_id,
+                visibility=visibility,
+                transcript_text=final_text,
+                started_at=seg_started_at,
+                ended_at=ended_at,
+                display_name=str(stream_context.start_message.get("displayName") or "").strip() or None,
+            )
+            if saved_segment:
+                transcript_segments.append(saved_segment)
+
+            segment_id = saved_segment.segment_id if saved_segment else f"silence-{segment_index}"
+            timestamp_ms = int(ended_at.timestamp() * 1000)
+            await send_ws_json_safe(websocket, {
+                "type": "transcript",
+                "text": final_text,
+                "participant_id": participant_id,
+                "segment_id": str(segment_id),
+                "scope": stream_context.scope.value,
+                "is_final": True,
+                "reason": "silence",
+                "persisted": None,
+                "timestamp_ms": timestamp_ms,
+            })
+            await broadcast_admin_transcript(
+                session_name,
+                participant_id=participant_id,
+                scope=stream_context.scope.value,
+                text=final_text,
+                is_final=True,
+                persisted=saved_segment is not None,
+                transcript_segment_id=str(segment_id),
+                reason="silence",
+            )
+            if stream_context.scope != Visibility.PRIVATE:
+                await broadcast_public_transcript_line(
+                    session_name,
+                    participant_id=participant_id,
+                    text=final_text,
+                    transcript_segment_id=str(segment_id),
+                )
+
+            segment_index += 1
+            return saved_segment
+
         try:
             first_message = await websocket.receive_text()
             stream_context = parse_stream_start_message(first_message, expected_session_name=session_name)
@@ -376,6 +449,22 @@ async def handle_audio_stream_websocket(
                     else:
                         int16_buffer = np.concatenate((int16_buffer, int16_array))
                     total_samples_received += int16_array.size
+
+                    chunk_rms = float(np.sqrt(np.mean(int16_array.astype(np.float64) ** 2)))
+                    if chunk_rms > _SILENCE_ENERGY_THRESHOLD:
+                        silence_start_at = None
+                        if segment_started_at is None:
+                            segment_started_at = utc_now()
+                    elif silence_start_at is None:
+                        silence_start_at = utc_now()
+
+                    if (
+                        silence_start_at is not None
+                        and merged_transcript_text
+                        and (utc_now() - silence_start_at).total_seconds() >= _SILENCE_DURATION_SECONDS
+                    ):
+                        await finalize_silence_segment()
+                        continue
 
                     await process_audio_buffer(force=False)
                     continue
