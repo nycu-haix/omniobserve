@@ -709,6 +709,7 @@ export function PrivateBoard({
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1169,6 +1170,7 @@ export function PrivateBoard({
 
 	const handleIdeaBlocksSplitResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		splitResizeCleanupRef.current?.();
 		const resizeHandle = event.currentTarget;
 		resizeHandle.setPointerCapture(event.pointerId);
 
@@ -1190,22 +1192,28 @@ export function PrivateBoard({
 			updateSplitRatio(moveEvent.clientY);
 		};
 
-		const handlePointerUp = () => {
+		const cleanupResizeListeners = () => {
 			if (resizeHandle.hasPointerCapture(event.pointerId)) {
 				resizeHandle.releasePointerCapture(event.pointerId);
 			}
-			setResizeCursor(null);
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
 			window.removeEventListener("pointermove", handlePointerMove);
 			window.removeEventListener("pointerup", handlePointerUp);
 			window.removeEventListener("pointercancel", handlePointerUp);
+			splitResizeCleanupRef.current = null;
+		};
+
+		const handlePointerUp = () => {
+			setResizeCursor(null);
+			cleanupResizeListeners();
 		};
 
 		updateSplitRatio(event.clientY);
 		setResizeCursor("row-resize");
 		document.body.style.cursor = "row-resize";
 		document.body.style.userSelect = "none";
+		splitResizeCleanupRef.current = cleanupResizeListeners;
 		window.addEventListener("pointermove", handlePointerMove);
 		window.addEventListener("pointerup", handlePointerUp);
 		window.addEventListener("pointercancel", handlePointerUp);
@@ -1220,6 +1228,12 @@ export function PrivateBoard({
 		const direction = event.key === "ArrowUp" ? -1 : 1;
 		setIdeaBlocksSplitRatio(current => clampIdeaBlocksSplitRatio(current + direction * 4));
 	};
+
+	useEffect(() => {
+		return () => {
+			splitResizeCleanupRef.current?.();
+		};
+	}, []);
 
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
