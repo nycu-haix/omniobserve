@@ -1017,7 +1017,7 @@ async def handle_whisperlivekit_audio_ws(
         pending_silence_task = asyncio.create_task(delayed_finalize())
 
     async def handle_wlk_message(raw_message: str) -> None:
-        nonlocal state_lines
+        nonlocal state_lines, last_finalized_state_line_count
         try:
             message = json.loads(raw_message)
         except Exception:
@@ -1042,13 +1042,16 @@ async def handle_whisperlivekit_audio_ws(
 
         if message_type == "snapshot":
             state_lines = list(message.get("lines") or [])
+            last_finalized_state_line_count = min(last_finalized_state_line_count, len(state_lines))
         elif message_type == "diff":
             pruned = int(message.get("lines_pruned") or 0)
             if pruned > 0:
                 state_lines = state_lines[pruned:]
+                last_finalized_state_line_count = max(0, last_finalized_state_line_count - pruned)
             state_lines.extend(list(message.get("new_lines") or []))
         elif "lines" in message:
             state_lines = list(message.get("lines") or [])
+            last_finalized_state_line_count = min(last_finalized_state_line_count, len(state_lines))
 
         buffer_text = str(message.get("buffer_transcription") or "")
         tail_silence_key = finalized_tail_silence_key()

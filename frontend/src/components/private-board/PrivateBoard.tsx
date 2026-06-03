@@ -384,12 +384,17 @@ function formatTranscriptTime(value: string | number | null | undefined): string
 }
 
 function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): TranscriptLineType["source"] {
+	if (message.type === "transcript_update") {
+		const persistedSource = message.scope ?? message.mic_mode ?? message.local_mic_mode;
+		if (persistedSource === "public" || persistedSource === "private") {
+			return persistedSource;
+		}
+		return "private";
+	}
+
 	const source = message.local_mic_mode ?? message.mic_mode ?? message.scope;
 	if (source === "public" || source === "private") {
 		return source;
-	}
-	if (message.type === "transcript_update") {
-		return "private";
 	}
 	if (message.type === "transcript" && (message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON)) {
 		return "private";
@@ -424,7 +429,7 @@ function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMess
 	if (message.type === "transcript_update" && message.persisted !== true) {
 		return false;
 	}
-	if (line.source !== "private") {
+	if (line.source !== "private" && line.source !== "public") {
 		return false;
 	}
 	return line.userId == null || isOwnTranscriptUser(line.userId, participantId);
