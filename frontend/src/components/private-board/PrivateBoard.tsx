@@ -680,6 +680,7 @@ export function PrivateBoard({
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
+	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
 	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
 	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -687,6 +688,7 @@ export function PrivateBoard({
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
+	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
 	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -710,6 +712,9 @@ export function PrivateBoard({
 	const selectBoardTab = useCallback((tab: BoardTab) => {
 		if (tab === "ideablock") {
 			setUnreadIdeaBlockCount(0);
+		}
+		if (tab === "public-chat") {
+			setUnreadPublicChatCount(0);
 		}
 		setActiveTab(tab);
 	}, []);
@@ -881,6 +886,10 @@ export function PrivateBoard({
 	}, [ideaBlocks]);
 
 	useEffect(() => {
+		publicChatMessagesRef.current = publicChatMessages;
+	}, [publicChatMessages]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
@@ -1003,8 +1012,13 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "public_chat_message") {
+				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
+				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
 				setIsSendingPublicChat(false);
-				setPublicChatMessages(prev => appendPublicChatMessage(prev, publicChatPayloadToMessage(lastMessage.payload, participantId)));
+				setPublicChatMessages(prev => appendPublicChatMessage(prev, nextMessage));
+				if (isNewUnreadMessage && visibleActiveTab !== "public-chat") {
+					setUnreadPublicChatCount(current => current + 1);
+				}
 			}
 		}, 0);
 
@@ -1429,6 +1443,7 @@ export function PrivateBoard({
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
+	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 
 	return (
 		<>
@@ -1477,13 +1492,21 @@ export function PrivateBoard({
 							<Button
 								aria-pressed={visibleActiveTab === "public-chat"}
 								className={cn(
-									"transition-all active:translate-y-px active:scale-[0.98]",
+									"relative transition-all active:translate-y-px active:scale-[0.98]",
 									visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
 								onClick={() => selectBoardTab("public-chat")}
 							>
 								聊天室
+								{unreadPublicChatCount > 0 && (
+									<span
+										className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
+										aria-label={`${unreadPublicChatCount} unread chat messages`}
+									>
+										{unreadPublicChatCountLabel}
+									</span>
+								)}
 							</Button>
 						</div>
 					</div>
@@ -1604,7 +1627,7 @@ export function PrivateBoard({
 									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 								</div>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim()}>
-									{isSavingManualIdea ? "儲存中" : "新增"}
+									{isSavingManualIdea ? "正在生成" : "新增"}
 								</Button>
 							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
