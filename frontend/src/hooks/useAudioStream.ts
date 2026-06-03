@@ -452,6 +452,7 @@ export function useAudioStream(
 
 					console.info("[audio-ws] send start", startMessage);
 					socket.send(JSON.stringify(startMessage));
+					sendAudioSamples(new Float32Array(0));
 
 					setIsAudioConnected(true);
 					setIsAudioStreaming(true);

@@ -429,6 +429,13 @@ function transcriptSourceFromAudioMessage(message: AudioDraftTargetMessage): Tra
 	return undefined;
 }
 
+function stripWhisperArtifacts(text: string): string {
+	return text
+		.replace(/<\|\d+\.?\d*\|>/g, "")
+		.replace(/\(\s+[^)]+\s+\)/g, "")
+		.replace(/\[\s+[^\]]+\s+\]/g, "");
+}
+
 function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): TranscriptLineType {
 	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
 	const userId = message.participant_id ?? message.userId ?? message.user_id;
@@ -441,7 +448,7 @@ function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): Transcr
 		userId: userId == null ? undefined : String(userId),
 		time: formatTranscriptTime(timestampMs),
 		timestampMs,
-		text: message.text?.trim() ?? ""
+		text: stripWhisperArtifacts(message.text ?? "").trim()
 	};
 }
 
@@ -1356,10 +1363,37 @@ export function PrivateBoard({
 						text: transcriptLine.text,
 						isDraft: false
 					};
+				} else if (isTranscriptFinal && matchingDraft?.isFinal) {
+					replaceDraftLineId = matchingDraft.id;
+					activeTranscriptDraftsRef.current.set(draftKey, {
+						id: replaceDraftLineId,
+						text: transcriptLine.text,
+						source: transcriptLine.source,
+						userId: transcriptLine.userId ?? participantId,
+						isFinal: true
+					});
+					displayLine = {
+						...transcriptLine,
+						id: replaceDraftLineId,
+						text: transcriptLine.text,
+						isDraft: false
+					};
 				} else if (isPersistedFinal) {
 					if (matchingDraft) {
 						replaceDraftLineId = matchingDraft.id;
 						activeTranscriptDraftsRef.current.delete(draftKey);
+					} else {
+						// Fallback: the live draft used "active" as segment key but the persisted
+						// final arrived with a real DB segment ID — keys won't match, so scan for
+						// any non-final draft with the same source and userId.
+						const userId = transcriptLine.userId ?? participantId;
+						for (const [key, draft] of activeTranscriptDraftsRef.current) {
+							if (draft.source === transcriptLine.source && draft.userId === userId && !draft.isFinal) {
+								replaceDraftLineId = draft.id;
+								activeTranscriptDraftsRef.current.delete(key);
+								break;
+							}
+						}
 					}
 					displayLine = {
 						...transcriptLine,

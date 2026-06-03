@@ -56,7 +56,7 @@ END_THRESHOLD = 0.15
 
 MIN_SILENCE_MS = 1200
 MIN_SPEECH_MS = 1000
-MAX_SPEECH_MS = 10000
+MAX_SPEECH_MS = 20000
 
 MIN_SILENCE_CHUNKS = int((MIN_SILENCE_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 MIN_SPEECH_CHUNKS = int((MIN_SPEECH_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
@@ -87,9 +87,16 @@ WHISPERLIVEKIT_WS_URL = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:
 WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
 WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
 WHISPERLIVEKIT_GATEWAY_SILENCE_RMS = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SILENCE_RMS", "0.0015"))
+WHISPERLIVEKIT_MAX_SPEECH_SEC = float(os.getenv("WHISPERLIVEKIT_MAX_SPEECH_SEC", "20.0"))
+WHISPERLIVEKIT_SEND_QUEUE_CHUNKS = int(os.getenv("WHISPERLIVEKIT_SEND_QUEUE_CHUNKS", "100"))
+WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS = int(os.getenv("WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS", "10"))
+WHISPERLIVEKIT_SILENCE_PREROLL_SEC = float(os.getenv("WHISPERLIVEKIT_SILENCE_PREROLL_SEC", "0.4"))
+WHISPERLIVEKIT_SILENCE_TAIL_SEC = float(os.getenv("WHISPERLIVEKIT_SILENCE_TAIL_SEC", "0.8"))
 ASR_MARKER_PATTERN = re.compile(
     r"\s*(?:"
-    r"\[(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声)\]"
+    r"<\|[^>]*\|>"
+    r"|<\|\d+(?:\.\d*)?(?:\|>)?"
+    r"|\[(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声)\]"
     r"|[（(](?:台語|臺語|台语|閩南語|闽南语|客語|客家話|粵語|粤语|廣東話|广东话|英文|英語|中文|普通話|國語|国语|日語|韓語)[）)]"
     r")\s*"
 )
@@ -332,6 +339,45 @@ def merge_transcript_text(previous_text: str, next_text: str) -> str:
             return f"{previous}{next_value[overlap:]}"
 
     return f"{previous}{next_value}"
+
+
+def merge_transcript_text_with_editable_tail(previous_text: str, next_text: str, editable_tail_chars: int) -> str:
+    previous = previous_text.strip()
+    next_value = next_text.strip()
+    if not previous:
+        return next_value
+    if not next_value:
+        return previous
+
+    editable_chars = max(0, editable_tail_chars)
+    locked_len = max(0, len(previous) - editable_chars)
+    if locked_len == 0:
+        return next_value
+
+    locked_prefix = previous[:locked_len]
+    if next_value.startswith(locked_prefix):
+        return next_value
+    if len(next_value) >= locked_len:
+        return f"{locked_prefix}{next_value[locked_len:]}"
+    return previous
+
+
+def strip_finalized_transcript_prefix(finalized_text: str, next_text: str) -> str:
+    finalized = finalized_text.strip()
+    next_value = next_text.strip()
+    if not finalized or not next_value:
+        return next_value
+    if next_value in finalized:
+        return ""
+    if next_value.startswith(finalized):
+        return next_value[len(finalized):].strip()
+
+    max_overlap = min(len(finalized), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if finalized[-overlap:] == next_value[:overlap]:
+            return next_value[overlap:].strip()
+
+    return next_value
 
 
 def clean_asr_transcript_text(text: str) -> str:
@@ -818,6 +864,8 @@ async def handle_whisperlivekit_audio_ws(
 
     latest_buffer_text = ""
     current_draft_text = ""
+    current_final_candidate_text = ""
+    last_final_text = ""
     current_segment_index = 1
     finalized_silence_keys: set[str] = set()
     last_finalized_state_line_count = 0
@@ -831,6 +879,13 @@ async def handle_whisperlivekit_audio_ws(
     audio_silence_started_at: float | None = None
     awaiting_new_speech_after_final = False
     session_started = False
+    last_soft_reset_stream_time = 0.0
+    wlk_send_queue: asyncio.Queue[tuple[bytes, bool] | None] = asyncio.Queue(maxsize=WHISPERLIVEKIT_SEND_QUEUE_CHUNKS)
+    pipeline_relay_tasks: set[asyncio.Task] = set()
+    silence_preroll_chunks: deque[tuple[bytes, float]] = deque()
+    silence_preroll_duration = 0.0
+    wlk_has_pending_speech = False
+    wlk_tail_silence_duration = 0.0
 
     async def send_client_json(payload: dict[str, Any]) -> None:
         try:
@@ -838,6 +893,76 @@ async def handle_whisperlivekit_audio_ws(
                 await websocket.send_json(payload)
         except Exception:
             print("Cannot send WhisperLiveKit proxy payload because websocket is closed")
+
+    def track_pipeline_relay(task: asyncio.Task) -> None:
+        pipeline_relay_tasks.add(task)
+        task.add_done_callback(pipeline_relay_tasks.discard)
+
+    def remember_silence_preroll(chunk: bytes, duration: float) -> None:
+        nonlocal silence_preroll_duration
+        if WHISPERLIVEKIT_SILENCE_PREROLL_SEC <= 0:
+            return
+
+        silence_preroll_chunks.append((chunk, duration))
+        silence_preroll_duration += duration
+        while silence_preroll_duration > WHISPERLIVEKIT_SILENCE_PREROLL_SEC and silence_preroll_chunks:
+            _, dropped_duration = silence_preroll_chunks.popleft()
+            silence_preroll_duration = max(0.0, silence_preroll_duration - dropped_duration)
+
+    def flush_silence_preroll() -> None:
+        nonlocal silence_preroll_duration
+        while silence_preroll_chunks:
+            chunk, _ = silence_preroll_chunks.popleft()
+            enqueue_wlk_audio_chunk(chunk, False)
+        silence_preroll_duration = 0.0
+
+    def enqueue_wlk_audio_chunk(chunk: bytes, is_speech: bool) -> None:
+        item = (chunk, is_speech)
+        try:
+            wlk_send_queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            pass
+
+        if not is_speech:
+            return
+
+        pending_items: list[tuple[bytes, bool] | None] = []
+        dropped_queued_item = False
+        while True:
+            try:
+                queued_item = wlk_send_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            if queued_item is None:
+                pending_items.append(queued_item)
+                continue
+
+            _, queued_is_speech = queued_item
+            if not dropped_queued_item and not queued_is_speech:
+                dropped_queued_item = True
+                continue
+            pending_items.append(queued_item)
+
+        if not dropped_queued_item:
+            for index, queued_item in enumerate(pending_items):
+                if queued_item is not None:
+                    pending_items.pop(index)
+                    dropped_queued_item = True
+                    break
+
+        for queued_item in pending_items:
+            try:
+                wlk_send_queue.put_nowait(queued_item)
+            except asyncio.QueueFull:
+                break
+
+        if dropped_queued_item:
+            try:
+                wlk_send_queue.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
 
     def whisperlivekit_line_text(line: dict[str, Any]) -> str:
         return clean_asr_transcript_text(str(line.get("text") or line.get("transcription") or ""))
@@ -878,6 +1003,9 @@ async def handle_whisperlivekit_audio_ws(
     def current_client_segment_id() -> str:
         return f"wlk-live-{participant_id or user_id or 'unknown'}-{current_segment_index}"
 
+    def current_final_text() -> str:
+        return current_final_candidate_text or current_draft_text
+
     def finalized_tail_silence_key() -> str | None:
         if not state_lines:
             return None
@@ -890,15 +1018,20 @@ async def handle_whisperlivekit_audio_ws(
         return whisperlivekit_line_key(tail_line, tail_index)
 
     async def forward_draft(text: str) -> None:
-        nonlocal latest_buffer_text, current_draft_text
+        nonlocal latest_buffer_text, current_draft_text, current_final_candidate_text
         normalized_text = clean_asr_transcript_text(text)
         if not normalized_text:
             return
-        if normalized_text == latest_buffer_text:
-            schedule_draft_idle_finalize()
+        current_final_candidate_text = normalized_text
+        display_text = merge_transcript_text_with_editable_tail(
+            current_draft_text,
+            normalized_text,
+            WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS,
+        )
+        if display_text == latest_buffer_text:
             return
-        latest_buffer_text = normalized_text
-        current_draft_text = normalized_text
+        latest_buffer_text = display_text
+        current_draft_text = display_text
         await send_client_json({
             "type": "transcript",
             "source": source,
@@ -913,24 +1046,31 @@ async def handle_whisperlivekit_audio_ws(
             "end": 0,
             "duration": 0,
             "reason": LIVE_TRANSCRIPT_REASON,
-            "text": normalized_text,
+            "text": display_text,
             "persisted": False,
             "replaceDraft": True,
         })
         schedule_draft_idle_finalize()
 
     async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
-        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id
+        nonlocal current_draft_text, current_final_candidate_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text
         text = clean_asr_transcript_text(text)
-        if not text:
+        final_text = text
+        if not final_text:
             return
+        text = final_text
         start_time = whisperlivekit_line_start(line) if line else 0.0
         end_time = whisperlivekit_line_end(line) if line else 0.0
         duration = max(0.0, end_time - start_time)
         latest_buffer_text = ""
         current_draft_text = ""
+        current_final_candidate_text = ""
         pending_silence_key = None
         pending_draft_idle_segment_id = None
+        pending_audio_silence_segment_id = None
+        wlk_has_pending_speech = False
+        wlk_tail_silence_duration = 0.0
+        last_final_text = text
         line_id = current_client_segment_id()
         current_segment_index += 1
         awaiting_new_speech_after_final = True
@@ -989,25 +1129,32 @@ async def handle_whisperlivekit_audio_ws(
             display_name=display_name,
             reason="silence",
         )
-        async with relay_lock:
-            await relay_transcript_to_pipeline(
-                websocket=websocket,
-                send_lock=send_lock,
-                text=text,
-                reason="silence",
-                source=source,
-                scope=scope,
-                agent_type=agent_type,
-                room_name=room_name,
-                participant_id=participant_id,
-                user_id=user_id,
-                display_name=display_name,
-                start=start_time,
-                end=end_time,
-                duration=duration,
-                retranscribed_final=False,
-                client_segment_id=line_id,
-            )
+        relay_kwargs = {
+            "text": text,
+            "reason": "silence",
+            "source": source,
+            "scope": scope,
+            "agent_type": agent_type,
+            "room_name": room_name,
+            "participant_id": participant_id,
+            "user_id": user_id,
+            "display_name": display_name,
+            "start": start_time,
+            "end": end_time,
+            "duration": duration,
+            "retranscribed_final": False,
+            "client_segment_id": line_id,
+        }
+
+        async def relay_final_to_pipeline() -> None:
+            async with relay_lock:
+                await relay_transcript_to_pipeline(
+                    websocket=websocket,
+                    send_lock=send_lock,
+                    **relay_kwargs,
+                )
+
+        track_pipeline_relay(asyncio.create_task(relay_final_to_pipeline()))
 
     async def finalize_current_draft_from_silence(silence_key: str) -> None:
         nonlocal last_finalized_state_line_count
@@ -1030,7 +1177,7 @@ async def handle_whisperlivekit_audio_ws(
 
         finalized_silence_keys.add(silence_key)
         last_finalized_state_line_count = tail_index
-        await forward_final_text(current_draft_text, source_line)
+        await forward_final_text(current_final_text(), source_line)
 
     async def finalize_current_draft_from_audio_silence(segment_id: str) -> None:
         nonlocal last_finalized_state_line_count, pending_audio_silence_segment_id
@@ -1040,7 +1187,7 @@ async def handle_whisperlivekit_audio_ws(
         latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
         last_finalized_state_line_count = len(state_lines)
         pending_audio_silence_segment_id = segment_id
-        await forward_final_text(current_draft_text, latest[1] if latest else None)
+        await forward_final_text(current_final_text(), latest[1] if latest else None)
 
     async def finalize_current_draft_from_idle(segment_id: str) -> None:
         nonlocal last_finalized_state_line_count, pending_draft_idle_segment_id
@@ -1054,7 +1201,7 @@ async def handle_whisperlivekit_audio_ws(
         latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
         last_finalized_state_line_count = len(state_lines)
         pending_draft_idle_segment_id = None
-        await forward_final_text(current_draft_text, latest[1] if latest else None)
+        await forward_final_text(current_final_text(), latest[1] if latest else None)
 
     def cancel_pending_draft_idle_finalize() -> None:
         nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
@@ -1112,7 +1259,7 @@ async def handle_whisperlivekit_audio_ws(
         pending_silence_task = asyncio.create_task(delayed_finalize())
 
     async def handle_wlk_message(raw_message: str) -> None:
-        nonlocal state_lines, last_finalized_state_line_count
+        nonlocal state_lines, last_finalized_state_line_count, awaiting_new_speech_after_final
         try:
             message = json.loads(raw_message)
         except Exception:
@@ -1128,7 +1275,7 @@ async def handle_whisperlivekit_audio_ws(
             cancel_pending_silence_finalize()
             if current_draft_text:
                 latest = latest_speech_line(state_lines)
-                await forward_final_text(current_draft_text, latest[1] if latest else None)
+                await forward_final_text(current_final_text(), latest[1] if latest else None)
             print("WhisperLiveKit ready_to_stop")
             return
         if message.get("error"):
@@ -1150,13 +1297,22 @@ async def handle_whisperlivekit_audio_ws(
 
         buffer_text = str(message.get("buffer_transcription") or "")
         tail_silence_key = finalized_tail_silence_key()
+        live_text = (
+            build_live_text(active_state_lines(), buffer_text)
+            if tail_silence_key is None
+            else build_live_text(active_state_lines()[:-1], buffer_text)
+        )
         if awaiting_new_speech_after_final:
-            return
+            live_text = strip_finalized_transcript_prefix(last_final_text, live_text)
+            if not live_text:
+                return
+            awaiting_new_speech_after_final = False
+
         if tail_silence_key is None:
             cancel_pending_silence_finalize()
-            await forward_draft(build_live_text(active_state_lines(), buffer_text))
+            await forward_draft(live_text)
         elif tail_silence_key not in finalized_silence_keys:
-            await forward_draft(build_live_text(active_state_lines()[:-1], buffer_text))
+            await forward_draft(live_text)
             schedule_silence_finalize(tail_silence_key)
 
     try:
@@ -1186,7 +1342,20 @@ async def handle_whisperlivekit_audio_ws(
                     if isinstance(raw_message, str):
                         await handle_wlk_message(raw_message)
 
+            async def wlk_audio_sender() -> None:
+                while True:
+                    queue_item = await wlk_send_queue.get()
+                    if queue_item is None:
+                        break
+                    chunk, _ = queue_item
+                    try:
+                        await wlk_ws.send(chunk)
+                    except Exception as exc:
+                        print(f"[wlk-sender] send error: {exc}")
+                        break
+
             receiver_task = asyncio.create_task(receive_wlk_messages())
+            sender_task = asyncio.create_task(wlk_audio_sender())
             try:
                 while True:
                     data = await websocket.receive()
@@ -1259,11 +1428,40 @@ async def handle_whisperlivekit_audio_ws(
                     else:
                         audio_silence_started_at = None
                         awaiting_new_speech_after_final = False
+                        if (
+                            WHISPERLIVEKIT_MAX_SPEECH_SEC > 0
+                            and audio_stream_time - last_soft_reset_stream_time >= WHISPERLIVEKIT_MAX_SPEECH_SEC
+                            and current_draft_text
+                        ):
+                            last_soft_reset_stream_time = audio_stream_time
+                            schedule_audio_silence_finalize()
 
                     encoded_audio = encode_pcm_s16le(decoded_audio)
                     if encoded_audio:
-                        await wlk_ws.send(encoded_audio)
+                        is_speech_chunk = rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS
+                        if is_speech_chunk:
+                            if not wlk_has_pending_speech:
+                                flush_silence_preroll()
+                            wlk_has_pending_speech = True
+                            wlk_tail_silence_duration = 0.0
+                            enqueue_wlk_audio_chunk(encoded_audio, True)
+                        else:
+                            remember_silence_preroll(encoded_audio, audio_duration)
+                            if wlk_has_pending_speech and wlk_tail_silence_duration < WHISPERLIVEKIT_SILENCE_TAIL_SEC:
+                                enqueue_wlk_audio_chunk(encoded_audio, False)
+                                wlk_tail_silence_duration += audio_duration
             finally:
+                while wlk_send_queue.full():
+                    try:
+                        wlk_send_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                await wlk_send_queue.put(None)
+                try:
+                    await asyncio.wait_for(sender_task, timeout=5)
+                except Exception:
+                    sender_task.cancel()
+                    await asyncio.gather(sender_task, return_exceptions=True)
                 try:
                     await asyncio.wait_for(receiver_task, timeout=15)
                 except Exception:
