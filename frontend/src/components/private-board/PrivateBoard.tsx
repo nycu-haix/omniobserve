@@ -93,6 +93,23 @@ interface AudioIdeaBlocksUpdateMessage {
 	idea_blocks?: IdeaBlockResponse[];
 }
 
+interface AudioTranscriptBoundaryMessage {
+	type: "transcript_boundary";
+	segment_id?: string | number | null;
+	participant_id?: string | number | null;
+	userId?: string | number | null;
+	user_id?: string | number | null;
+	mic_mode?: string | null;
+	scope?: string | null;
+	text?: string;
+	timestamp_ms?: number | null;
+	local_mic_mode?: string | null;
+	reason?: string | null;
+	persisted?: boolean | null;
+	client_segment_id?: string | number | null;
+	replace_segment_id?: string | number | null;
+}
+
 type AudioTranscriptMessage =
 	| {
 			type: "transcript_update";
@@ -128,6 +145,8 @@ type AudioTranscriptMessage =
 			client_segment_id?: string | number | null;
 			replace_segment_id?: string | number | null;
 	  };
+
+type AudioDraftTargetMessage = AudioTranscriptMessage | AudioTranscriptBoundaryMessage;
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS = 7000;
@@ -179,6 +198,10 @@ function isAudioTranscriptMessage(message: object | null): message is AudioTrans
 	return (
 		!!message && "type" in message && (message.type === "transcript_update" || message.type === "transcript") && "text" in message && typeof message.text === "string" && message.text.trim().length > 0
 	);
+}
+
+function isAudioTranscriptBoundaryMessage(message: object | null): message is AudioTranscriptBoundaryMessage {
+	return !!message && "type" in message && message.type === "transcript_boundary";
 }
 
 function isAudioIdeaBlocksUpdateMessage(message: object | null): message is AudioIdeaBlocksUpdateMessage {
@@ -387,7 +410,7 @@ function formatTranscriptTime(value: string | number | null | undefined): string
 	}).format(date);
 }
 
-function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): TranscriptLineType["source"] {
+function transcriptSourceFromAudioMessage(message: AudioDraftTargetMessage): TranscriptLineType["source"] {
 	if (message.type === "transcript_update") {
 		const persistedSource = message.scope ?? message.mic_mode ?? message.local_mic_mode;
 		if (persistedSource === "public" || persistedSource === "private") {
@@ -406,7 +429,7 @@ function transcriptSourceFromAudioMessage(message: AudioTranscriptMessage): Tran
 	return undefined;
 }
 
-function audioTranscriptMessageToLine(message: AudioTranscriptMessage): TranscriptLineType {
+function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): TranscriptLineType {
 	const segmentId = message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id;
 	const userId = message.participant_id ?? message.userId ?? message.user_id;
 	const source = transcriptSourceFromAudioMessage(message);
@@ -427,7 +450,7 @@ function shouldAppendAudioTranscriptToTranscriptTab(message: AudioTranscriptMess
 		return (
 			(line.source === "private" || line.source === "public") &&
 			(message.persisted === false || message.persisted == null) &&
-			(message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON || FINAL_TRANSCRIPT_REASONS.has(String(message.reason ?? "")))
+			(message.reason === MAX_SPEECH_TRANSCRIPT_REASON || message.reason === LIVE_TRANSCRIPT_REASON)
 		);
 	}
 	if (message.type === "transcript_update" && message.persisted !== true) {
@@ -469,7 +492,7 @@ function mergeTranscriptText(previousText: string, nextText: string): string {
 	return `${previous}${next}`;
 }
 
-function audioTranscriptDisplaySignature(message: AudioTranscriptMessage, line: TranscriptLineType): string {
+function audioTranscriptDisplaySignature(message: AudioDraftTargetMessage, line: TranscriptLineType): string {
 	return [message.type, line.source ?? "", message.reason ?? "", line.text.trim()].join("|");
 }
 
@@ -479,16 +502,7 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 		return lines;
 	}
 
-	const normalizedUserId = line.userId == null ? undefined : String(line.userId);
-	const existingLine = lines.find(item => {
-		if (item.id === line.id) {
-			return true;
-		}
-
-		const itemUserId = item.userId == null ? undefined : String(item.userId);
-		const isSameUser = itemUserId == null || normalizedUserId == null || itemUserId === normalizedUserId;
-		return item.text.trim() === normalizedText && item.source === line.source && isSameUser;
-	});
+	const existingLine = lines.find(item => item.id === line.id);
 	if (!existingLine) {
 		return sortTranscriptLines([...lines, { ...line, text: normalizedText }]);
 	}
@@ -521,7 +535,7 @@ function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string,
 	return appendTranscriptLine(withoutDraft, finalLine);
 }
 
-function audioTranscriptDraftSegmentId(message: AudioTranscriptMessage): string | undefined {
+function audioTranscriptDraftSegmentId(message: AudioDraftTargetMessage): string | undefined {
 	const segmentId =
 		message.replace_segment_id ??
 		message.client_segment_id ??
@@ -529,43 +543,12 @@ function audioTranscriptDraftSegmentId(message: AudioTranscriptMessage): string 
 	return segmentId == null ? undefined : String(segmentId);
 }
 
-function transcriptDraftTargetKey(message: AudioTranscriptMessage, line: TranscriptLineType, participantId: string): string {
+function transcriptDraftTargetKey(message: AudioDraftTargetMessage, line: TranscriptLineType, participantId: string): string {
 	return [line.source ?? "unknown", line.userId ?? participantId, audioTranscriptDraftSegmentId(message) ?? "active"].join("|");
 }
 
-function canMergeAdjacentPublicTranscriptLines(left: TranscriptLineType, right: TranscriptLineType): boolean {
-	return (
-		left.source === "public" &&
-		right.source === "public" &&
-		!left.isDraft &&
-		!right.isDraft &&
-		left.userId != null &&
-		right.userId != null &&
-		String(left.userId) === String(right.userId)
-	);
-}
-
-function mergeAdjacentPublicTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
-	return lines.reduce<TranscriptLineType[]>((mergedLines, line) => {
-		const previousLine = mergedLines[mergedLines.length - 1];
-		if (!previousLine || !canMergeAdjacentPublicTranscriptLines(previousLine, line)) {
-			mergedLines.push(line);
-			return mergedLines;
-		}
-
-		mergedLines[mergedLines.length - 1] = {
-			...previousLine,
-			displayName: previousLine.displayName ?? line.displayName,
-			text: mergeTranscriptText(previousLine.text, line.text),
-			timestampMs: previousLine.timestampMs ?? line.timestampMs,
-			linkedBlockId: previousLine.linkedBlockId ?? line.linkedBlockId
-		};
-		return mergedLines;
-	}, []);
-}
-
 function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
-	const sortedLines = [...lines].sort((left, right) => {
+	return [...lines].sort((left, right) => {
 		const leftTime = left.timestampMs ?? Number(left.id);
 		const rightTime = right.timestampMs ?? Number(right.id);
 
@@ -575,7 +558,6 @@ function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] 
 
 		return left.id.localeCompare(right.id, undefined, { numeric: true });
 	});
-	return mergeAdjacentPublicTranscriptLines(sortedLines);
 }
 
 function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicChatMessage): PublicChatMessage[] {
@@ -840,6 +822,7 @@ export function PrivateBoard({
 	}, []);
 	const lastProcessedBoardMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
+	const lastProcessedAudioBoundaryRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const unreadIdeaBlockIdsFromRefreshRef = useRef<Set<string>>(new Set());
 	const lastVisibleActiveTabRef = useRef<BoardTab>(visibleActiveTab);
@@ -1251,6 +1234,52 @@ export function PrivateBoard({
 	}, [cueCondition, isCollapsed, isPublicChatNotificationVisible, lastMessage, participantId, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
+		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
+			return;
+		}
+		if (lastProcessedAudioBoundaryRef.current === lastAudioMessage) {
+			return;
+		}
+		lastProcessedAudioBoundaryRef.current = lastAudioMessage;
+
+		const timer = window.setTimeout(() => {
+			const transcriptLine = audioTranscriptMessageToLine(lastAudioMessage);
+			const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
+			const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
+			const boundaryText = (matchingDraft?.text || transcriptLine.text || "").trim();
+			if (!boundaryText) {
+				return;
+			}
+
+			const finalDraftId = matchingDraft?.id ?? transcriptLine.id;
+			activeTranscriptDraftsRef.current.set(draftKey, {
+				id: finalDraftId,
+				text: boundaryText,
+				source: transcriptLine.source,
+				userId: transcriptLine.userId ?? participantId,
+				isFinal: true
+			});
+
+			const frozenLine = {
+				...transcriptLine,
+				id: finalDraftId,
+				text: boundaryText,
+				displayName: transcriptLine.displayName ?? displayName,
+				isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId),
+				isDraft: false
+			};
+			setTranscriptLines(prev =>
+				linkTranscriptLinesToBlocks(
+					matchingDraft ? replaceTranscriptLine(prev, matchingDraft.id, frozenLine) : appendTranscriptLine(prev, frozenLine),
+					ideaBlocks
+				)
+			);
+		}, 0);
+
+		return () => window.clearTimeout(timer);
+	}, [displayName, ideaBlocks, lastAudioMessage, participantId]);
+
+	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
 			return;
 		}
@@ -1281,6 +1310,9 @@ export function PrivateBoard({
 						: null;
 
 				if (isLiveTranscriptDraft) {
+					if (matchingDraft?.isFinal) {
+						return;
+					}
 					const draftUserId = transcriptLine.userId ?? participantId;
 					const currentDraft =
 						matchingDraft &&

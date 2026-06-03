@@ -181,7 +181,7 @@ export function useAudioStream(
 				}
 				try {
 					const message = JSON.parse(event.data) as AudioStreamMessage;
-					if (message.type === "idea_blocks_update" || message.type === "task_items_update" || message.type === "pipeline_error") {
+					if (message.type === "idea_blocks_update" || message.type === "task_items_update" || message.type === "transcript_error" || message.type === "pipeline_error") {
 						finish();
 					}
 				} catch {
@@ -469,6 +469,11 @@ export function useAudioStream(
 						const parsedMessage = JSON.parse(event.data) as AudioStreamMessage;
 						parsedMessage.local_mic_mode = currentMode;
 						console.info("[audio-ws] receive", parsedMessage);
+						if (parsedMessage.type === "transcript_error" || parsedMessage.type === "pipeline_error" || parsedMessage.type === "asr_error") {
+							const reason = typeof parsedMessage.reason === "string" ? parsedMessage.reason : undefined;
+							const error = typeof parsedMessage.error === "string" ? parsedMessage.error : undefined;
+							setAudioError(error || reason || "Audio transcript was not saved.");
+						}
 						setLastAudioMessage(parsedMessage);
 					} catch {
 						console.info("[audio-ws] receive raw", event.data);

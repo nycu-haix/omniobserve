@@ -398,9 +398,9 @@ async def relay_transcript_to_pipeline(
         "retranscribedFinal": retranscribed_final,
     }
     terminal_types = (
-        {"task_items_update", "pipeline_error"}
+        {"task_items_update", "transcript_error", "pipeline_error"}
         if reason in PIPELINE_FINAL_REASONS
-        else {"transcript", "pipeline_error"}
+        else {"transcript", "transcript_error", "pipeline_error"}
     )
     pipeline_messages = []
 
@@ -433,7 +433,9 @@ async def relay_transcript_to_pipeline(
 
                 message_type = message.get("type")
                 if isinstance(message, dict) and message_type in {
+                    "transcript",
                     "transcript_update",
+                    "transcript_error",
                     "idea_blocks_update",
                     "task_items_update",
                     "pipeline_error",
@@ -823,6 +825,8 @@ async def handle_whisperlivekit_audio_ws(
     pending_silence_task: asyncio.Task | None = None
     pending_silence_key: str | None = None
     pending_audio_silence_segment_id: str | None = None
+    pending_draft_idle_task: asyncio.Task | None = None
+    pending_draft_idle_segment_id: str | None = None
     audio_stream_time = 0.0
     audio_silence_started_at: float | None = None
     awaiting_new_speech_after_final = False
@@ -888,7 +892,10 @@ async def handle_whisperlivekit_audio_ws(
     async def forward_draft(text: str) -> None:
         nonlocal latest_buffer_text, current_draft_text
         normalized_text = clean_asr_transcript_text(text)
-        if not normalized_text or normalized_text == latest_buffer_text:
+        if not normalized_text:
+            return
+        if normalized_text == latest_buffer_text:
+            schedule_draft_idle_finalize()
             return
         latest_buffer_text = normalized_text
         current_draft_text = normalized_text
@@ -910,9 +917,10 @@ async def handle_whisperlivekit_audio_ws(
             "persisted": False,
             "replaceDraft": True,
         })
+        schedule_draft_idle_finalize()
 
     async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
-        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final
+        nonlocal current_draft_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id
         text = clean_asr_transcript_text(text)
         if not text:
             return
@@ -922,9 +930,29 @@ async def handle_whisperlivekit_audio_ws(
         latest_buffer_text = ""
         current_draft_text = ""
         pending_silence_key = None
+        pending_draft_idle_segment_id = None
         line_id = current_client_segment_id()
         current_segment_index += 1
         awaiting_new_speech_after_final = True
+        await send_client_json({
+            "type": "transcript_boundary",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": line_id,
+            "start": round(start_time, 2),
+            "end": round(end_time, 2),
+            "duration": round(duration, 2),
+            "reason": "silence",
+            "text": text,
+            "persisted": False,
+            "client_segment_id": line_id,
+            "replace_segment_id": line_id,
+        })
         payload = {
             "type": "transcript",
             "source": source,
@@ -1013,6 +1041,38 @@ async def handle_whisperlivekit_audio_ws(
         last_finalized_state_line_count = len(state_lines)
         pending_audio_silence_segment_id = segment_id
         await forward_final_text(current_draft_text, latest[1] if latest else None)
+
+    async def finalize_current_draft_from_idle(segment_id: str) -> None:
+        nonlocal last_finalized_state_line_count, pending_draft_idle_segment_id
+        try:
+            await asyncio.sleep(WHISPERLIVEKIT_FINAL_SILENCE_SEC)
+        except asyncio.CancelledError:
+            return
+        if segment_id != current_client_segment_id() or not current_draft_text:
+            return
+
+        latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
+        last_finalized_state_line_count = len(state_lines)
+        pending_draft_idle_segment_id = None
+        await forward_final_text(current_draft_text, latest[1] if latest else None)
+
+    def cancel_pending_draft_idle_finalize() -> None:
+        nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if pending_draft_idle_task and not pending_draft_idle_task.done():
+            pending_draft_idle_task.cancel()
+        pending_draft_idle_task = None
+        pending_draft_idle_segment_id = None
+
+    def schedule_draft_idle_finalize() -> None:
+        nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if not current_draft_text:
+            return
+        segment_id = current_client_segment_id()
+        if pending_draft_idle_segment_id == segment_id and pending_draft_idle_task and not pending_draft_idle_task.done():
+            pending_draft_idle_task.cancel()
+
+        pending_draft_idle_segment_id = segment_id
+        pending_draft_idle_task = asyncio.create_task(finalize_current_draft_from_idle(segment_id))
 
     def schedule_audio_silence_finalize() -> None:
         nonlocal pending_audio_silence_segment_id
@@ -1211,6 +1271,7 @@ async def handle_whisperlivekit_audio_ws(
                     await asyncio.gather(receiver_task, return_exceptions=True)
         finally:
             cancel_pending_silence_finalize()
+            cancel_pending_draft_idle_finalize()
             await wlk_ws.close()
     except Exception as exc:
         print(f"WhisperLiveKit proxy error: {exc}")

@@ -130,12 +130,27 @@ def parse_stream_start_message(raw_text: str, *, expected_session_name: str | No
 
 
 async def send_ws_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> None:
-    if websocket.client_state != WebSocketState.CONNECTED:
+    if (
+        websocket.client_state != WebSocketState.CONNECTED
+        or websocket.application_state != WebSocketState.CONNECTED
+    ):
         return
     try:
         await websocket.send_json(payload)
     except Exception as exc:
         logger.warning("Failed to send WebSocket message: %s", exc)
+
+
+async def close_ws_safe(websocket: WebSocket, *, code: int = 1000) -> None:
+    if (
+        websocket.client_state != WebSocketState.CONNECTED
+        or websocket.application_state != WebSocketState.CONNECTED
+    ):
+        return
+    try:
+        await websocket.close(code=code)
+    except Exception as exc:
+        logger.warning("Failed to close WebSocket safely: %s", exc)
 
 
 async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_name: str, participant_id: str, idea_blocks: list[Any]) -> None:
@@ -403,8 +418,7 @@ async def handle_audio_stream_websocket(
             return
         except Exception as exc:
             logger.warning("Invalid start message for audio stream: %s", exc)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1003)
+            await close_ws_safe(websocket, code=1003)
             return
 
         try:
@@ -574,8 +588,7 @@ async def handle_audio_stream_websocket(
                             "task_items": task_items_payload,
                         },
                     )
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.close()
+                    await close_ws_safe(websocket)
                     return
 
         except WebSocketDisconnect:
@@ -588,14 +601,13 @@ async def handle_audio_stream_websocket(
         except Exception as exc:
             logger.exception("Unhandled WebSocket audio stream error: %s", exc)
             await finalize_stream_transcript()
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+            await close_ws_safe(websocket, code=1011)
         finally:
             mark_audio_disconnected(session_name, participant_id)
             await broadcast_presence_state(session_name)
-            if not stop_received and websocket.client_state == WebSocketState.CONNECTED:
+            if not stop_received:
                 # Keep connection open unless stop arrives; close only in error paths above.
-                await websocket.close()
+                await close_ws_safe(websocket)
 
 
 def _normalize_visibility(value: Any) -> Visibility:
@@ -649,7 +661,7 @@ async def handle_transcript_segments_websocket(
                         participant_id,
                     )
                     await send_ws_json_safe(websocket, {"type": "transcript_segments_stopped"})
-                    await websocket.close()
+                    await close_ws_safe(websocket)
                     return
                 if message_type != "transcript_segment":
                     logger.info(
@@ -709,6 +721,7 @@ async def handle_transcript_segments_websocket(
                         {
                             "type": "transcript",
                             "participant_id": participant_id,
+                            "scope": visibility.value,
                             "segment_id": segment_id,
                             "text": text,
                             "is_final": is_final,
@@ -716,6 +729,29 @@ async def handle_transcript_segments_websocket(
                             "persisted": segment_id is not None,
                         },
                     )
+                    if reason in FINAL_TRANSCRIPT_REASONS:
+                        if segment_id is None:
+                            await send_ws_json_safe(
+                                websocket,
+                                {
+                                    "type": "transcript_error",
+                                    "reason": "save_failed",
+                                },
+                            )
+                            continue
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "transcript_update",
+                                "transcript_segment_id": segment_id,
+                                "participant_id": participant_id,
+                                "scope": visibility.value,
+                                "text": text,
+                                "is_final": True,
+                                "reason": reason,
+                                "persisted": True,
+                            },
+                        )
                     await broadcast_public_transcript_line(
                         session_name,
                         participant_id=participant_id,
@@ -919,10 +955,19 @@ async def handle_transcript_segments_websocket(
                 participant_id,
             )
             return
+        except RuntimeError as exc:
+            if "WebSocket is not connected" in str(exc) or "Cannot call \"receive\"" in str(exc):
+                logger.info(
+                    "pipeline_ws_disconnected_runtime session_name=%s participant_id=%s error=%s",
+                    session_name,
+                    participant_id,
+                    exc,
+                )
+                return
+            raise
         except Exception as exc:
             logger.exception("pipeline_ws_unhandled_error session_name=%s participant_id=%s error=%s", session_name, participant_id, exc)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+            await close_ws_safe(websocket, code=1011)
 
 
 def _participant_id_to_int(participant_id: str) -> int:
