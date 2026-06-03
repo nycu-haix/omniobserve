@@ -561,6 +561,10 @@ function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 			return left.isDeleted ? -1 : 1;
 		}
 
+		if ((left.status === "generating") !== (right.status === "generating")) {
+			return left.status === "generating" ? 1 : -1;
+		}
+
 		const leftTime = left.createdAtMs ?? Number(left.id);
 		const rightTime = right.createdAtMs ?? Number(right.id);
 
