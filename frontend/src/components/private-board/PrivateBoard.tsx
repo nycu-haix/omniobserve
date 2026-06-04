@@ -431,10 +431,54 @@ function transcriptSourceFromAudioMessage(message: AudioDraftTargetMessage): Tra
 }
 
 function stripWhisperArtifacts(text: string): string {
-	return text
-		.replace(/<\|\d+\.?\d*\|>/g, "")
-		.replace(/\(\s+[^)]+\s+\)/g, "")
-		.replace(/\[\s+[^\]]+\s+\]/g, "");
+	const cjkPattern = /[\u3400-\u9fff]/;
+	const artifactPattern = /\b(?:audio|drop|out|sound|silence|noise|else|elsewhat\w*|going|so)\b/gi;
+	const promptLeakPattern =
+		/(?:請以|请以)?(?:繁體|繁体)?(?:用)?中文(?:逐字稿|逐字轉錄|转录|輸出|输出|字幕|中文字幕|輸請用中文字幕)?|只保留明確英文專有名詞|明確英文專有名詞|英文專有名詞/g;
+	const labelPattern =
+		/^(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声|台語|臺語|台语|閩南語|闽南语|客語|客家話|粵語|粤语|廣東話|广东话|英文|英語|中文|普通話|國語|国语|日語|韓語)$/;
+	let cleaned = text
+		.replace(/<\|[^>]*\|>/g, "")
+		.replace(/<\|\d+(?:\.\d*)?(?:\|>)?/g, "")
+		.replace(promptLeakPattern, "")
+		.replace(/[[(【（]([^\])】）]{0,80})[\])】）]/g, (_match, content: string) => {
+			const trimmed = content.trim();
+			if (!trimmed || labelPattern.test(trimmed) || !cjkPattern.test(trimmed)) {
+				return "";
+			}
+			return trimmed
+				.replace(artifactPattern, "")
+				.replace(/\b(?:no)\b/gi, "")
+				.replace(/^[\s,，.。:：;；、!?！？'"`~\-–—…]+|[\s,，:：;；、'"`~\-–—…]+$/g, "")
+				.trim();
+		})
+		.replace(/\s+/g, " ")
+		.trim();
+
+	if (cjkPattern.test(cleaned)) {
+		const fragments = cleaned.match(/[^。！？!?]+[。！？!?]?/g) ?? [];
+		const keptFragments = fragments.filter(fragment => {
+			const trimmed = fragment.trim();
+			if (!trimmed) return false;
+			const hasCjk = cjkPattern.test(trimmed);
+			const hasAscii = /[A-Za-z]/.test(trimmed);
+			const isArtifactEnglish = artifactPattern.test(trimmed);
+			artifactPattern.lastIndex = 0;
+			return hasCjk || !hasAscii || !isArtifactEnglish;
+		});
+		if (keptFragments.length > 0) {
+			cleaned = keptFragments.join("");
+		}
+	}
+
+	return cleaned
+		.replace(/\s*([。！？!?])\s*/g, "$1")
+		.replace(/\s*([,，、:：;；])\s*/g, "$1")
+		.replace(/([,，、:：;；])([。！？!?])/g, "$2")
+		.replace(/([。！？!?]){2,}/g, "$1")
+		.replace(/([,，、:：;；]){2,}/g, "$1")
+		.replace(/^[\s,，.。:：;；、!?！？'"`~\-–—…]+|[\s,，:：;；、'"`~\-–—…]+$/g, "")
+		.trim();
 }
 
 function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): TranscriptLineType {
@@ -447,7 +491,7 @@ function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): Transcr
 		source,
 		origin: "live",
 		userId: userId == null ? undefined : String(userId),
-		time: formatTranscriptTime(timestampMs),
+		time: undefined,
 		timestampMs,
 		text: stripWhisperArtifacts(message.text ?? "").trim()
 	};
@@ -839,7 +883,7 @@ export function PrivateBoard({
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; isFinal?: boolean }>>(new Map());
+	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1280,6 +1324,7 @@ export function PrivateBoard({
 				text: boundaryText,
 				source: transcriptLine.source,
 				userId: transcriptLine.userId ?? participantId,
+				timestampMs: matchingDraft?.timestampMs ?? transcriptLine.timestampMs,
 				isFinal: true
 			});
 
@@ -1325,6 +1370,7 @@ export function PrivateBoard({
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
 				let replaceDraftLineId: string | null = null;
+				let persistedReplacementDraft: { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean } | null = null;
 				const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
 				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
 				const matchingFinalDraft =
@@ -1348,7 +1394,8 @@ export function PrivateBoard({
 							id: `live-batch-${draftUserId}-${transcriptLine.source ?? "unknown"}-${Date.now()}`,
 							text: "",
 							source: transcriptLine.source,
-							userId: draftUserId
+							userId: draftUserId,
+							timestampMs: transcriptLine.timestampMs
 						};
 					const mergedText = mergeTranscriptText(currentDraft.text, transcriptLine.text);
 					const draftText = lastAudioMessage.replaceDraft === true ? transcriptLine.text : mergedText;
@@ -1356,7 +1403,8 @@ export function PrivateBoard({
 						id: currentDraft.id,
 						text: draftText,
 						source: transcriptLine.source,
-						userId: draftUserId
+						userId: draftUserId,
+						timestampMs: currentDraft.timestampMs ?? transcriptLine.timestampMs
 					});
 					displayLine = {
 						...transcriptLine,
@@ -1371,12 +1419,14 @@ export function PrivateBoard({
 						text: transcriptLine.text,
 						source: transcriptLine.source,
 						userId: transcriptLine.userId ?? participantId,
+						timestampMs: matchingFinalDraft.timestampMs ?? transcriptLine.timestampMs,
 						isFinal: true
 					});
 					displayLine = {
 						...transcriptLine,
 						id: replaceDraftLineId,
 						text: transcriptLine.text,
+						timestampMs: matchingFinalDraft.timestampMs ?? transcriptLine.timestampMs,
 						isDraft: false
 					};
 				} else if (isTranscriptFinal && matchingDraft?.isFinal) {
@@ -1386,18 +1436,28 @@ export function PrivateBoard({
 						text: transcriptLine.text,
 						source: transcriptLine.source,
 						userId: transcriptLine.userId ?? participantId,
+						timestampMs: matchingDraft.timestampMs ?? transcriptLine.timestampMs,
 						isFinal: true
 					});
 					displayLine = {
 						...transcriptLine,
 						id: replaceDraftLineId,
 						text: transcriptLine.text,
+						timestampMs: matchingDraft.timestampMs ?? transcriptLine.timestampMs,
 						isDraft: false
 					};
 				} else if (isPersistedFinal) {
 					if (matchingDraft) {
 						replaceDraftLineId = matchingDraft.id;
-						activeTranscriptDraftsRef.current.delete(draftKey);
+						persistedReplacementDraft = matchingDraft;
+						activeTranscriptDraftsRef.current.set(draftKey, {
+							id: replaceDraftLineId,
+							text: transcriptLine.text,
+							source: transcriptLine.source,
+							userId: transcriptLine.userId ?? participantId,
+							timestampMs: matchingDraft.timestampMs ?? transcriptLine.timestampMs,
+							isFinal: true
+						});
 					} else {
 						// Fallback: the live draft used "active" as segment key but the persisted
 						// final arrived with a real DB segment ID — keys won't match, so scan for
@@ -1406,14 +1466,22 @@ export function PrivateBoard({
 						for (const [key, draft] of activeTranscriptDraftsRef.current) {
 							if (draft.source === transcriptLine.source && draft.userId === userId && !draft.isFinal) {
 								replaceDraftLineId = draft.id;
-								activeTranscriptDraftsRef.current.delete(key);
+								persistedReplacementDraft = draft;
+								activeTranscriptDraftsRef.current.set(key, {
+									...draft,
+									text: transcriptLine.text,
+									timestampMs: draft.timestampMs ?? transcriptLine.timestampMs,
+									isFinal: true
+								});
 								break;
 							}
 						}
 					}
 					displayLine = {
 						...transcriptLine,
+						id: replaceDraftLineId ?? transcriptLine.id,
 						text: transcriptLine.text,
+						timestampMs: persistedReplacementDraft?.timestampMs ?? transcriptLine.timestampMs,
 						origin: "history",
 						isDraft: false
 					};
