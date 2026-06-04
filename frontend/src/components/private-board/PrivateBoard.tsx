@@ -150,6 +150,7 @@ type AudioDraftTargetMessage = AudioTranscriptMessage | AudioTranscriptBoundaryM
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS = 7000;
+const AUDIO_FINAL_DUPLICATE_WINDOW_MS = 5000;
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
@@ -511,6 +512,21 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 
 	const existingLine = lines.find(item => item.id === line.id);
 	if (!existingLine) {
+		if (!line.isDraft && (line.source === "public" || line.source === "private")) {
+			const lineTimestampMs = line.timestampMs ?? Date.now();
+			const duplicateFinalLine = lines.find(
+				item => {
+					if (item.isDraft || item.source !== line.source || item.userId !== line.userId || item.text.trim() !== normalizedText) {
+						return false;
+					}
+					const itemTimestampMs = item.timestampMs ?? lineTimestampMs;
+					return Math.abs(lineTimestampMs - itemTimestampMs) <= AUDIO_FINAL_DUPLICATE_WINDOW_MS;
+				}
+			);
+			if (duplicateFinalLine) {
+				return lines;
+			}
+		}
 		return sortTranscriptLines([...lines, { ...line, text: normalizedText }]);
 	}
 	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {

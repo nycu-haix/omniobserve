@@ -886,6 +886,7 @@ async def handle_whisperlivekit_audio_ws(
     silence_preroll_duration = 0.0
     wlk_has_pending_speech = False
     wlk_tail_silence_duration = 0.0
+    restart_wlk_after_final = False
 
     async def send_client_json(payload: dict[str, Any]) -> None:
         try:
@@ -1053,7 +1054,7 @@ async def handle_whisperlivekit_audio_ws(
         schedule_draft_idle_finalize()
 
     async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
-        nonlocal current_draft_text, current_final_candidate_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text
+        nonlocal current_draft_text, current_final_candidate_text, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text, restart_wlk_after_final
         text = clean_asr_transcript_text(text)
         final_text = text
         if not final_text:
@@ -1071,6 +1072,7 @@ async def handle_whisperlivekit_audio_ws(
         wlk_has_pending_speech = False
         wlk_tail_silence_duration = 0.0
         last_final_text = text
+        restart_wlk_after_final = True
         line_id = current_client_segment_id()
         current_segment_index += 1
         awaiting_new_speech_after_final = True
@@ -1315,12 +1317,14 @@ async def handle_whisperlivekit_audio_ws(
             await forward_draft(live_text)
             schedule_silence_finalize(tail_silence_key)
 
-    try:
-        wlk_ws = None
+    wlk_ws = None
+    receiver_task: asyncio.Task | None = None
+    sender_task: asyncio.Task | None = None
+
+    async def connect_wlk_session():
         for attempt in range(1, 11):
             try:
-                wlk_ws = await websockets.connect(wlk_url, max_size=None)
-                break
+                return await websockets.connect(wlk_url, max_size=None)
             except OSError as exc:
                 if attempt >= 10:
                     raise
@@ -1330,150 +1334,187 @@ async def handle_whisperlivekit_audio_ws(
                     f"(attempt {attempt}/10): {exc}; retrying in {wait_seconds}s"
                 )
                 await asyncio.sleep(wait_seconds)
+        raise RuntimeError("WhisperLiveKit proxy connection was not created")
 
-        if wlk_ws is None:
-            raise RuntimeError("WhisperLiveKit proxy connection was not created")
-
-        try:
-            print(f"Connected to WhisperLiveKit: {wlk_url}")
-
-            async def receive_wlk_messages() -> None:
-                async for raw_message in wlk_ws:
-                    if isinstance(raw_message, str):
-                        await handle_wlk_message(raw_message)
-
-            async def wlk_audio_sender() -> None:
-                while True:
-                    queue_item = await wlk_send_queue.get()
-                    if queue_item is None:
-                        break
-                    chunk, _ = queue_item
-                    try:
-                        await wlk_ws.send(chunk)
-                    except Exception as exc:
-                        print(f"[wlk-sender] send error: {exc}")
-                        break
-
-            receiver_task = asyncio.create_task(receive_wlk_messages())
-            sender_task = asyncio.create_task(wlk_audio_sender())
+    def drain_wlk_send_queue() -> None:
+        while True:
             try:
-                while True:
-                    data = await websocket.receive()
-                    if data.get("type") == "websocket.disconnect":
-                        await wlk_ws.send(b"")
-                        break
+                wlk_send_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
-                    raw_text = data.get("text")
-                    if raw_text is not None:
-                        try:
-                            msg = json.loads(raw_text)
-                        except Exception:
-                            continue
-                        if not isinstance(msg, dict):
-                            continue
+    async def receive_wlk_messages(ws) -> None:
+        async for raw_message in ws:
+            if isinstance(raw_message, str):
+                await handle_wlk_message(raw_message)
 
-                        msg_type = msg.get("type")
-                        if msg_type == "start":
-                            source = msg.get("source", source)
-                            scope = msg.get("scope", scope)
-                            agent_type = msg.get("agentType", agent_type)
-                            room_name = msg.get("roomName", room_name)
-                            user_id = msg.get("userId", user_id)
-                            display_name = msg.get("displayName", display_name)
-                            input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
-                            encoding = msg.get("encoding", msg.get("format", encoding))
-                            channels = int(msg.get("channels", channels))
-                            session_started = True
-                            await send_client_json({
-                                "type": "joined",
-                                "session_name": room_name,
-                                "participant_id": participant_id,
-                                "engine": "whisperlivekit",
-                            })
-                            continue
-                        if msg_type == "stop":
-                            await wlk_ws.send(b"")
-                            break
-                        if msg_type == "reset_outputs":
-                            result = clear_output_files()
-                            await send_client_json({"type": "reset_outputs_done", **result})
-                            continue
-                        continue
+    async def wlk_audio_sender(ws) -> None:
+        while True:
+            queue_item = await wlk_send_queue.get()
+            if queue_item is None:
+                break
+            chunk, _ = queue_item
+            try:
+                await ws.send(chunk)
+            except Exception as exc:
+                print(f"[wlk-sender] send error: {exc}")
+                break
 
-                    pcm_bytes = data.get("bytes")
-                    if pcm_bytes is None or not session_started:
-                        continue
+    async def stop_wlk_session(send_stop: bool = True) -> None:
+        nonlocal wlk_ws, receiver_task, sender_task
+        ws = wlk_ws
+        if ws is not None and send_stop:
+            try:
+                await ws.send(b"")
+            except Exception:
+                pass
 
-                    try:
-                        decoded_audio = decode_audio_bytes(
-                            pcm_bytes,
-                            encoding=encoding,
-                            input_sample_rate=input_sample_rate,
-                        )
-                    except Exception as exc:
-                        print(f"WhisperLiveKit proxy decode error: {exc}")
-                        continue
-                    if channels != 1:
-                        print(f"Warning: channels={channels}. WhisperLiveKit proxy expects mono PCM.")
+        drain_wlk_send_queue()
+        try:
+            wlk_send_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            drain_wlk_send_queue()
+            wlk_send_queue.put_nowait(None)
 
-                    audio_duration = len(decoded_audio) / float(SAMPLE_RATE)
-                    audio_stream_time += audio_duration
-                    rms, _ = get_audio_stats(decoded_audio)
-                    if rms < WHISPERLIVEKIT_GATEWAY_SILENCE_RMS:
-                        if current_draft_text:
-                            if audio_silence_started_at is None:
-                                audio_silence_started_at = max(0.0, audio_stream_time - audio_duration)
-                            if audio_stream_time - audio_silence_started_at >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
-                                schedule_audio_silence_finalize()
-                    else:
-                        audio_silence_started_at = None
-                        awaiting_new_speech_after_final = False
-                        if (
-                            WHISPERLIVEKIT_MAX_SPEECH_SEC > 0
-                            and audio_stream_time - last_soft_reset_stream_time >= WHISPERLIVEKIT_MAX_SPEECH_SEC
-                            and current_draft_text
-                        ):
-                            last_soft_reset_stream_time = audio_stream_time
-                            schedule_audio_silence_finalize()
+        if sender_task is not None:
+            try:
+                await asyncio.wait_for(sender_task, timeout=3)
+            except Exception:
+                sender_task.cancel()
+                await asyncio.gather(sender_task, return_exceptions=True)
+        if receiver_task is not None:
+            receiver_task.cancel()
+            await asyncio.gather(receiver_task, return_exceptions=True)
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
-                    encoded_audio = encode_pcm_s16le(decoded_audio)
-                    if encoded_audio:
-                        is_speech_chunk = rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS
-                        if is_speech_chunk:
-                            if not wlk_has_pending_speech:
-                                flush_silence_preroll()
-                            wlk_has_pending_speech = True
-                            wlk_tail_silence_duration = 0.0
-                            enqueue_wlk_audio_chunk(encoded_audio, True)
-                        else:
-                            remember_silence_preroll(encoded_audio, audio_duration)
-                            if wlk_has_pending_speech and wlk_tail_silence_duration < WHISPERLIVEKIT_SILENCE_TAIL_SEC:
-                                enqueue_wlk_audio_chunk(encoded_audio, False)
-                                wlk_tail_silence_duration += audio_duration
-            finally:
-                while wlk_send_queue.full():
-                    try:
-                        wlk_send_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                await wlk_send_queue.put(None)
+        wlk_ws = None
+        receiver_task = None
+        sender_task = None
+
+    async def start_wlk_session() -> None:
+        nonlocal wlk_ws, receiver_task, sender_task
+        drain_wlk_send_queue()
+        wlk_ws = await connect_wlk_session()
+        print(f"Connected to WhisperLiveKit: {wlk_url}")
+        receiver_task = asyncio.create_task(receive_wlk_messages(wlk_ws))
+        sender_task = asyncio.create_task(wlk_audio_sender(wlk_ws))
+
+    async def restart_wlk_session() -> None:
+        nonlocal state_lines, last_finalized_state_line_count, awaiting_new_speech_after_final, restart_wlk_after_final
+        print("Restarting WhisperLiveKit session after finalized transcript")
+        await stop_wlk_session(send_stop=True)
+        state_lines = []
+        last_finalized_state_line_count = 0
+        finalized_silence_keys.clear()
+        awaiting_new_speech_after_final = False
+        restart_wlk_after_final = False
+        await start_wlk_session()
+
+    try:
+        await start_wlk_session()
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+
+            raw_text = data.get("text")
+            if raw_text is not None:
                 try:
-                    await asyncio.wait_for(sender_task, timeout=5)
+                    msg = json.loads(raw_text)
                 except Exception:
-                    sender_task.cancel()
-                    await asyncio.gather(sender_task, return_exceptions=True)
-                try:
-                    await asyncio.wait_for(receiver_task, timeout=15)
-                except Exception:
-                    receiver_task.cancel()
-                    await asyncio.gather(receiver_task, return_exceptions=True)
-        finally:
-            cancel_pending_silence_finalize()
-            cancel_pending_draft_idle_finalize()
-            await wlk_ws.close()
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+
+                msg_type = msg.get("type")
+                if msg_type == "start":
+                    source = msg.get("source", source)
+                    scope = msg.get("scope", scope)
+                    agent_type = msg.get("agentType", agent_type)
+                    room_name = msg.get("roomName", room_name)
+                    user_id = msg.get("userId", user_id)
+                    display_name = msg.get("displayName", display_name)
+                    input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
+                    encoding = msg.get("encoding", msg.get("format", encoding))
+                    channels = int(msg.get("channels", channels))
+                    session_started = True
+                    await send_client_json({
+                        "type": "joined",
+                        "session_name": room_name,
+                        "participant_id": participant_id,
+                        "engine": "whisperlivekit",
+                    })
+                    continue
+                if msg_type == "stop":
+                    break
+                if msg_type == "reset_outputs":
+                    result = clear_output_files()
+                    await send_client_json({"type": "reset_outputs_done", **result})
+                    continue
+                continue
+
+            pcm_bytes = data.get("bytes")
+            if pcm_bytes is None or not session_started:
+                continue
+
+            try:
+                decoded_audio = decode_audio_bytes(
+                    pcm_bytes,
+                    encoding=encoding,
+                    input_sample_rate=input_sample_rate,
+                )
+            except Exception as exc:
+                print(f"WhisperLiveKit proxy decode error: {exc}")
+                continue
+            if channels != 1:
+                print(f"Warning: channels={channels}. WhisperLiveKit proxy expects mono PCM.")
+
+            audio_duration = len(decoded_audio) / float(SAMPLE_RATE)
+            audio_stream_time += audio_duration
+            rms, _ = get_audio_stats(decoded_audio)
+            if rms < WHISPERLIVEKIT_GATEWAY_SILENCE_RMS:
+                if current_draft_text:
+                    if audio_silence_started_at is None:
+                        audio_silence_started_at = max(0.0, audio_stream_time - audio_duration)
+                    if audio_stream_time - audio_silence_started_at >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
+                        schedule_audio_silence_finalize()
+            else:
+                audio_silence_started_at = None
+                if (
+                    WHISPERLIVEKIT_MAX_SPEECH_SEC > 0
+                    and audio_stream_time - last_soft_reset_stream_time >= WHISPERLIVEKIT_MAX_SPEECH_SEC
+                    and current_draft_text
+                ):
+                    last_soft_reset_stream_time = audio_stream_time
+                    schedule_audio_silence_finalize()
+
+            encoded_audio = encode_pcm_s16le(decoded_audio)
+            if encoded_audio:
+                is_speech_chunk = rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS
+                if is_speech_chunk:
+                    if restart_wlk_after_final:
+                        await restart_wlk_session()
+                    if not wlk_has_pending_speech:
+                        flush_silence_preroll()
+                    wlk_has_pending_speech = True
+                    wlk_tail_silence_duration = 0.0
+                    enqueue_wlk_audio_chunk(encoded_audio, True)
+                else:
+                    remember_silence_preroll(encoded_audio, audio_duration)
+                    if wlk_has_pending_speech and wlk_tail_silence_duration < WHISPERLIVEKIT_SILENCE_TAIL_SEC:
+                        enqueue_wlk_audio_chunk(encoded_audio, False)
+                        wlk_tail_silence_duration += audio_duration
     except Exception as exc:
         print(f"WhisperLiveKit proxy error: {exc}")
         await send_client_json({"type": "asr_error", "error": str(exc), "engine": "whisperlivekit"})
+    finally:
+        cancel_pending_silence_finalize()
+        cancel_pending_draft_idle_finalize()
+        await stop_wlk_session(send_stop=True)
 
 @app.websocket("/ws/audio")
 @app.websocket("/sessions/{session_id}/audio-stream")
