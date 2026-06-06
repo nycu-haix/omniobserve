@@ -223,8 +223,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			if (editingItemId !== null) {
 				const updatedItem = await updatePrivatePhaseTaskItem(sessionId, participantUserId, editingItemId, {
 					component_id: selectedComponent.id,
-					action_id: selectedAction.id,
-					detail: ""
+					action_id: selectedAction.id
 				});
 				setItems(current => sortPrivatePhaseTaskItems(current.map(item => (item.id === updatedItem.id ? updatedItem : item))));
 			} else {
