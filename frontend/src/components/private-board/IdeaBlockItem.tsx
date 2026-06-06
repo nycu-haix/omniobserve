@@ -43,7 +43,13 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
-	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
+	const similarityReasonTag =
+		block.similarityIsSameReason == null
+			? null
+			: {
+					label: block.similarityIsSameReason ? "same reason" : "different reason",
+					className: block.similarityIsSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+				};
 	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
 
 	useEffect(() => {
@@ -257,6 +263,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
+							{shouldShowCue && similarityReasonTag && (
+								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
+								</Badge>
+							)}
 							{!isDeleted && !block.isDraft && (
 								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 									<Pencil className="h-4 w-4" />
@@ -323,9 +334,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
-							{similarityReasonLabel && (
-								<Badge className="w-fit" variant={block.similarityIsSameReason ? "default" : "outline"}>
-									{similarityReasonLabel}
+							{similarityReasonTag && (
+								<Badge className={cn("w-fit", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
 								</Badge>
 							)}
 						</div>
