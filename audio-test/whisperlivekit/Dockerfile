@@ -20,4 +20,4 @@ RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pyt
 EXPOSE 8000
 
 ENTRYPOINT ["wlk", "--host", "0.0.0.0"]
-CMD ["--backend", "whisper", "--model-path", "MediaTek-Research/Breeze-ASR-25", "--language", "zh", "--backend-policy", "simulstreaming", "--frame-threshold", "15", "--pcm-input"]
+CMD ["--backend", "whisper", "--model-path", "MediaTek-Research/Breeze-ASR-25", "--language", "zh", "--backend-policy", "simulstreaming", "--frame-threshold", "15", "--static-init-prompt", "繁體中文會議內容，可能包含英文人名、縮寫與技術名詞。", "--pcm-input"]
