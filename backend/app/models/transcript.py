@@ -17,6 +17,7 @@ class Transcript(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     session_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     visibility: Mapped[str] = mapped_column(String(16), nullable=False, server_default="private", default="private", index=True)
     time_stamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

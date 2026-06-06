@@ -55,6 +55,7 @@ async def post_transcript(
         user_id=user_id,
         transcript=payload.transcript,
         visibility=payload.visibility,
+        display_name=payload.display_name,
     )
     return await create_transcript(scoped_payload, db)
 

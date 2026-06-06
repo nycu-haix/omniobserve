@@ -1,12 +1,13 @@
 # OmniObserve Audio Test
 
-This directory contains the standalone audio test stack for validating browser microphone capture, WebSocket audio streaming, backend VAD segmentation, FunASR transcription, and transcript return messages.
+This directory contains the standalone audio test stack for validating browser microphone capture, WebSocket audio streaming, WhisperLiveKit VAD/SimulStreaming transcription, and transcript return messages.
 
 It can run either as a standalone diagnostic stack or as part of the root local full-stack Compose setup. Use the standalone mode when you want to test whether the audio pipeline itself works before wiring it into the full OmniObserve meeting experience.
 
 ## What It Provides
 
-- `vad-backend/`: FastAPI backend with Silero VAD and FunASR.
+- `vad-backend/`: lightweight FastAPI gateway that proxies browser PCM audio to WhisperLiveKit and relays final transcripts to the main pipeline.
+- `whisperlivekit/`: WhisperLiveKit server using local Breeze ASR 25 with fixed `--language zh`.
 - `GET /`: browser diagnostic page for direct microphone testing.
 - `GET /healthz`: backend health check.
 - `WS /ws/audio`: simple audio WebSocket endpoint.
@@ -45,16 +46,15 @@ Backend WebSocket:       ws://localhost:8001/ws/audio
 Static test pages:       http://localhost:3001/
 ```
 
-The compose file requests an Nvidia GPU device for `vad-backend`. On macOS Docker Desktop, prefer the direct Python setup above unless you remove or override the GPU reservation.
+The compose file requests an Nvidia GPU device for `whisperlivekit`. On macOS Docker Desktop, prefer the direct Python setup above unless you remove or override the GPU reservation.
 
-The Docker image uses `vad-backend/requirements.cuda-v100.txt`, which pins PyTorch and torchaudio to CUDA 11.8 wheels for V100 compatibility:
+The `vad-backend` image uses only lightweight gateway dependencies. The ASR runtime lives in the `whisperlivekit` image, which installs the CUDA-enabled WhisperLiveKit package and mounts the local Breeze ASR 25 model:
 
 ```text
-torch==2.4.1+cu118
-torchaudio==2.4.1+cu118
+/models/Breeze-ASR-25
 ```
 
-After rebuilding on the V100 host, backend startup logs should include `supported_arches` with `sm_70`.
+WhisperLiveKit is launched with `--backend whisper --model-path /models/Breeze-ASR-25 --language zh --backend-policy simulstreaming --frame-threshold 15 --pcm-input`. Do not add `--no-vad`; VAD filters silence before encoder work.
 
 ## Browser Diagnostic Test
 
@@ -69,9 +69,9 @@ Use the diagnostic page to test the whole pipeline manually:
 7. Confirm the page shows:
    - WebSocket status is open while running.
    - PCM chunks increase.
-   - VAD start/end events appear in the log.
-   - `segment_saved` appears after speech ends.
-   - latest transcript appears after ASR finishes.
+   - draft transcript updates arrive while speech is still in progress.
+   - draft text may be revised in place as SimulStreaming/AlignAtt re-decodes the active buffer.
+   - final transcript lines replace the draft after WhisperLiveKit commits a line.
 
 If the page receives `asr_error`, check the backend terminal logs first. If VAD events appear but no transcript returns, the audio path is working and the failure is likely in ASR/model loading.
 
@@ -191,12 +191,6 @@ The backend selects the ASR device with `ASR_DEVICE`:
 ASR_DEVICE=auto    # default; use cuda:0 if torch detects CUDA, otherwise cpu
 ASR_DEVICE=cpu     # force CPU
 ASR_DEVICE=cuda:0  # force first CUDA device
-```
-
-For quick tests, the punctuation model can be disabled:
-
-```text
-FUNASR_DISABLE_PUNC=1
 ```
 
 If deployment on an older Nvidia GPU such as V100 returns:

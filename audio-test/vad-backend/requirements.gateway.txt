@@ -1,0 +1,4 @@
+fastapi
+numpy
+uvicorn[standard]
+websockets
