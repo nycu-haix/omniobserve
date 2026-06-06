@@ -11,7 +11,7 @@ from starlette.websockets import WebSocketState
 
 from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
-from ..models import Visibility
+from ..models import IdeaBlock, Visibility
 from ..schemas import ChatMessageCreate
 from ..task_config import (
     get_default_phase_for_session,
@@ -408,6 +408,99 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
     }
 
 
+async def _handle_similarity_reason_share(
+    session_id: str, participant_id: str, payload: dict[str, Any]
+) -> None:
+    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
+    participant_user_id = _normalize_int(participant_id, -1)
+    if block_id < 0 or participant_user_id < 0:
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {
+                "type": "similarity_reason_share_error",
+                "reason": "invalid idea block",
+            },
+        )
+        return
+
+    async with SessionLocal() as db:
+        own_block = await db.get(IdeaBlock, block_id)
+        if (
+            own_block is None
+            or own_block.is_deleted
+            or own_block.session_name != session_id
+            or own_block.user_id != participant_user_id
+            or own_block.similarity_id is None
+        ):
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "similarity_reason_share_error",
+                    "reason": "similar idea block not found",
+                },
+            )
+            return
+
+        other_block = await db.get(IdeaBlock, own_block.similarity_id)
+        if (
+            other_block is None
+            or other_block.is_deleted
+            or other_block.session_name != session_id
+            or other_block.user_id == own_block.user_id
+        ):
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "similarity_reason_share_error",
+                    "reason": "recipient idea block not found",
+                },
+            )
+            return
+
+        target_participant_id = str(other_block.user_id)
+        sender_display_name = get_participant_display_name(session_id, participant_id)
+        message = {
+            "type": "similarity_reason_shared",
+            "payload": {
+                "id": f"shared-reason-{own_block.id}-{other_block.id}-{_now_ms()}",
+                "blockId": str(other_block.id),
+                "fromBlockId": str(own_block.id),
+                "fromParticipantId": str(own_block.user_id),
+                "fromDisplayName": sender_display_name,
+                "title": own_block.title,
+                "summary": own_block.summary,
+                "receivedAtMs": _now_ms(),
+            },
+        }
+
+    sent = await board_manager.send_to(session_id, target_participant_id, message)
+    await board_manager.send_to(
+        session_id,
+        participant_id,
+        {
+            "type": "similarity_reason_share_sent",
+            "payload": {
+                "blockId": str(own_block.id),
+                "targetBlockId": str(other_block.id),
+                "targetParticipantId": target_participant_id,
+                "delivered": sent,
+            },
+        },
+    )
+    logger.info(
+        "similarity_reason_shared session_id=%s from_participant_id=%s from_block_id=%s target_participant_id=%s target_block_id=%s delivered=%s",
+        session_id,
+        participant_id,
+        own_block.id,
+        target_participant_id,
+        other_block.id,
+        sent,
+    )
+
+
 def _get_default_ranking_items(session_id: str) -> list[str]:
     return get_ranking_items_for_session(session_name=session_id)
 
@@ -602,6 +695,10 @@ async def handle_board_websocket(
                 await board_manager.send_to(
                     session_id, participant_id, {"type": "pong"}
                 )
+                continue
+
+            if message_type == "share_similarity_reason":
+                await _handle_similarity_reason_share(session_id, participant_id, payload)
                 continue
 
             if message_type == "ranking_move":

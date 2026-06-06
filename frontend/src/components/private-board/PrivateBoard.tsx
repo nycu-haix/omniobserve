@@ -5,7 +5,7 @@ import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSes
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, SimilarityReasonSharedData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
@@ -33,6 +33,7 @@ type BoardMessage =
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityCueData }
+	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
@@ -156,6 +157,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "update_idea_block" ||
 		message.type === "new_transcript_line" ||
 		message.type === "similarity_cue" ||
+		message.type === "similarity_reason_shared" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
@@ -514,6 +516,7 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 								cueText: block.cueText,
 								hasCue: block.hasCue || nextBlock.hasCue,
 								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+								sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
 								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 							}
 						: block
@@ -521,6 +524,23 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[]): Idea
 			}, baseBlocks)
 		)
 	);
+}
+
+function mergeSharedReasons(left: IdeaBlock["sharedReasons"], right: IdeaBlock["sharedReasons"]): IdeaBlock["sharedReasons"] {
+	const merged = [...(left ?? []), ...(right ?? [])];
+	if (merged.length === 0) {
+		return undefined;
+	}
+
+	const seen = new Set<string>();
+	return merged.filter(reason => {
+		const key = reason.id || `${reason.fromParticipantId}:${reason.fromBlockId}`;
+		if (seen.has(key)) {
+			return false;
+		}
+		seen.add(key);
+		return true;
+	});
 }
 
 function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -1027,6 +1047,36 @@ export function PrivateBoard({
 				);
 			}
 
+			if (lastMessage.type === "similarity_reason_shared") {
+				if (cueCondition !== "experimental") {
+					return;
+				}
+				const sharedReason = lastMessage.payload;
+				console.info("[private-board] similarity_reason_shared received", {
+					sessionId,
+					participantId,
+					blockId: sharedReason.blockId,
+					fromParticipantId: sharedReason.fromParticipantId
+				});
+				setIdeaBlocks(prev =>
+					prev.map(block =>
+						block.id === sharedReason.blockId
+							? {
+									...block,
+									expanded: true,
+									hasCue: true,
+									similarityIsSameReason: false,
+									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
+								}
+							: block
+					)
+				);
+				setHighlightedBlockId(sharedReason.blockId);
+				if (visibleActiveTab !== "ideablock") {
+					setUnreadIdeaBlockCount(current => current + 1);
+				}
+			}
+
 			if (lastMessage.type === "public_chat_message") {
 				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
 				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
@@ -1490,6 +1540,18 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
+	const shareSimilarityReason = (cue: SimilarityCueData) => {
+		if (cue.isSameReason !== false) {
+			return;
+		}
+		onSendBoardMessage({
+			type: "share_similarity_reason",
+			blockId: cue.blockId,
+			cueId: cue.id
+		});
+		setCues(prev => prev.filter(item => item.id !== cue.id));
+	};
+
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
 	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
@@ -1712,7 +1774,9 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
+			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && (
+				<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} onShareReason={shareSimilarityReason} />
+			)}
 		</>
 	);
 }

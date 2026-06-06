@@ -10,11 +10,22 @@ export interface IdeaBlock {
 	hasCue?: boolean;
 	cueText?: string;
 	similarityIsSameReason?: boolean | null;
+	sharedReasons?: SharedSimilarityReason[];
 	expanded?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
 	createdAtMs?: number;
 	status: IdeaBlockStatus;
+}
+
+export interface SharedSimilarityReason {
+	id: string;
+	fromBlockId: string;
+	fromParticipantId: string;
+	fromDisplayName?: string;
+	title: string;
+	summary: string;
+	receivedAtMs?: number;
 }
 
 export interface TranscriptLine {
@@ -35,6 +46,10 @@ export interface SimilarityCueData {
 	blockId: string;
 	blockSummary: string;
 	isSameReason?: boolean;
+}
+
+export interface SimilarityReasonSharedData extends SharedSimilarityReason {
+	blockId: string;
 }
 
 export interface PublicChatMessage {

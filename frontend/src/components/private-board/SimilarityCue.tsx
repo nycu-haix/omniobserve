@@ -1,4 +1,4 @@
-import { Lightbulb, X } from "lucide-react";
+import { Eye, Lightbulb, Send, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
@@ -7,11 +7,13 @@ interface SimilarityCueProps {
 	cues: SimilarityCueData[];
 	onJump: (blockId: string) => void;
 	onDismiss: (cueId: string) => void;
+	onShareReason: (cue: SimilarityCueData) => void;
 }
 
 const CUE_AUTO_DISMISS_MS = 5000;
+const DIFFERENT_REASON_CUE_AUTO_DISMISS_MS = 12000;
 
-export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, onShareReason }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -23,7 +25,7 @@ export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 			return;
 		}
 
-		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue.id), CUE_AUTO_DISMISS_MS));
+		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue.id), cue.isSameReason === false ? DIFFERENT_REASON_CUE_AUTO_DISMISS_MS : CUE_AUTO_DISMISS_MS));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
@@ -34,15 +36,26 @@ export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 	return (
 		<div className="fixed bottom-20 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
 			{cues.map(cue => {
-				const message = (cue.isSameReason ?? true) ? "有人和你想法一樣，要不要試著發表？" : "有人和你有相似的想法但原因略有不同，要不要分享交流？";
+				const isDifferentReason = cue.isSameReason === false;
+				const message = isDifferentReason ? "有人和你有相似的想法但原因略有不同。" : "有人和你想法一樣，要不要試著發表？";
 				return (
 					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
 						<div className="mb-3 flex items-start gap-2 text-sm">
 							<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
-							<span>{message}</span>
+							<div className="grid gap-1">
+								<span>{message}</span>
+								{isDifferentReason && <span className="text-muted-foreground">AI：你想不想讓別人知道你的理由？</span>}
+							</div>
 						</div>
-						<div className="flex justify-end gap-2">
-							<Button size="sm" onClick={() => onJump(cue.blockId)}>
+						<div className="flex flex-wrap justify-end gap-2">
+							{isDifferentReason && (
+								<Button className="gap-1.5" size="sm" onClick={() => onShareReason(cue)}>
+									<Send className="h-3.5 w-3.5" />
+									分享我的理由
+								</Button>
+							)}
+							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue.blockId)}>
+								<Eye className="h-3.5 w-3.5" />
 								查看想法
 							</Button>
 							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
