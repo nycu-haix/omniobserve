@@ -138,7 +138,7 @@ services:
       - "127.0.0.1:${JVB_COLIBRI_PORT:-8080}:8080"
     volumes:
       - jvb-config:/config
-      - ./jvb/custom-jvb.conf:/config/custom-jvb.conf:ro
+      - ./jvb/custom-jvb.conf:/config/custom-jvb.conf
     environment:
       TZ: ${TZ:-Asia/Taipei}
       PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
