@@ -65,9 +65,37 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
      https://meet.omni.elvismao.com/xmpp-websocket
    ```
 
+8. Confirm the public runtime config exposes the expected media fallback settings:
+
+   ```bash
+   curl -s https://meet.omni.elvismao.com/config.js \
+     | grep -E 'websocket|bridgeChannel|resolution'
+   ```
+
+9. For a 3-person smoke test, join a room directly through Jitsi, not through
+   the OmniObserve frontend:
+
+   ```text
+   https://meet.omni.elvismao.com/jitsi-smoke-test
+   ```
+
+   In browser devtools, the failure mode this deployment is intended to prevent
+   looks like:
+
+   ```text
+   ICE disconnected JVB
+   JVB PC state is now failed
+   Sending ICE failed - the connection did not recover
+   CONFERENCE FAILED: conference.iceFailed
+   ```
+
 ## Operational notes
 
 - `JVB_ADVERTISE_IPS` is currently set to `203.145.220.54`, which is the public IP resolved by `meet.omni.elvismao.com`. Update it if the host public IP changes.
-- `10000/udp` must remain reachable from the internet. HTTP reverse proxies do not carry this media traffic.
+- `JVB_ADVERTISE_PRIVATE_CANDIDATES=0` is intentional for this public Docker deployment. Without it, JVB can advertise Docker-internal candidates such as `172.x.x.x:10000`, which public clients cannot use.
+- `10000/udp` must remain reachable from the internet. HTTP reverse proxies do not carry this media traffic. The Jitsi Docker handbook lists `10000/udp` as the RTP media port: https://jitsi.github.io/handbook/docs/devops-guide/devops-guide-docker/#architecture
+- `ENABLE_COLIBRI_WEBSOCKET=1` with `JVB_PREFER_SCTP=0` keeps the JVB bridge channel on HTTPS/WebSocket instead of relying on SCTP over the media peer connection. Jitsi's FAQ recommends bridge websockets for modern deployments: https://jitsi.github.io/handbook/docs/devops-guide/faq/#how-to-migrate-away-from-multiplexing-and-enable-bridge-websockets
+- TURN is not bundled here. If participants are on networks that block or mangle UDP, configure a TURN service and set `TURN_HOST` / `TURNS_HOST` plus credentials in Dokploy. The Jitsi Docker handbook documents these external TURN variables under "TURN server configuration".
+- Default video is capped to 360p (`RESOLUTION=360`, `RESOLUTION_WIDTH=640`) because the meeting pane is small and this reduces JVB bandwidth pressure for 3+ participants.
 - Jitsi's generated runtime config is stored in Docker named volumes so Dokploy volume backups can include it.
-- If the web page loads but participants cannot see or hear each other, check `JVB_ADVERTISE_IPS`, firewall/NAT rules, and whether `10000/udp` is still published.
+- If the web page loads but participants cannot see or hear each other, check `JVB_ADVERTISE_IPS`, `JVB_ADVERTISE_PRIVATE_CANDIDATES`, firewall/NAT rules, whether `10000/udp` is still published, and whether TURN credentials are being announced instead of `service-unavailable`.
