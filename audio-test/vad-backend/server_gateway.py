@@ -86,7 +86,36 @@ PIPELINE_FINAL_RELAY_RETRIES = int(os.getenv("PIPELINE_FINAL_RELAY_RETRIES", "3"
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
 ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
-WHISPERLIVEKIT_WS_URL = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:8000/asr").strip()
+_wlk_urls_env = os.getenv("WHISPERLIVEKIT_WS_URLS", "").strip()
+if _wlk_urls_env:
+    WHISPERLIVEKIT_WS_URLS: list[str] = [u.strip() for u in _wlk_urls_env.split(",") if u.strip()]
+else:
+    _fallback = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:8000/asr").strip()
+    WHISPERLIVEKIT_WS_URLS = [_fallback]
+WHISPERLIVEKIT_WS_URL = WHISPERLIVEKIT_WS_URLS[0]
+_wlk_rr_counter = 0
+_wlk_active_connections = {url: 0 for url in WHISPERLIVEKIT_WS_URLS}
+
+
+def acquire_wlk_url() -> str:
+    global _wlk_rr_counter
+    minimum_connections = min(_wlk_active_connections.values())
+    candidates = [
+        url
+        for url in WHISPERLIVEKIT_WS_URLS
+        if _wlk_active_connections[url] == minimum_connections
+    ]
+    url = candidates[_wlk_rr_counter % len(candidates)]
+    _wlk_rr_counter += 1
+    _wlk_active_connections[url] += 1
+    return url
+
+
+def release_wlk_url(url: str) -> None:
+    if url in _wlk_active_connections:
+        _wlk_active_connections[url] = max(0, _wlk_active_connections[url] - 1)
+
+
 WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
 WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
 WHISPERLIVEKIT_GATEWAY_SILENCE_RMS = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SILENCE_RMS", "0.0012"))
@@ -109,6 +138,7 @@ ASR_MARKER_PATTERN = re.compile(
     r"|<\|\d+(?:\.\d*)?(?:\|>)?"
     r")\s*"
 )
+ASR_DANGLING_MARKER_PATTERN = re.compile(r"<\|[^\s>]*|[<>]")
 ASR_BRACKET_MARKER_PATTERN = re.compile(r"[\[【（(]([^\]】）)]{0,80})[\]】）)]")
 ASR_BRACKET_LABEL_PATTERN = re.compile(
     r"^(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声|"
@@ -163,7 +193,11 @@ async def asr_status():
         "mock": ASR_MOCK,
         "model": ASR_MODEL_NAME,
         "device": str(asr_device) if ASR_ENGINE == "local" else None,
-        "whisperlivekit_ws_url": WHISPERLIVEKIT_WS_URL if ASR_ENGINE != "local" else None,
+        "whisperlivekit_ws_urls": WHISPERLIVEKIT_WS_URLS if ASR_ENGINE != "local" else None,
+        "whisperlivekit_balancing": "least_active_connections",
+        "whisperlivekit_active_connections": dict(_wlk_active_connections)
+        if ASR_ENGINE != "local"
+        else None,
     }
 
 # Clear old wav / transcript files on backend startup
@@ -482,6 +516,7 @@ def clean_asr_bracket_marker(match: re.Match[str]) -> str:
 
 def clean_asr_transcript_text(text: str) -> str:
     cleaned = ASR_MARKER_PATTERN.sub("", text)
+    cleaned = ASR_DANGLING_MARKER_PATTERN.sub("", cleaned)
     cleaned = ASR_PROMPT_LEAK_PATTERN.sub("", cleaned)
     cleaned = ASR_BRACKET_MARKER_PATTERN.sub(clean_asr_bracket_marker, cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
@@ -956,13 +991,14 @@ async def transcribe_and_send(
 # WebSocket endpoint
 # =========================
 
-def build_whisperlivekit_ws_url() -> str:
+def build_whisperlivekit_ws_url(base_url: str | None = None) -> str:
+    url = base_url or WHISPERLIVEKIT_WS_URL
     query = {
         "language": "zh",
         "mode": WHISPERLIVEKIT_MODE or "full",
     }
-    separator = "&" if "?" in WHISPERLIVEKIT_WS_URL else "?"
-    return f"{WHISPERLIVEKIT_WS_URL}{separator}{urlencode(query)}"
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlencode(query)}"
 
 
 def encode_pcm_s16le(audio: np.ndarray) -> bytes:
@@ -1000,7 +1036,13 @@ async def handle_whisperlivekit_audio_ws(
 ) -> None:
     send_lock = asyncio.Lock()
     relay_lock = asyncio.Lock()
-    wlk_url = build_whisperlivekit_ws_url()
+    wlk_base_url = acquire_wlk_url()
+    wlk_url = build_whisperlivekit_ws_url(wlk_base_url)
+    print(
+        "WhisperLiveKit assignment: "
+        f"participantId={participant_id}, backend={wlk_base_url}, "
+        f"active_connections={_wlk_active_connections}"
+    )
 
     source = "unknown"
     scope = "unknown"
@@ -1896,6 +1938,12 @@ async def handle_whisperlivekit_audio_ws(
             wlk_recovery_task.cancel()
             await asyncio.gather(wlk_recovery_task, return_exceptions=True)
         await stop_wlk_session(send_stop=True)
+        release_wlk_url(wlk_base_url)
+        print(
+            "WhisperLiveKit released: "
+            f"participantId={participant_id}, backend={wlk_base_url}, "
+            f"active_connections={_wlk_active_connections}"
+        )
 
 @app.websocket("/ws/audio")
 @app.websocket("/sessions/{session_id}/audio-stream")
