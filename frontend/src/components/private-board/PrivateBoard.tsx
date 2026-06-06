@@ -532,15 +532,7 @@ function mergeSharedReasons(left: IdeaBlock["sharedReasons"], right: IdeaBlock["
 		return undefined;
 	}
 
-	const seen = new Set<string>();
-	return merged.filter(reason => {
-		const key = reason.id || `${reason.fromParticipantId}:${reason.fromBlockId}`;
-		if (seen.has(key)) {
-			return false;
-		}
-		seen.add(key);
-		return true;
-	});
+	return Array.from(new Map(merged.map(reason => [reason.id, reason])).values());
 }
 
 function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -1055,8 +1047,7 @@ export function PrivateBoard({
 				console.info("[private-board] similarity_reason_shared received", {
 					sessionId,
 					participantId,
-					blockId: sharedReason.blockId,
-					fromParticipantId: sharedReason.fromParticipantId
+					blockId: sharedReason.blockId
 				});
 				setIdeaBlocks(prev =>
 					prev.map(block =>
@@ -1549,7 +1540,7 @@ export function PrivateBoard({
 			blockId: cue.blockId,
 			cueId: cue.id
 		});
-		setCues(prev => prev.filter(item => item.id !== cue.id));
+		setCues(prev => prev.filter(item => item.blockId !== cue.blockId || item.isSameReason !== false));
 	};
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");

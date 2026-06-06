@@ -346,14 +346,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						<div className="grid gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge className="w-fit border-yellow-700/30 bg-yellow-100 text-yellow-900" variant="outline">
-									對方分享的不同理由
+									匿名分享的不同理由
 								</Badge>
 							</div>
 							{sharedReasons.map(reason => (
 								<div className="grid gap-1 border-t border-yellow-700/20 pt-2 first:border-t-0 first:pt-0" key={reason.id}>
 									<div className="flex flex-wrap items-center gap-2 text-xs text-yellow-900">
-										<span className="font-semibold">{reason.fromDisplayName || `Participant ${reason.fromParticipantId}`}</span>
-										<span className="text-yellow-900/70">{reason.title}</span>
+										<span className="font-semibold text-yellow-900/70">相似想法</span>
+										<span>{reason.title}</span>
 									</div>
 									<p className="whitespace-pre-wrap break-words leading-5 text-yellow-950">{reason.summary}</p>
 								</div>

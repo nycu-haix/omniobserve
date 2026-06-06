@@ -20,9 +20,6 @@ export interface IdeaBlock {
 
 export interface SharedSimilarityReason {
 	id: string;
-	fromBlockId: string;
-	fromParticipantId: string;
-	fromDisplayName?: string;
 	title: string;
 	summary: string;
 	receivedAtMs?: number;
