@@ -2,8 +2,6 @@ import logging
 import os
 from pathlib import Path
 
-from .task_config import LLM_TOPIC_DESCRIPTION, TOPIC_DESCRIPTION
-
 logger = logging.getLogger("omniobserve")
 logging.basicConfig(level=logging.INFO)
 
@@ -60,7 +58,7 @@ MOCK_TRANSCRIPT_TEXT = os.getenv(
 """,
 )
 
-#specific system prompt for survival tasks
+# Task-specific details come from backend/app/task_config based on the session prefix.
 IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 <Role Assignment>
 你是一位專業的會議記錄分析師，正在針對任務導向討論中參與者的私人語音筆記進行結構化分析。
@@ -75,15 +73,15 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 閱讀 <Context> 標籤中的逐字稿內容，先判斷哪些內容與 <Topic> 的任務有關，再根據 <Principle> 中定義的準則將相關內容分割成獨立的 idea blocks。
 
 一個 idea block 應代表一個與任務有關的完整想法，例如：
-1) 對某個物品重要性的判斷
+1) 對某個任務項目、物品或改善面向重要性的判斷
 2) 排序理由
-3) 求生策略
-4) 海上求生、發出求救訊號、維持生命等存活考量
+3) 與任務目標有關的策略、取捨或優先順序判斷
+4) 支撐某個排序選擇的具體用途、設計理由、風險或效益
 5) 對其他人排序或理由的同意、反對、修正
 6) 與題目目標有關的問題或不確定性
 
 每個 idea block 請輸出：
-1) content：一句最多10個字的短總結，描述此 idea block 與物品清單中哪個 item 或哪個決策有關（給前端顯示用）
+1) content：一句最多10個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）
 2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文；必須使用第一人稱「我覺得...」保留說話者原本的主觀立場，不要寫成「說話者明確表示...」這類第三人稱描述
 3) transcript：該 idea block 對應的逐字稿原文片段
 
@@ -98,7 +96,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 - 麥克風、錄音、系統、介面操作
 - 「請 AI 幫我整理」這類工具操作語句
 - 單純流程管理，例如「我們先討論一下」
-- 與海上求生排序任務無關的內容
+- 與 <Topic> 任務目標無關的內容
 - 沒有具體觀點、理由、問題或決策價值的句子
 
 不相關的內容，即使語意完整，也不要輸出。
@@ -160,7 +158,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 
 [
   {{
-    "content": "一句最多10個字的短總結，描述此 idea block 與物品清單中哪個 item 或哪個決策有關（給前端顯示用）",
+    "content": "一句最多10個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）",
     "summary": "針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文；必須使用第一人稱「我覺得...」保留說話者原本的主觀立場，不要寫成「說話者明確表示...」這類第三人稱描述",
     "transcript": "對應逐字稿原文片段"
   }},

@@ -1,14 +1,35 @@
-*.pyc
+# macOS
+.DS_Store
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
+.venv-*/
 venv/
 venv_*/
+
+# Node / frontend
 node_modules/
 .pnpm-store/
-/audio-test/vad-backend/segments
-.DS_Store
+dist/
+
+# Environment files
 .env
-*.pdf
-# Local dev overrides — not for production
+.env.*
+!.env.example
+
+# Local ASR/runtime outputs
+/audio-test/vad-backend/segments/
+/audio-test/vad-backend/transcripts.jsonl
+
+# Local dev overrides, not for production
 /audio-test/docker-compose.override.yml
 /audio-test/vad-backend/Dockerfile.local
+
+# Generated documents
+*.pdf

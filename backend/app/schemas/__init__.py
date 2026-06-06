@@ -10,6 +10,8 @@ from .board import (
     IdeaBlockUpdateResponse,
     TaskConfigItemResponse,
     TaskConfigResponse,
+    TaskPhaseResponse,
+    TaskTemplateResponse,
     TopicDescriptionResponse,
 )
 from .chat_message import ChatMessageCreate, ChatMessageCreateRequest, ChatMessageResponse
@@ -25,6 +27,12 @@ from .idea_block import (
     IdeaBlockUpdate,
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
+from .private_phase_task_item import (
+    PrivatePhaseTaskItemCreate,
+    PrivatePhaseTaskItemReorder,
+    PrivatePhaseTaskItemResponse,
+    PrivatePhaseTaskItemUpdate,
+)
 from .ranking_move import RankingMoveResponse
 from .similarity import (
     SimilarityCreate,
@@ -60,6 +68,10 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
+    "PrivatePhaseTaskItemCreate",
+    "PrivatePhaseTaskItemReorder",
+    "PrivatePhaseTaskItemResponse",
+    "PrivatePhaseTaskItemUpdate",
     "RankingMoveResponse",
     "SimilarityCreate",
     "SimilarityResponse",
@@ -70,6 +82,8 @@ __all__ = [
     "TaskItemResponse",
     "TaskConfigItemResponse",
     "TaskConfigResponse",
+    "TaskPhaseResponse",
+    "TaskTemplateResponse",
     "TopicDescriptionResponse",
     "TranscriptCreate",
     "TranscriptCreateRequest",

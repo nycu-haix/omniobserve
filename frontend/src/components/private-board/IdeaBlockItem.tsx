@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -14,10 +15,10 @@ interface IdeaBlockItemProps {
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
-	currentPhase?: string;
+	currentPhase?: SessionPhase;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = "private" }: IdeaBlockItemProps) {
+export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = DEFAULT_SESSION_PHASE }: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -41,7 +42,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
-	const shouldShowCue = block.hasCue && currentPhase === "group";
+	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
 	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
 	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
 

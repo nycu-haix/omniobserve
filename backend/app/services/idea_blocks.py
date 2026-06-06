@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
-from ..config import IDEA_BLOCK_SYSTEM_PROMPT, LLM_TOPIC_DESCRIPTION, OPENAI_MODEL, logger
+from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
+from ..task_config import get_llm_topic_description_for_session
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
 
@@ -44,7 +45,7 @@ def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any]]:
+async def build_idea_blocks_with_llm(transcript_text: str, *, session_name: str | None = None) -> list[dict[str, Any]]:
     mock_blocks = _build_mock_idea_blocks(transcript_text)
     if mock_blocks:
         logger.info(
@@ -64,7 +65,7 @@ async def build_idea_blocks_with_llm(transcript_text: str) -> list[dict[str, Any
         )
 
     system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(
-        topic_description=LLM_TOPIC_DESCRIPTION,
+        topic_description=get_llm_topic_description_for_session(session_name=session_name),
         transcript_text=transcript_text,
     )
     user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
@@ -165,7 +166,7 @@ async def generate_and_save_idea_blocks(
     source_transcript_ids: list[str],
     transcript_text: str,
 ) -> list[IdeaBlock]:
-    generated_blocks = await build_idea_blocks_with_llm(transcript_text)
+    generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name)
 
     idea_blocks: list[IdeaBlock] = []
     user_id = _participant_id_to_int(participant_id)

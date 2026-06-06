@@ -1,8 +1,7 @@
 import { ChevronRight } from "lucide-react";
-import type { UIEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { formatParticipantDisplayName } from "../../lib/participantDefaults";
+import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -38,12 +37,11 @@ type BoardMessage =
 	| { type: "similarity_cue"; payload: SimilarityCueData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
-	| { type: "phase_changed"; phase: SessionPhase; end_time_ms: number; duration_s: number }
-	| { type: "countdown_changed"; current_phase?: SessionPhase; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
-	| { type: "board_state"; current_phase?: SessionPhase; timer_end_time_ms?: number; cue_condition?: CueCondition }
+	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
+	| { type: "countdown_changed"; current_phase?: unknown; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
+	| { type: "board_state"; current_phase?: unknown; timer_end_time_ms?: number; cue_condition?: CueCondition }
 	| { type: "cue_condition_changed"; cue_condition?: CueCondition; condition?: CueCondition };
 
-type SessionPhase = "private" | "group";
 type CueCondition = "experimental" | "control";
 
 interface TranscriptResponse {
@@ -149,14 +147,18 @@ type AudioTranscriptMessage =
 type AudioDraftTargetMessage = AudioTranscriptMessage | AudioTranscriptBoundaryMessage;
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
-const PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS = 7000;
 const AUDIO_FINAL_DUPLICATE_WINDOW_MS = 5000;
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
+const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+}
+
+function clampIdeaBlocksSplitRatio(ratio: number): number {
+	return Math.min(Math.max(ratio, MIN_IDEA_BLOCKS_SPLIT_RATIO), 100 - MIN_IDEA_BLOCKS_SPLIT_RATIO);
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -218,6 +220,16 @@ const createDraftIdeaBlock = (): IdeaBlock => ({
 	isDraft: true,
 	createdAtMs: Date.now(),
 	status: "ready"
+});
+
+const createGeneratingIdeaBlock = (content: string): IdeaBlock => ({
+	id: `manual-generating-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	summary: "正在生成...",
+	aiSummary: content,
+	transcript: "",
+	expanded: false,
+	createdAtMs: Date.now(),
+	status: "generating"
 });
 
 function getTranscriptUserId(participantId: string): number {
@@ -656,15 +668,6 @@ function mergePublicChatMessages(baseMessages: PublicChatMessage[], nextMessages
 	return nextMessages.reduce((messages, message) => appendPublicChatMessage(messages, message), baseMessages);
 }
 
-function appendUnreadPublicChatMessage(messages: PublicChatMessage[], message: PublicChatMessage): PublicChatMessage[] {
-	const normalizedMessage = message.message.trim();
-	if (!normalizedMessage || messages.some(item => item.id === message.id)) {
-		return messages;
-	}
-
-	return sortPublicChatMessages([...messages, { ...message, message: normalizedMessage }]);
-}
-
 function sortPublicChatMessages(messages: PublicChatMessage[]): PublicChatMessage[] {
 	return [...messages].sort((left, right) => {
 		const leftTime = left.timestampMs ?? Number(left.id);
@@ -725,6 +728,9 @@ function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 }
 
 function ideaBlockDedupKey(block: IdeaBlock): string {
+	if (block.status === "generating") {
+		return "";
+	}
 	return normalizeIdeaBlockText(block.aiSummary || block.summary);
 }
 
@@ -739,6 +745,10 @@ function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
 		if (!!left.isDeleted !== !!right.isDeleted) {
 			return left.isDeleted ? -1 : 1;
+		}
+
+		if ((left.status === "generating") !== (right.status === "generating")) {
+			return left.status === "generating" ? 1 : -1;
 		}
 
 		const leftTime = left.createdAtMs ?? Number(left.id);
@@ -850,11 +860,10 @@ export function PrivateBoard({
 	currentPhase: controlledPhase,
 	timerEndTime: controlledTimerEndTime,
 	onCollapse,
-	isCollapsed = false,
 	onRequestOpen
 }: PrivateBoardProps) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
-	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
 	const [timerEndTime, setTimerEndTime] = useState<number>(0);
 	const visiblePhase = controlledPhase ?? currentPhase;
@@ -864,32 +873,38 @@ export function PrivateBoard({
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
 	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
-	const [unreadPublicChatMessages, setUnreadPublicChatMessages] = useState<PublicChatMessage[]>([]);
-	const [isPublicChatNotificationVisible, setIsPublicChatNotificationVisible] = useState(false);
-	const [publicChatNotificationMessageId, setPublicChatNotificationMessageId] = useState<string | null>(null);
 	const [ideaBlockRefreshKey, setIdeaBlockRefreshKey] = useState(0);
 	const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null);
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
-	const [manualIdeaPendingCount, setManualIdeaPendingCount] = useState(0);
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
+	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
+	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
+	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
+	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
-	const scrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
+	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
+	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
+	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
 	const lastProcessedBoardMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioBoundaryRef = useRef<object | null>(null);
+	const lastProcessedIdeaBlocksUpdateMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const unreadIdeaBlockIdsFromRefreshRef = useRef<Set<string>>(new Set());
 	const lastVisibleActiveTabRef = useRef<BoardTab>(visibleActiveTab);
@@ -898,19 +913,6 @@ export function PrivateBoard({
 		ideablock: true,
 		"public-chat": true
 	});
-	const isSavingManualIdea = manualIdeaPendingCount > 0;
-	const unreadIdeaBlockCount = ideaBlocks.filter(block => block.isUnread && !block.isDeleted).length;
-	const publicChatNotificationMessage = publicChatNotificationMessageId ? unreadPublicChatMessages.find(message => message.id === publicChatNotificationMessageId) ?? null : unreadPublicChatMessages[0] ?? null;
-	const firstUnreadPublicChatMessage = publicChatNotificationMessage ?? unreadPublicChatMessages[0] ?? null;
-	const hasMultipleUnreadPublicChatMessages = unreadPublicChatMessages.length > 1;
-	const firstUnreadPublicChatSenderName = firstUnreadPublicChatMessage ? formatParticipantDisplayName(firstUnreadPublicChatMessage.userId, firstUnreadPublicChatMessage.displayName) || "聊天室" : "";
-
-	const clearPublicChatNotification = useCallback(() => {
-		setUnreadPublicChatMessages([]);
-		setIsPublicChatNotificationVisible(false);
-		setPublicChatNotificationMessageId(null);
-	}, []);
-
 	const queueSimilarityCueFromBlock = useCallback(
 		(block: IdeaBlock) => {
 			if (cueCondition !== "experimental") {
@@ -952,18 +954,20 @@ export function PrivateBoard({
 		[cueCondition]
 	);
 
-	const openPublicChatTab = useCallback(() => {
-		setActiveTab("public-chat");
-		clearPublicChatNotification();
-	}, [clearPublicChatNotification]);
+	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
 
-	const openPublicChatFromNotification = useCallback(() => {
-		onRequestOpen?.();
-		openPublicChatTab();
-	}, [onRequestOpen, openPublicChatTab]);
+	const selectBoardTab = useCallback((tab: BoardTab) => {
+		if (tab === "ideablock") {
+			setUnreadIdeaBlockCount(0);
+		}
+		if (tab === "public-chat") {
+			setUnreadPublicChatCount(0);
+		}
+		setActiveTab(tab);
+	}, []);
 
 	const focusActiveComposer = useCallback(() => {
-		if (canShowIdeaBlocks && visibleActiveTab === "ideablock") {
+		if (isIdeaBlocksTabActive) {
 			manualIdeaTextareaRef.current?.focus();
 			return true;
 		}
@@ -974,7 +978,7 @@ export function PrivateBoard({
 		}
 
 		return false;
-	}, [canShowIdeaBlocks, visibleActiveTab]);
+	}, [isIdeaBlocksTabActive, visibleActiveTab]);
 
 	useEffect(() => {
 		const handleComposerShortcutKeyDown = (event: KeyboardEvent) => {
@@ -984,19 +988,19 @@ export function PrivateBoard({
 
 			if (event.code === "Digit1") {
 				event.preventDefault();
-				setActiveTab("transcript");
+				selectBoardTab("transcript");
 				return;
 			}
 
 			if (event.code === "Digit2" && canShowIdeaBlocks) {
 				event.preventDefault();
-				setActiveTab("ideablock");
+				selectBoardTab("ideablock");
 				return;
 			}
 
 			if (event.code === "Digit3") {
 				event.preventDefault();
-				openPublicChatTab();
+				selectBoardTab("public-chat");
 				return;
 			}
 
@@ -1007,25 +1011,7 @@ export function PrivateBoard({
 
 		window.addEventListener("keydown", handleComposerShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleComposerShortcutKeyDown);
-	}, [canShowIdeaBlocks, focusActiveComposer, openPublicChatTab]);
-
-	useEffect(() => {
-		if (visibleActiveTab === "public-chat" && !isCollapsed) {
-			clearPublicChatNotification();
-		}
-	}, [clearPublicChatNotification, isCollapsed, visibleActiveTab]);
-
-	useEffect(() => {
-		if (!isPublicChatNotificationVisible || unreadPublicChatMessages.length === 0) {
-			return;
-		}
-
-		const timer = window.setTimeout(() => {
-			setIsPublicChatNotificationVisible(false);
-		}, PUBLIC_CHAT_NOTIFICATION_AUTO_DISMISS_MS);
-
-		return () => window.clearTimeout(timer);
-	}, [isPublicChatNotificationVisible, unreadPublicChatMessages.length]);
+	}, [canShowIdeaBlocks, focusActiveComposer, selectBoardTab]);
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -1164,13 +1150,18 @@ export function PrivateBoard({
 	}, [ideaBlocks]);
 
 	useEffect(() => {
+		publicChatMessagesRef.current = publicChatMessages;
+	}, [publicChatMessages]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
 
 		if (lastMessage.type === "phase_changed") {
 			const timer = window.setTimeout(() => {
-				setCurrentPhase(lastMessage.phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1178,7 +1169,8 @@ export function PrivateBoard({
 
 		if (lastMessage.type === "countdown_changed") {
 			const timer = window.setTimeout(() => {
-				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.timer_end_time_ms ?? lastMessage.end_time_ms ?? 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1186,7 +1178,8 @@ export function PrivateBoard({
 
 		if (lastMessage.type === "board_state") {
 			const timer = window.setTimeout(() => {
-				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				if (typeof lastMessage.timer_end_time_ms === "number") setTimerEndTime(lastMessage.timer_end_time_ms);
 				if (lastMessage.cue_condition) setCueCondition(lastMessage.cue_condition);
 			}, 0);
@@ -1226,6 +1219,10 @@ export function PrivateBoard({
 			if (lastMessage.type === "new_idea_block") {
 				unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.id);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, [{ ...lastMessage.payload, isUnread: true }], { markNewUnread: true }));
+				const isNewActiveBlock = !lastMessage.payload.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === lastMessage.payload.id);
+				if (isNewActiveBlock && visibleActiveTab !== "ideablock") {
+					setUnreadIdeaBlockCount(current => current + 1);
+				}
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
@@ -1286,19 +1283,18 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "public_chat_message") {
-				const chatMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
+				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
+				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
 				setIsSendingPublicChat(false);
-				setPublicChatMessages(prev => appendPublicChatMessage(prev, chatMessage));
-				if (isCollapsed || visibleActiveTab !== "public-chat") {
-					setUnreadPublicChatMessages(prev => appendUnreadPublicChatMessage(prev, chatMessage));
-					setPublicChatNotificationMessageId(current => (isPublicChatNotificationVisible ? current ?? chatMessage.id : chatMessage.id));
-					setIsPublicChatNotificationVisible(true);
+				setPublicChatMessages(prev => appendPublicChatMessage(prev, nextMessage));
+				if (isNewUnreadMessage && visibleActiveTab !== "public-chat") {
+					setUnreadPublicChatCount(current => current + 1);
 				}
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [cueCondition, isCollapsed, isPublicChatNotificationVisible, lastMessage, participantId, sessionId, visibleActiveTab, visiblePhase]);
+	}, [cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
@@ -1517,8 +1513,12 @@ export function PrivateBoard({
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
 			return;
 		}
-
 		const timer = window.setTimeout(() => {
+			if (lastProcessedIdeaBlocksUpdateMessageRef.current === lastAudioMessage) {
+				return;
+			}
+			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
+
 			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
 				const previousBlocksById = new Map(ideaBlocksRef.current.map(block => [block.id, block]));
 				const existingBlockIds = new Set(previousBlocksById.keys());
@@ -1538,7 +1538,12 @@ export function PrivateBoard({
 				});
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
+					const existingActiveBlockIds = new Set(prev.filter(block => !block.isDeleted).map(block => block.id));
 					mergedBlocksSnapshot = mergeIdeaBlocks(prev, updatedBlocks, { markNewUnread: true });
+					const newActiveBlockCount = mergedBlocksSnapshot.filter(block => !block.isDeleted && !existingActiveBlockIds.has(block.id)).length;
+					if (newActiveBlockCount > 0 && lastVisibleActiveTabRef.current !== "ideablock") {
+						setUnreadIdeaBlockCount(current => current + newActiveBlockCount);
+					}
 					ideaBlocksRef.current = mergedBlocksSnapshot;
 					return mergedBlocksSnapshot;
 				});
@@ -1586,7 +1591,7 @@ export function PrivateBoard({
 			return;
 		}
 		onRequestOpen?.();
-		setActiveTab("ideablock");
+		selectBoardTab("ideablock");
 		setHighlightedBlockId(blockId);
 	};
 
@@ -1596,7 +1601,7 @@ export function PrivateBoard({
 			return;
 		}
 
-		setActiveTab("transcript");
+		selectBoardTab("ideablock");
 		window.setTimeout(() => setHighlightedTranscriptId(transcriptId), 0);
 	};
 
@@ -1605,29 +1610,133 @@ export function PrivateBoard({
 		return transcriptIds.length > 0;
 	};
 
-	const handleBoardScroll = (event: UIEvent<HTMLDivElement>) => {
-		shouldAutoScrollRef.current[visibleActiveTab] = isNearScrollBottom(event.currentTarget);
+	const handleTranscriptScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current.transcript = isNearScrollBottom(event.currentTarget);
+	}, []);
+
+	const handleIdeaBlocksScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current.ideablock = isNearScrollBottom(event.currentTarget);
+	}, []);
+
+	const handlePublicChatScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+		shouldAutoScrollRef.current["public-chat"] = isNearScrollBottom(event.currentTarget);
+	}, []);
+
+	const handleIdeaBlocksSplitResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		splitResizeCleanupRef.current?.();
+		const resizeHandle = event.currentTarget;
+		resizeHandle.setPointerCapture(event.pointerId);
+
+		const updateSplitRatio = (clientY: number) => {
+			const container = ideaBlocksSplitContainerRef.current;
+			if (!container) {
+				return;
+			}
+
+			const rect = container.getBoundingClientRect();
+			if (rect.height <= 0) {
+				return;
+			}
+
+			setIdeaBlocksSplitRatio(clampIdeaBlocksSplitRatio(((clientY - rect.top) / rect.height) * 100));
+		};
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			updateSplitRatio(moveEvent.clientY);
+		};
+
+		const cleanupResizeListeners = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+			splitResizeCleanupRef.current = null;
+		};
+
+		const handlePointerUp = () => {
+			setResizeCursor(null);
+			cleanupResizeListeners();
+		};
+
+		updateSplitRatio(event.clientY);
+		setResizeCursor("row-resize");
+		document.body.style.cursor = "row-resize";
+		document.body.style.userSelect = "none";
+		splitResizeCleanupRef.current = cleanupResizeListeners;
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
 	};
 
+	const handleIdeaBlocksSplitResizeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+			return;
+		}
+
+		event.preventDefault();
+		const direction = event.key === "ArrowUp" ? -1 : 1;
+		setIdeaBlocksSplitRatio(current => clampIdeaBlocksSplitRatio(current + direction * 4));
+	};
+
+	useEffect(() => {
+		return () => {
+			splitResizeCleanupRef.current?.();
+		};
+	}, []);
+
 	useLayoutEffect(() => {
-		const viewport = scrollViewportRef.current;
+		const transcriptViewport = transcriptScrollViewportRef.current;
+		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
+		const publicChatViewport = publicChatScrollViewportRef.current;
+		const didEnterIdeaBlocks = lastVisibleActiveTabRef.current !== "ideablock" && isIdeaBlocksTabActive;
 		const didEnterTranscript = lastVisibleActiveTabRef.current !== "transcript" && visibleActiveTab === "transcript";
+		const didEnterPublicChat = lastVisibleActiveTabRef.current !== "public-chat" && visibleActiveTab === "public-chat";
 		lastVisibleActiveTabRef.current = visibleActiveTab;
 
-		if (didEnterTranscript) {
+		if (didEnterIdeaBlocks) {
 			shouldAutoScrollRef.current.transcript = true;
-			if (viewport) {
-				viewport.scrollTop = viewport.scrollHeight;
+			shouldAutoScrollRef.current.ideablock = true;
+			if (transcriptViewport) {
+				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			}
+			if (ideaBlocksViewport) {
+				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
 			}
 			return;
 		}
 
-		if (!viewport || !shouldAutoScrollRef.current[visibleActiveTab]) {
+		if (isIdeaBlocksTabActive) {
+			if (transcriptViewport && shouldAutoScrollRef.current.transcript) {
+				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			}
+			if (ideaBlocksViewport && shouldAutoScrollRef.current.ideablock) {
+				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
+			}
 			return;
 		}
 
-		viewport.scrollTop = viewport.scrollHeight;
-	}, [visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
+		if (didEnterTranscript) {
+			shouldAutoScrollRef.current.transcript = true;
+		}
+
+		if (visibleActiveTab === "transcript" && transcriptViewport && shouldAutoScrollRef.current.transcript) {
+			transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			return;
+		}
+
+		if (didEnterPublicChat) {
+			shouldAutoScrollRef.current["public-chat"] = true;
+		}
+
+		if (publicChatViewport && shouldAutoScrollRef.current["public-chat"]) {
+			publicChatViewport.scrollTop = publicChatViewport.scrollHeight;
+		}
+	}, [isIdeaBlocksTabActive, visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id && !block.isDeleted ? { ...block, expanded: !block.expanded, isUnread: false } : block)));
@@ -1742,9 +1851,14 @@ export function PrivateBoard({
 		}
 
 		setManualIdeaText("");
-		setManualIdeaPendingCount(current => current + 1);
 		setManualIdeaError(null);
 		window.requestAnimationFrame(() => manualIdeaTextareaRef.current?.focus());
+		const generatingBlock = createGeneratingIdeaBlock(normalizedContent);
+		setIdeaBlocks(prev => {
+			const nextBlocks = sortIdeaBlocks([...prev, generatingBlock]);
+			ideaBlocksRef.current = nextBlocks;
+			return nextBlocks;
+		});
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
 				const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
@@ -1757,8 +1871,16 @@ export function PrivateBoard({
 					expanded: false,
 					isDraft: false
 				};
-				setIdeaBlocks(prev => sortIdeaBlocks([...prev, newBlock]));
-				setHighlightedBlockId(newBlock.id);
+				setIdeaBlocks(prev => {
+					const nextBlocks = sortIdeaBlocks(prev.map(block => (block.id === generatingBlock.id ? newBlock : block)));
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
+				if (lastVisibleActiveTabRef.current === "ideablock") {
+					setHighlightedBlockId(newBlock.id);
+				} else {
+					setUnreadIdeaBlockCount(current => current + 1);
+				}
 				return;
 			}
 
@@ -1775,12 +1897,26 @@ export function PrivateBoard({
 			}
 
 			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
-			setIdeaBlocks(prev => mergeIdeaBlocks(prev, [{ ...savedBlock, isUnread: true }], { markNewUnread: true }));
+			const isNewActiveBlock = !savedBlock.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === savedBlock.id);
+			setIdeaBlocks(prev => {
+				const withoutGeneratingBlock = prev.filter(block => block.id !== generatingBlock.id);
+				const nextBlocks = mergeIdeaBlocks(withoutGeneratingBlock, [{ ...savedBlock, isUnread: true }], { markNewUnread: true });
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
+			if (lastVisibleActiveTabRef.current === "ideablock") {
+				setHighlightedBlockId(savedBlock.id);
+			} else if (isNewActiveBlock) {
+				setUnreadIdeaBlockCount(current => current + 1);
+			}
 			setIdeaBlockRefreshKey(current => current + 1);
 		} catch (error) {
+			setIdeaBlocks(prev => {
+				const nextBlocks = prev.filter(block => block.id !== generatingBlock.id);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
 			setManualIdeaError(error instanceof Error ? error.message : "Failed to save idea block");
-		} finally {
-			setManualIdeaPendingCount(current => Math.max(0, current - 1));
 		}
 	};
 
@@ -1803,34 +1939,16 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
-	const hasVisibleSimilarityCues = canShowIdeaBlocks && visiblePhase === "group" && cues.length > 0;
-	const renderPublicChatNotification = (isStackedAboveCue: boolean) =>
-		firstUnreadPublicChatMessage && isPublicChatNotificationVisible ? (
-			<button
-				type="button"
-				className={cn(
-					"grid gap-0.5 rounded-lg border bg-card px-3 py-1.5 text-left text-card-foreground shadow-lg ring-1 ring-black/5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-					isStackedAboveCue ? "w-full" : "fixed bottom-20 right-4 z-[60] w-[min(360px,calc(100vw-2rem))]"
-				)}
-				aria-label="開啟聊天室新留言"
-				onClick={openPublicChatFromNotification}
-			>
-				<div>
-					<span className="text-xs font-semibold leading-4 text-muted-foreground">聊天室有新留言</span>
-				</div>
-				<div className="truncate text-sm font-medium leading-5">{firstUnreadPublicChatSenderName}</div>
-				<div className="line-clamp-1 text-xs leading-4 text-muted-foreground">{firstUnreadPublicChatMessage.message}</div>
-				{hasMultipleUnreadPublicChatMessages && <div className="justify-self-end text-xs font-medium leading-4 text-muted-foreground">多則留言</div>}
-			</button>
-		) : null;
-	const standalonePublicChatNotification = hasVisibleSimilarityCues ? null : renderPublicChatNotification(false);
-	const similarityCueNotification =
-		canShowIdeaBlocks && visiblePhase === "group" ? (
-			<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} topContent={renderPublicChatNotification(true)} />
-		) : null;
+	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
+	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
+	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
+	const transcriptTabEmptyText = canShowIdeaBlocks ? "尚無公開逐字稿" : "尚無逐字稿";
+	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
+	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 
 	return (
 		<>
+			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex items-center gap-2">
@@ -1847,24 +1965,27 @@ export function PrivateBoard({
 									visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
-								onClick={() => setActiveTab("transcript")}
+								onClick={() => selectBoardTab("transcript")}
 							>
 								逐字稿
 							</Button>
 							{canShowIdeaBlocks && (
 								<Button
-									aria-pressed={activeTab === "ideablock"}
+									aria-pressed={visibleActiveTab === "ideablock"}
 									className={cn(
-										"transition-all active:translate-y-px active:scale-[0.98]",
-										activeTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+										"relative transition-all active:translate-y-px active:scale-[0.98]",
+										visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 									)}
-									variant={activeTab === "ideablock" ? "default" : "ghost"}
-									onClick={() => setActiveTab("ideablock")}
+									variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
+									onClick={() => selectBoardTab("ideablock")}
 								>
 									Idea Blocks
 									{unreadIdeaBlockCount > 0 && (
-										<span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-semibold leading-none text-destructive-foreground">
-											{unreadIdeaBlockCount > 99 ? "99+" : unreadIdeaBlockCount}
+										<span
+											className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
+											aria-label={`${unreadIdeaBlockCount} unread idea blocks`}
+										>
+											{unreadIdeaBlockCountLabel}
 										</span>
 									)}
 								</Button>
@@ -1872,13 +1993,21 @@ export function PrivateBoard({
 							<Button
 								aria-pressed={visibleActiveTab === "public-chat"}
 								className={cn(
-									"transition-all active:translate-y-px active:scale-[0.98]",
+									"relative transition-all active:translate-y-px active:scale-[0.98]",
 									visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
-								onClick={openPublicChatTab}
+								onClick={() => selectBoardTab("public-chat")}
 							>
 								聊天室
+								{unreadPublicChatCount > 0 && (
+									<span
+										className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
+										aria-label={`${unreadPublicChatCount} unread chat messages`}
+									>
+										{unreadPublicChatCountLabel}
+									</span>
+								)}
 							</Button>
 						</div>
 					</div>
@@ -1889,44 +2018,94 @@ export function PrivateBoard({
 					</div>
 				</header>
 
-				<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={scrollViewportRef} viewportProps={{ onScroll: handleBoardScroll }}>
-					{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
-						<div className="grid gap-2 pb-3">
-							{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
-							{ideaBlocks.map(block => (
-								<div
-									key={block.id}
-									ref={node => {
-										blockRefs.current[block.id] = node;
-									}}
-								>
-									<IdeaBlockItem
-										block={block}
-										isHighlighted={highlightedBlockId === block.id}
-										onToggle={toggleBlock}
-										onSave={saveIdeaBlock}
-										onDelete={deleteIdeaBlock}
-										onJumpToTranscript={jumpToTranscript}
-										canJumpToTranscript={canJumpToTranscript(block)}
-										currentPhase={visiblePhase}
-									/>
-								</div>
-							))}
-						</div>
-					)}
-					{visibleActiveTab === "transcript" && (
+				{visibleActiveTab === "transcript" && (
+					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
 						<TranscriptLines
-							lines={transcriptLines}
-							emptyText="尚無逐字稿"
-							onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+							lines={transcriptTabLines}
+							emptyText={transcriptTabEmptyText}
+							onJumpToBlock={undefined}
 							onTranscriptRef={setTranscriptRef}
 							highlightedTranscriptId={highlightedTranscriptId}
 						/>
-					)}
-					{visibleActiveTab === "public-chat" && <PublicChatMessages messages={publicChatMessages} />}
-				</ScrollArea>
+					</ScrollArea>
+				)}
 
-				{canShowIdeaBlocks && visibleActiveTab === "ideablock" && (
+				{isIdeaBlocksTabActive && (
+					<div
+						ref={ideaBlocksSplitContainerRef}
+						className="grid min-h-0 flex-1 p-3"
+						style={{
+							gridTemplateRows: `minmax(0, ${ideaBlocksSplitRatio}fr) 1rem minmax(0, ${100 - ideaBlocksSplitRatio}fr)`
+						}}
+					>
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
+								<TranscriptLines
+									lines={privateTranscriptLines}
+									emptyText="尚無逐字稿"
+									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+									onTranscriptRef={setTranscriptRef}
+									highlightedTranscriptId={highlightedTranscriptId}
+								/>
+							</ScrollArea>
+						</section>
+
+						<div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+							<div />
+							<button
+								type="button"
+								className="group grid h-4 w-20 cursor-row-resize place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								aria-label="調整私人逐字稿與 Idea Blocks 高度"
+								aria-orientation="horizontal"
+								aria-valuemin={MIN_IDEA_BLOCKS_SPLIT_RATIO}
+								aria-valuemax={100 - MIN_IDEA_BLOCKS_SPLIT_RATIO}
+								aria-valuenow={Math.round(ideaBlocksSplitRatio)}
+								role="separator"
+								onPointerDown={handleIdeaBlocksSplitResizeStart}
+								onKeyDown={handleIdeaBlocksSplitResizeKeyDown}
+							>
+								<span className="h-0.5 w-20 rounded-full bg-border transition-colors group-hover:bg-primary/30" aria-hidden="true" />
+							</button>
+							<div />
+						</div>
+
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="border-b px-3 py-2 text-sm font-medium">Idea Blocks</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleIdeaBlocksScroll }}>
+								<div className="grid gap-2 pb-3">
+									{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
+									{ideaBlocks.map(block => (
+										<div
+											key={block.id}
+											ref={node => {
+												blockRefs.current[block.id] = node;
+											}}
+										>
+											<IdeaBlockItem
+												block={block}
+												isHighlighted={highlightedBlockId === block.id}
+												onToggle={toggleBlock}
+												onSave={saveIdeaBlock}
+												onDelete={deleteIdeaBlock}
+												onJumpToTranscript={jumpToTranscript}
+												canJumpToTranscript={canJumpToTranscript(block)}
+												currentPhase={visiblePhase}
+											/>
+										</div>
+									))}
+								</div>
+							</ScrollArea>
+						</section>
+					</div>
+				)}
+				{visibleActiveTab === "public-chat" && (
+					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={publicChatScrollViewportRef} viewportProps={{ onScroll: handlePublicChatScroll }}>
+						<PublicChatMessages messages={publicChatMessages} />
+					</ScrollArea>
+				)}
+
+				{isIdeaBlocksTabActive && (
 					<footer className="border-t bg-card p-3">
 						<div className="grid gap-2">
 							<div className="flex items-end gap-2">
@@ -1955,7 +2134,7 @@ export function PrivateBoard({
 									{!manualIdeaText.trim() && <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-muted-foreground">shift + enter 換行</span>}
 								</div>
 								<Button className="h-11 shrink-0 px-4" onClick={() => void addManualIdeaBlock()} disabled={!manualIdeaText.trim()}>
-									{isSavingManualIdea ? "儲存中" : "新增"}
+									新增
 								</Button>
 							</div>
 							{manualIdeaError && <p className="text-xs text-destructive">{manualIdeaError}</p>}
@@ -1982,19 +2161,18 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{typeof document !== "undefined" && similarityCueNotification ? createPortal(similarityCueNotification, document.body) : null}
-			{typeof document !== "undefined" && standalonePublicChatNotification ? createPortal(standalonePublicChatNotification, document.body) : null}
+			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
 		</>
 	);
 }
 
 function PhaseBadge({ phase }: { phase: SessionPhase }) {
-	const label = phase === "group" ? "Group Phase" : "Private Phase";
+	const label = getSessionPhaseLabel(phase);
 	return (
 		<div
 			className={cn(
 				"rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
-				phase === "group" ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
+				isGroupPhase(phase) ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
 			)}
 		>
 			{label}

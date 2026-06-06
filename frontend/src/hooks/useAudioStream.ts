@@ -38,6 +38,11 @@ function getAudioWsBaseUrl(): string {
 	return baseUrl.replace(/\/+$/, "");
 }
 
+function getPipelineWsBaseUrl(): string | null {
+	const generalWsBaseUrl = import.meta.env.VITE_WS_BASE_URL as string | undefined;
+	return generalWsBaseUrl ? generalWsBaseUrl.replace(/\/+$/, "") : null;
+}
+
 function sourceForMode(mode: AudioStreamMode): string {
 	return mode === "public" ? "browser_public" : "browser_private";
 }
@@ -346,7 +351,12 @@ export function useAudioStream(
 			};
 
 			const wsBaseUrl = getAudioWsBaseUrl();
-			const wsUrl = `${wsBaseUrl}/sessions/${encodeURIComponent(sessionId)}` + `/audio-stream?participant_id=${encodeURIComponent(participantId)}`;
+			const pipelineWsBaseUrl = getPipelineWsBaseUrl();
+			const params = new URLSearchParams({ participant_id: participantId });
+			if (pipelineWsBaseUrl && pipelineWsBaseUrl !== wsBaseUrl) {
+				params.set("pipeline_ws_base_url", pipelineWsBaseUrl);
+			}
+			const wsUrl = `${wsBaseUrl}/sessions/${encodeURIComponent(sessionId)}/audio-stream?${params.toString()}`;
 
 			console.info("[audio-ws] connecting", {
 				mode,
@@ -438,6 +448,7 @@ export function useAudioStream(
 						userId: meta.participantId,
 						displayName: meta.displayName,
 						clientId: meta.clientId,
+						pipelineWsBaseUrl: pipelineWsBaseUrl ?? undefined,
 						sampleRate: TARGET_SAMPLE_RATE,
 						channels: 1,
 						encoding: "float32",

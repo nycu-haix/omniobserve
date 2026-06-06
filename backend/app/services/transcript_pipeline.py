@@ -139,7 +139,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(transcript_text),
         )
-        generated_blocks = await build_idea_blocks_with_llm(transcript_text)
+        generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name)
         logger.info(
             "pipeline_idea_llm_done session_name=%s user_id=%s count=%s",
             session_name,
@@ -232,6 +232,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 await generate_and_save_task_items_for_idea_block(
                     db,
                     idea_block_id=idea_block.id,
+                    session_name=session_name,
                     text=summary,
                 )
             )

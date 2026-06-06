@@ -15,6 +15,7 @@ class TaskItemConfig(TypedDict):
 
 TASK_ID = "lost-at-sea"
 TASK_TITLE = "Lost at Sea"
+TEMPLATE_DESCRIPTION = "海上求生情境中的 15 項物品排序任務。"
 
 TOPIC_DESCRIPTION = """你們搭乘一艘私人遊艇，在南太平洋上漂流。因為一場原因不明的火災，遊艇和船上大部分物品都被燒毀，遊艇正在慢慢下沉。
 
@@ -275,11 +276,30 @@ SIMILARITY_TASK_CONTEXT = (
     + "。"
 )
 
+PRIVATE_RANKING_LAYOUT = {
+    "type": "leaf",
+    "content": "private-ranking",
+}
+PUBLIC_RANKING_COMPARISON_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 50,
+    "first": {"type": "leaf", "content": "public-ranking"},
+    "second": {"type": "leaf", "content": "private-ranking"},
+}
+
+TASK_PHASES = [
+    {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
+    {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
+]
+
 TASK_CONFIG = {
     "task_id": TASK_ID,
     "title": TASK_TITLE,
+    "template_description": TEMPLATE_DESCRIPTION,
     "topic_description": TOPIC_DESCRIPTION,
     "task_detail": TASK_TOPIC_DETAIL,
+    "phases": TASK_PHASES,
     "items": TASK_ITEMS,
 }
 
@@ -288,8 +308,10 @@ def serialize_task_config() -> dict[str, Any]:
     return {
         "task_id": TASK_ID,
         "title": TASK_TITLE,
+        "template_description": TEMPLATE_DESCRIPTION,
         "topic_description": TOPIC_DESCRIPTION,
         "task_detail": TASK_TOPIC_DETAIL,
+        "phases": TASK_PHASES,
         "items": [
             {
                 "id": item["id"],
