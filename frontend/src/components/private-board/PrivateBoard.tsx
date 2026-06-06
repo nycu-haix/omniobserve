@@ -709,11 +709,13 @@ export function PrivateBoard({
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
 	const lastProcessedBoardMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
+	const lastProcessedIdeaBlocksUpdateMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const lastVisibleActiveTabRef = useRef<BoardTab>(visibleActiveTab);
 	const shouldAutoScrollRef = useRef<Record<BoardTab, boolean>>({
@@ -1078,8 +1080,12 @@ export function PrivateBoard({
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
 			return;
 		}
-
 		const timer = window.setTimeout(() => {
+			if (lastProcessedIdeaBlocksUpdateMessageRef.current === lastAudioMessage) {
+				return;
+			}
+			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
+
 			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
 				const updatedBlocks = lastAudioMessage.idea_blocks.map(ideaBlockResponseToBlock);
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
@@ -1087,7 +1093,7 @@ export function PrivateBoard({
 					const existingActiveBlockIds = new Set(prev.filter(block => !block.isDeleted).map(block => block.id));
 					mergedBlocksSnapshot = mergeIdeaBlocks(prev, updatedBlocks);
 					const newActiveBlockCount = mergedBlocksSnapshot.filter(block => !block.isDeleted && !existingActiveBlockIds.has(block.id)).length;
-					if (newActiveBlockCount > 0 && visibleActiveTab !== "ideablock") {
+					if (newActiveBlockCount > 0 && lastVisibleActiveTabRef.current !== "ideablock") {
 						setUnreadIdeaBlockCount(current => current + newActiveBlockCount);
 					}
 					ideaBlocksRef.current = mergedBlocksSnapshot;
@@ -1102,7 +1108,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, visibleActiveTab]);
+	}, [lastAudioMessage]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -1169,6 +1175,7 @@ export function PrivateBoard({
 
 	const handleIdeaBlocksSplitResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		splitResizeCleanupRef.current?.();
 		const resizeHandle = event.currentTarget;
 		resizeHandle.setPointerCapture(event.pointerId);
 
@@ -1190,22 +1197,28 @@ export function PrivateBoard({
 			updateSplitRatio(moveEvent.clientY);
 		};
 
-		const handlePointerUp = () => {
+		const cleanupResizeListeners = () => {
 			if (resizeHandle.hasPointerCapture(event.pointerId)) {
 				resizeHandle.releasePointerCapture(event.pointerId);
 			}
-			setResizeCursor(null);
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
 			window.removeEventListener("pointermove", handlePointerMove);
 			window.removeEventListener("pointerup", handlePointerUp);
 			window.removeEventListener("pointercancel", handlePointerUp);
+			splitResizeCleanupRef.current = null;
+		};
+
+		const handlePointerUp = () => {
+			setResizeCursor(null);
+			cleanupResizeListeners();
 		};
 
 		updateSplitRatio(event.clientY);
 		setResizeCursor("row-resize");
 		document.body.style.cursor = "row-resize";
 		document.body.style.userSelect = "none";
+		splitResizeCleanupRef.current = cleanupResizeListeners;
 		window.addEventListener("pointermove", handlePointerMove);
 		window.addEventListener("pointerup", handlePointerUp);
 		window.addEventListener("pointercancel", handlePointerUp);
@@ -1220,6 +1233,12 @@ export function PrivateBoard({
 		const direction = event.key === "ArrowUp" ? -1 : 1;
 		setIdeaBlocksSplitRatio(current => clampIdeaBlocksSplitRatio(current + direction * 4));
 	};
+
+	useEffect(() => {
+		return () => {
+			splitResizeCleanupRef.current?.();
+		};
+	}, []);
 
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
@@ -1473,6 +1492,8 @@ export function PrivateBoard({
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
+	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
+	const transcriptTabEmptyText = canShowIdeaBlocks ? "尚無公開逐字稿" : "尚無逐字稿";
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 
@@ -1550,7 +1571,13 @@ export function PrivateBoard({
 
 				{visibleActiveTab === "transcript" && (
 					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-						<TranscriptLines lines={publicTranscriptLines} emptyText="尚無公開逐字稿" onJumpToBlock={undefined} onTranscriptRef={setTranscriptRef} highlightedTranscriptId={highlightedTranscriptId} />
+						<TranscriptLines
+							lines={transcriptTabLines}
+							emptyText={transcriptTabEmptyText}
+							onJumpToBlock={undefined}
+							onTranscriptRef={setTranscriptRef}
+							highlightedTranscriptId={highlightedTranscriptId}
+						/>
 					</ScrollArea>
 				)}
 
