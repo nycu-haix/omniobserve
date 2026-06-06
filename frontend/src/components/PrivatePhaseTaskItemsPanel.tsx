@@ -1,7 +1,4 @@
-import type { DragEndEvent } from "@dnd-kit/core";
-import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
-import { CSS } from "@dnd-kit/utilities";
-import { ArrowDown, ArrowUp, Check, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "../lib/utils";
 import {
@@ -26,24 +23,14 @@ interface PrivatePhaseTaskItemsPanelProps {
 interface PhaseTaskFormState {
 	componentId: string;
 	actionId: string;
-	detail: string;
 }
 
 type KeywordKind = "component" | "action";
 
-interface PhaseTaskKeywordDragData {
-	kind: KeywordKind;
-	id: string;
-}
-
-const COMPONENT_DROP_ID = "phase-task-component-drop";
-const ACTION_DROP_ID = "phase-task-action-drop";
-
 function createPhaseTaskForm(): PhaseTaskFormState {
 	return {
 		componentId: "",
-		actionId: "",
-		detail: ""
+		actionId: ""
 	};
 }
 
@@ -52,15 +39,13 @@ function getParticipantUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined, detail: string): string {
+function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined): string {
 	if (!component || !action) {
 		return "";
 	}
 
 	const template = action.template_zh?.trim();
-	const baseStatement = template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
-	const normalizedDetail = detail.trim();
-	return normalizedDetail ? `${baseStatement}：${normalizedDetail}` : baseStatement;
+	return template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
 }
 
 function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
@@ -74,14 +59,9 @@ function reindexPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePha
 	}));
 }
 
-function KeywordDropSlot({ id, label, selectedOption, isActive, onClear }: { id: string; label: string; selectedOption?: Phase1BuilderOption; isActive: boolean; onClear: () => void }) {
-	const { isOver, setNodeRef } = useDroppable({ id });
-
+function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: string; selectedOption?: Phase1BuilderOption; isActive: boolean; onClear: () => void }) {
 	return (
-		<div
-			ref={setNodeRef}
-			className={cn("grid min-h-24 gap-2 rounded-lg border border-dashed bg-card p-3 transition-colors", isOver && "border-primary bg-primary/5", isActive && "border-primary/60 bg-primary/5")}
-		>
+		<div className={cn("grid min-h-24 gap-2 rounded-lg border border-dashed bg-card p-3 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
 			<div className="flex items-center justify-between gap-2">
 				<span className="text-xs font-semibold text-muted-foreground">{label}</span>
 				{selectedOption && (
@@ -103,32 +83,17 @@ function KeywordDropSlot({ id, label, selectedOption, isActive, onClear }: { id:
 }
 
 function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind; option: Phase1BuilderOption; isSelected: boolean; onSelect: () => void }) {
-	const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-		id: `phase-task-keyword-${kind}-${option.id}`,
-		data: {
-			kind,
-			id: option.id
-		} satisfies PhaseTaskKeywordDragData
-	});
-	const style = {
-		transform: CSS.Translate.toString(transform)
-	};
-
 	return (
 		<button
-			ref={setNodeRef}
 			type="button"
 			className={cn(
-				"inline-flex min-h-9 min-w-0 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs font-medium leading-5 shadow-sm transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-				isSelected && "border-primary bg-primary/10 text-primary",
-				isDragging && "opacity-60"
+				"inline-flex min-h-9 min-w-0 items-center rounded-md border bg-card px-2.5 py-1.5 text-left text-xs font-medium leading-5 shadow-sm transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				isSelected && "border-primary bg-primary/10 text-primary"
 			)}
-			style={style}
 			onClick={onSelect}
-			{...attributes}
-			{...listeners}
+			aria-pressed={isSelected}
+			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}`}
 		>
-			<GripVertical className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
 			<span className="min-w-0 break-words">{option.label_zh}</span>
 		</button>
 	);
@@ -156,7 +121,7 @@ function PrivatePhaseTaskItemRow({
 	return (
 		<div className={cn("flex min-h-10 select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors", isMoving && "opacity-60")}>
 			<div className="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted px-1 text-center text-[10px] font-semibold uppercase leading-3 text-muted-foreground">
-				TASK
+				項目
 			</div>
 			<span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.priority || index + 1}</span>
 			<div className="grid min-w-0 flex-1 gap-0.5">
@@ -178,7 +143,6 @@ function PrivatePhaseTaskItemRow({
 				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
 					<Trash2 className="h-4 w-4" />
 				</Button>
-				<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 			</div>
 		</div>
 	);
@@ -195,9 +159,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const participantUserId = getParticipantUserId(participantId);
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
 	const selectedAction = builder.actions.find(item => item.id === form.actionId);
-	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, form.detail);
+	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
 	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
-	const keywordSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
 	const resetForm = useCallback(() => {
 		setForm(createPhaseTaskForm());
@@ -212,8 +175,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 				const hasAction = builder.actions.some(item => item.id === current.actionId);
 				return {
 					componentId: hasComponent ? current.componentId : "",
-					actionId: hasAction ? current.actionId : "",
-					detail: current.detail
+					actionId: hasAction ? current.actionId : ""
 				};
 			});
 		}, 0);
@@ -235,7 +197,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					if (loadError instanceof DOMException && loadError.name === "AbortError") {
 						return;
 					}
-					setError(loadError instanceof Error ? loadError.message : "Task items 載入失敗");
+					setError(loadError instanceof Error ? loadError.message : "改善項目載入失敗");
 				})
 				.finally(() => {
 					if (!controller.signal.aborted) {
@@ -261,8 +223,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			if (editingItemId !== null) {
 				const updatedItem = await updatePrivatePhaseTaskItem(sessionId, participantUserId, editingItemId, {
 					component_id: selectedComponent.id,
-					action_id: selectedAction.id,
-					detail: form.detail
+					action_id: selectedAction.id
 				});
 				setItems(current => sortPrivatePhaseTaskItems(current.map(item => (item.id === updatedItem.id ? updatedItem : item))));
 			} else {
@@ -270,13 +231,13 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					task_id: taskId,
 					component_id: selectedComponent.id,
 					action_id: selectedAction.id,
-					detail: form.detail
+					detail: ""
 				});
 				setItems(current => sortPrivatePhaseTaskItems([...current, createdItem]));
 			}
 			resetForm();
 		} catch (saveError) {
-			setError(saveError instanceof Error ? saveError.message : "Task item 儲存失敗");
+			setError(saveError instanceof Error ? saveError.message : "改善項目儲存失敗");
 		} finally {
 			setIsSaving(false);
 		}
@@ -291,29 +252,11 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setError(null);
 	};
 
-	const handleKeywordDragEnd = (event: DragEndEvent) => {
-		const dragData = event.active.data.current as PhaseTaskKeywordDragData | undefined;
-		const dropId = event.over?.id;
-		if (!dragData || !dropId) {
-			return;
-		}
-
-		if (dragData.kind === "component" && dropId === COMPONENT_DROP_ID) {
-			selectKeyword("component", dragData.id);
-			return;
-		}
-
-		if (dragData.kind === "action" && dropId === ACTION_DROP_ID) {
-			selectKeyword("action", dragData.id);
-		}
-	};
-
 	const editTaskItem = (item: PrivatePhaseTaskItem) => {
 		setEditingItemId(item.id);
 		setForm({
 			componentId: item.component_id,
-			actionId: item.action_id,
-			detail: item.detail
+			actionId: item.action_id
 		});
 		setError(null);
 	};
@@ -329,7 +272,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			await deletePrivatePhaseTaskItem(sessionId, participantUserId, itemId);
 		} catch (deleteError) {
 			setItems(previousItems);
-			setError(deleteError instanceof Error ? deleteError.message : "Task item 刪除失敗");
+			setError(deleteError instanceof Error ? deleteError.message : "改善項目刪除失敗");
 		}
 	};
 
@@ -357,21 +300,21 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			setItems(sortPrivatePhaseTaskItems(savedItems));
 		} catch (moveError) {
 			setItems(currentItems);
-			setError(moveError instanceof Error ? moveError.message : "Task item 排序失敗");
+			setError(moveError instanceof Error ? moveError.message : "改善項目排序失敗");
 		} finally {
 			setMovingItemId(null);
 		}
 	};
 
 	return (
-		<section className="grid h-full min-h-0 content-start gap-4 overflow-y-auto pr-1" aria-label="Private Phase 1 task items">
-			<div className="grid gap-2" aria-label="Private Phase 1 priority list">
+		<section className="grid h-full min-h-0 content-start gap-4 overflow-y-auto pr-1" aria-label="第一階段改善項目">
+			<div className="grid gap-2" aria-label="優先改善項目清單">
 				<div className="flex items-center justify-between gap-3">
-					<h3 className="text-sm font-semibold">優先改善 Task Items</h3>
+					<h3 className="text-sm font-semibold">優先改善項目</h3>
 					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{items.length}</span>
 				</div>
 				{isLoading && <div className="grid min-h-24 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">載入中</div>}
-				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無 task items</div>}
+				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無改善項目</div>}
 				{!isLoading &&
 					sortPrivatePhaseTaskItems(items).map((item, index, sortedItems) => (
 						<PrivatePhaseTaskItemRow
@@ -388,79 +331,62 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					))}
 			</div>
 
-			<div className="grid gap-3 rounded-md border bg-background p-3" aria-label="建立 Private Phase 1 task item">
-				<DndContext sensors={keywordSensors} onDragEnd={handleKeywordDragEnd}>
-					<div className="grid gap-3 sm:grid-cols-2">
-						<KeywordDropSlot
-							id={COMPONENT_DROP_ID}
-							label="海報元件"
-							selectedOption={selectedComponent}
-							isActive={!!selectedComponent}
-							onClear={() => {
-								setForm(current => ({ ...current, componentId: "" }));
-								setError(null);
-							}}
-						/>
-						<KeywordDropSlot
-							id={ACTION_DROP_ID}
-							label="改善動作"
-							selectedOption={selectedAction}
-							isActive={!!selectedAction}
-							onClear={() => {
-								setForm(current => ({ ...current, actionId: "" }));
-								setError(null);
-							}}
-						/>
+			<div className="grid gap-3 rounded-md border bg-background p-3" aria-label="建立第一階段改善項目">
+				<div className="grid gap-3 sm:grid-cols-2">
+					<KeywordDropSlot
+						label="海報元件"
+						selectedOption={selectedComponent}
+						isActive={!!selectedComponent}
+						onClear={() => {
+							setForm(current => ({ ...current, componentId: "" }));
+							setError(null);
+						}}
+					/>
+					<KeywordDropSlot
+						label="改善動作"
+						selectedOption={selectedAction}
+						isActive={!!selectedAction}
+						onClear={() => {
+							setForm(current => ({ ...current, actionId: "" }));
+							setError(null);
+						}}
+					/>
+				</div>
+				<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+					<div className="min-w-0 flex-1 rounded-md bg-muted px-3 py-2 text-sm leading-6 text-foreground">
+						<span className="break-words">{previewStatement || "尚未建立改善項目"}</span>
 					</div>
-					<label className="grid gap-1 text-sm font-medium">
-						<span>補充條件</span>
-						<textarea
-							className="min-h-20 resize-y rounded-md border bg-card px-3 py-2 text-sm leading-6 outline-none focus:ring-1 focus:ring-ring"
-							placeholder={builder.detail_placeholder || "補充限制或目標"}
-							value={form.detail}
-							maxLength={280}
-							onChange={event => {
-								setForm(current => ({ ...current, detail: event.target.value }));
-								setError(null);
-							}}
-						/>
-					</label>
-					<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-						<div className="min-w-0 flex-1 rounded-md bg-muted px-3 py-2 text-sm leading-6 text-foreground">
-							<span className="break-words">{previewStatement || "尚未建立 task item"}</span>
-						</div>
-						<div className="flex shrink-0 gap-2">
-							{editingItemId !== null && (
-								<Button type="button" variant="outline" size="icon" className="h-10 w-10" title="取消編輯" aria-label="取消編輯" onClick={resetForm}>
-									<X className="h-4 w-4" />
-								</Button>
-							)}
-							<Button type="button" className="h-10 gap-2 px-3" disabled={!canSave} onClick={() => void saveTaskItem()}>
-								{editingItemId !== null ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-								{isSaving ? "儲存中" : editingItemId !== null ? "更新" : "新增"}
+					<div className="flex shrink-0 gap-2">
+						{editingItemId !== null && (
+							<Button type="button" variant="outline" size="icon" className="h-10 w-10" title="取消編輯" aria-label="取消編輯" onClick={resetForm}>
+								<X className="h-4 w-4" />
 							</Button>
+						)}
+						<Button type="button" className="h-10 gap-2 px-3" disabled={!canSave} onClick={() => void saveTaskItem()}>
+							{editingItemId !== null ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+							{isSaving ? "儲存中" : editingItemId !== null ? "更新" : "新增"}
+						</Button>
+					</div>
+				</div>
+				<div className="grid gap-3 rounded-md bg-muted/40 p-3" aria-label="可選項目">
+					<div className="text-xs font-semibold text-muted-foreground">可選項目</div>
+					<div className="grid gap-2">
+						<div className="text-xs font-medium text-muted-foreground">海報元件</div>
+						<div className="flex flex-wrap gap-2">
+							{builder.components.map(component => (
+								<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
+							))}
 						</div>
 					</div>
-					<div className="grid gap-3 rounded-md bg-muted/40 p-3" aria-label="Keyword Pool">
-						<div className="text-xs font-semibold text-muted-foreground">Keyword Pool</div>
-						<div className="grid gap-2">
-							<div className="text-xs font-medium text-muted-foreground">海報元件</div>
-							<div className="flex flex-wrap gap-2">
-								{builder.components.map(component => (
-									<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
-								))}
-							</div>
-						</div>
-						<div className="grid gap-2">
-							<div className="text-xs font-medium text-muted-foreground">改善動作</div>
-							<div className="flex flex-wrap gap-2">
-								{builder.actions.map(action => (
-									<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
-								))}
-							</div>
+					<div className="grid gap-2">
+						<div className="text-xs font-medium text-muted-foreground">改善動作</div>
+						<div className="flex flex-wrap gap-2">
+							{builder.actions.map(action => (
+								<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
+							))}
 						</div>
 					</div>
-				</DndContext>
+				</div>
 				{error && <p className="text-xs text-destructive">{error}</p>}
 			</div>
 		</section>
