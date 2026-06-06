@@ -501,9 +501,9 @@ function audioTranscriptMessageToLine(message: AudioDraftTargetMessage): Transcr
 	return {
 		id: segmentId == null ? `audio-${Date.now()}` : String(segmentId),
 		source,
-		origin: "live",
+		origin: message.type === "transcript_update" && message.persisted === true ? "history" : "live",
 		userId: userId == null ? undefined : String(userId),
-		time: undefined,
+		time: message.type === "transcript_update" && message.persisted === true ? formatTranscriptTime(timestampMs) : undefined,
 		timestampMs,
 		text: stripWhisperArtifacts(message.text ?? "").trim()
 	};
@@ -1447,7 +1447,7 @@ export function PrivateBoard({
 						replaceDraftLineId = matchingDraft.id;
 						persistedReplacementDraft = matchingDraft;
 						activeTranscriptDraftsRef.current.set(draftKey, {
-							id: replaceDraftLineId,
+							id: transcriptLine.id,
 							text: transcriptLine.text,
 							source: transcriptLine.source,
 							userId: transcriptLine.userId ?? participantId,
@@ -1465,6 +1465,7 @@ export function PrivateBoard({
 								persistedReplacementDraft = draft;
 								activeTranscriptDraftsRef.current.set(key, {
 									...draft,
+									id: transcriptLine.id,
 									text: transcriptLine.text,
 									timestampMs: draft.timestampMs ?? transcriptLine.timestampMs,
 									isFinal: true
@@ -1475,7 +1476,7 @@ export function PrivateBoard({
 					}
 					displayLine = {
 						...transcriptLine,
-						id: replaceDraftLineId ?? transcriptLine.id,
+						id: transcriptLine.id,
 						text: transcriptLine.text,
 						timestampMs: persistedReplacementDraft?.timestampMs ?? transcriptLine.timestampMs,
 						origin: "history",

@@ -626,6 +626,27 @@ def _timestamp_from_seconds(value: Any) -> datetime:
 FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 _pending_transcript_batch_texts: dict[tuple[str, str], list[str]] = defaultdict(list)
 _pending_transcript_batch_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
+_persisted_client_segments: dict[tuple[str, str, str, str], tuple[str, str]] = {}
+_MAX_PERSISTED_CLIENT_SEGMENTS = 10000
+
+
+def _client_segment_cache_key(
+    session_name: str,
+    participant_id: str,
+    visibility: Visibility,
+    client_segment_id: str,
+) -> tuple[str, str, str, str]:
+    return (session_name, participant_id, visibility.value, client_segment_id)
+
+
+def _remember_persisted_client_segment(
+    key: tuple[str, str, str, str],
+    segment_id: str,
+    text: str,
+) -> None:
+    _persisted_client_segments[key] = (segment_id, text)
+    while len(_persisted_client_segments) > _MAX_PERSISTED_CLIENT_SEGMENTS:
+        _persisted_client_segments.pop(next(iter(_persisted_client_segments)))
 
 
 async def handle_transcript_segments_websocket(
@@ -676,6 +697,7 @@ async def handle_transcript_segments_websocket(
                 reason = str(payload.get("reason") or "").strip().lower()
                 visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
                 retranscribed_final = payload.get("retranscribedFinal") is True
+                client_segment_id = str(payload.get("client_segment_id") or "").strip()
                 if not text:
                     logger.info(
                         "pipeline_ws_skip_empty_transcript session_name=%s participant_id=%s reason=%s",
@@ -703,19 +725,42 @@ async def handle_transcript_segments_websocket(
                     )
                     segment_id = None
                     is_final = reason in FINAL_TRANSCRIPT_REASONS
-                    if is_final:
-                        timestamp = _timestamp_from_seconds(payload.get("start"))
-                        saved_segment = await save_ws_transcript_segment(
-                            db,
-                            session_name=session_name,
-                            participant_id=participant_id,
-                            visibility=Visibility.PUBLIC,
-                            transcript_text=text,
-                            started_at=timestamp,
-                            ended_at=timestamp,
-                            display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
+                    cache_key = (
+                        _client_segment_cache_key(
+                            session_name,
+                            participant_id,
+                            Visibility.PUBLIC,
+                            client_segment_id,
                         )
-                        segment_id = saved_segment.segment_id if saved_segment else None
+                        if is_final and client_segment_id
+                        else None
+                    )
+                    cached_segment = _persisted_client_segments.get(cache_key) if cache_key else None
+                    if is_final:
+                        if cached_segment is not None:
+                            segment_id, text = cached_segment
+                            logger.info(
+                                "pipeline_ws_public_final_reused session_name=%s participant_id=%s client_segment_id=%s transcript_id=%s",
+                                session_name,
+                                participant_id,
+                                client_segment_id,
+                                segment_id,
+                            )
+                        else:
+                            timestamp = _timestamp_from_seconds(payload.get("start"))
+                            saved_segment = await save_ws_transcript_segment(
+                                db,
+                                session_name=session_name,
+                                participant_id=participant_id,
+                                visibility=Visibility.PUBLIC,
+                                transcript_text=text,
+                                started_at=timestamp,
+                                ended_at=timestamp,
+                                display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
+                            )
+                            segment_id = saved_segment.segment_id if saved_segment else None
+                            if cache_key and segment_id is not None:
+                                _remember_persisted_client_segment(cache_key, segment_id, text)
                     if not is_final:
                         await send_ws_json_safe(
                             websocket,
@@ -754,14 +799,52 @@ async def handle_transcript_segments_websocket(
                             },
                         )
                     if reason in FINAL_TRANSCRIPT_REASONS:
-                        await broadcast_public_transcript_line(
-                            session_name,
-                            participant_id=participant_id,
-                            text=text,
-                            transcript_segment_id=segment_id,
-                        )
+                        if cached_segment is None:
+                            await broadcast_public_transcript_line(
+                                session_name,
+                                participant_id=participant_id,
+                                text=text,
+                                transcript_segment_id=segment_id,
+                            )
                         await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
                         await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                    continue
+
+                cache_key = (
+                    _client_segment_cache_key(
+                        session_name,
+                        participant_id,
+                        visibility,
+                        client_segment_id,
+                    )
+                    if reason in FINAL_TRANSCRIPT_REASONS and client_segment_id
+                    else None
+                )
+                cached_segment = _persisted_client_segments.get(cache_key) if cache_key else None
+                if cached_segment is not None:
+                    cached_segment_id, cached_text = cached_segment
+                    logger.info(
+                        "pipeline_ws_private_final_reused session_name=%s participant_id=%s client_segment_id=%s transcript_id=%s",
+                        session_name,
+                        participant_id,
+                        client_segment_id,
+                        cached_segment_id,
+                    )
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "transcript_update",
+                            "transcript_segment_id": cached_segment_id,
+                            "participant_id": participant_id,
+                            "scope": visibility.value,
+                            "text": cached_text,
+                            "is_final": True,
+                            "reason": reason,
+                            "persisted": True,
+                        },
+                    )
+                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
+                    await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
                 batch_texts: list[str] | None = None
@@ -846,6 +929,13 @@ async def handle_transcript_segments_websocket(
                         },
                     )
                     continue
+
+                if cache_key:
+                    _remember_persisted_client_segment(
+                        cache_key,
+                        saved_segment.segment_id,
+                        saved_segment.text,
+                    )
 
                 logger.info(
                     "pipeline_ws_batch_saved session_name=%s participant_id=%s transcript_id=%s chars=%s",

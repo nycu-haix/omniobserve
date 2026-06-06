@@ -81,6 +81,8 @@ SEGMENT_DIR.mkdir(exist_ok=True)
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
 DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").strip().rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
+PIPELINE_PERSIST_TIMEOUT_SEC = float(os.getenv("PIPELINE_PERSIST_TIMEOUT_SEC", "10"))
+PIPELINE_FINAL_RELAY_RETRIES = int(os.getenv("PIPELINE_FINAL_RELAY_RETRIES", "3"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
 ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
@@ -89,6 +91,7 @@ WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
 WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
 WHISPERLIVEKIT_GATEWAY_SILENCE_RMS = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SILENCE_RMS", "0.0012"))
 WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK", "0.012"))
+WHISPERLIVEKIT_SPEECH_RESUME_SEC = float(os.getenv("WHISPERLIVEKIT_SPEECH_RESUME_SEC", "0.2"))
 WHISPERLIVEKIT_MAX_SPEECH_SEC = float(os.getenv("WHISPERLIVEKIT_MAX_SPEECH_SEC", "0"))
 WHISPERLIVEKIT_SEND_QUEUE_CHUNKS = int(os.getenv("WHISPERLIVEKIT_SEND_QUEUE_CHUNKS", "48"))
 WHISPERLIVEKIT_SEND_TIMEOUT_SEC = float(os.getenv("WHISPERLIVEKIT_SEND_TIMEOUT_SEC", "2.0"))
@@ -569,6 +572,7 @@ async def relay_transcript_to_pipeline(
         "source": source,
         "agentType": agent_type,
         "retranscribedFinal": retranscribed_final,
+        "client_segment_id": client_segment_id,
     }
     terminal_types = (
         {"task_items_update", "transcript_error", "pipeline_error"}
@@ -675,6 +679,13 @@ def get_audio_stats(audio_chunk: np.ndarray):
     peak = float(np.max(np.abs(audio_chunk)))
 
     return rms, peak
+
+
+def is_gateway_speech_chunk(rms: float, peak: float) -> bool:
+    return (
+        rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS
+        and peak >= WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK
+    )
 
 
 def decode_audio_bytes(
@@ -1020,6 +1031,8 @@ async def handle_whisperlivekit_audio_ws(
     pending_draft_idle_segment_id: str | None = None
     audio_stream_time = 0.0
     audio_silence_started_at: float | None = None
+    audio_silence_duration = 0.0
+    speech_resume_duration = 0.0
     awaiting_new_speech_after_final = False
     session_started = False
     last_soft_reset_stream_time = 0.0
@@ -1240,7 +1253,7 @@ async def handle_whisperlivekit_audio_ws(
         schedule_draft_idle_finalize()
 
     async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
-        nonlocal current_draft_text, current_final_candidate_text, current_segment_timestamp_ms, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text, restart_wlk_after_final, wlk_session_generation, wlk_last_progress_at
+        nonlocal current_draft_text, current_final_candidate_text, current_segment_timestamp_ms, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text, restart_wlk_after_final, wlk_session_generation, wlk_last_progress_at, audio_silence_started_at, audio_silence_duration, speech_resume_duration
         text = clean_asr_transcript_text(text)
         final_text = text
         if not final_text:
@@ -1264,11 +1277,19 @@ async def handle_whisperlivekit_audio_ws(
         wlk_has_pending_speech = False
         wlk_tail_silence_duration = 0.0
         wlk_last_progress_at = time.monotonic()
+        audio_silence_started_at = None
+        audio_silence_duration = 0.0
+        speech_resume_duration = 0.0
         last_final_text = text
         restart_wlk_after_final = True
         wlk_session_generation += 1
         current_segment_index += 1
         awaiting_new_speech_after_final = True
+        print(
+            "WhisperLiveKit final created: "
+            f"roomName={room_name}, participantId={participant_id}, "
+            f"segment_id={line_id}, chars={len(text)}, reason=silence"
+        )
         await send_client_json({
             "type": "transcript_boundary",
             "source": source,
@@ -1346,24 +1367,61 @@ async def handle_whisperlivekit_audio_ws(
         }
 
         async def relay_final_to_pipeline() -> None:
-            persisted_event = asyncio.Event()
-            async with relay_lock:
-                relay_task = asyncio.create_task(
-                    relay_transcript_to_pipeline(
-                        websocket=websocket,
-                        send_lock=send_lock,
-                        persisted_event=persisted_event,
-                        **relay_kwargs,
+            attempts = max(1, PIPELINE_FINAL_RELAY_RETRIES)
+            for attempt in range(1, attempts + 1):
+                persisted_event = asyncio.Event()
+                persist_timed_out = False
+                async with relay_lock:
+                    relay_task = asyncio.create_task(
+                        relay_transcript_to_pipeline(
+                            websocket=websocket,
+                            send_lock=send_lock,
+                            persisted_event=persisted_event,
+                            **relay_kwargs,
+                        )
                     )
+                    try:
+                        await asyncio.wait_for(
+                            persisted_event.wait(),
+                            timeout=PIPELINE_PERSIST_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        persist_timed_out = True
+                        relay_task.cancel()
+                        await asyncio.gather(relay_task, return_exceptions=True)
+                        print(
+                            "Pipeline persist acknowledgement timed out: "
+                            f"segment_id={line_id}, attempt={attempt}/{attempts}"
+                        )
+                        if attempt < attempts:
+                            await asyncio.sleep(min(attempt, 2))
+                            continue
+
+                pipeline_messages = [] if persist_timed_out else await relay_task
+                persisted_update = next(
+                    (
+                        message
+                        for message in pipeline_messages
+                        if message.get("type") == "transcript_update"
+                        and message.get("persisted") is True
+                    ),
+                    None,
                 )
-                try:
-                    await asyncio.wait_for(persisted_event.wait(), timeout=PIPELINE_WS_TIMEOUT_SEC)
-                except asyncio.TimeoutError:
+                if persisted_update is not None:
                     print(
-                        "Pipeline persist acknowledgement timed out; allowing the next final segment "
-                        f"(segment_id={line_id})"
+                        "Pipeline final persisted: "
+                        f"roomName={room_name}, participantId={participant_id}, "
+                        f"client_segment_id={line_id}, "
+                        f"transcript_segment_id={persisted_update.get('transcript_segment_id')}"
                     )
-            await relay_task
+                    return
+
+                print(
+                    "Pipeline final was not persisted: "
+                    f"segment_id={line_id}, attempt={attempt}/{attempts}"
+                )
+                if attempt < attempts:
+                    await asyncio.sleep(min(attempt, 2))
 
         track_pipeline_relay(asyncio.create_task(relay_final_to_pipeline()))
 
@@ -1769,15 +1827,37 @@ async def handle_whisperlivekit_audio_ws(
             audio_duration = len(decoded_audio) / float(SAMPLE_RATE)
             audio_stream_time += audio_duration
             rms, peak = get_audio_stats(decoded_audio)
-            is_speech_chunk = rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS or peak >= WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK
-            if not is_speech_chunk:
-                if current_draft_text:
+            is_speech_chunk = is_gateway_speech_chunk(rms, peak)
+            if current_draft_text:
+                if is_speech_chunk:
+                    speech_resume_duration += audio_duration
+                    if speech_resume_duration >= WHISPERLIVEKIT_SPEECH_RESUME_SEC:
+                        audio_silence_started_at = None
+                        audio_silence_duration = 0.0
+                else:
+                    speech_resume_duration = 0.0
                     if audio_silence_started_at is None:
                         audio_silence_started_at = max(0.0, audio_stream_time - audio_duration)
-                    if audio_stream_time - audio_silence_started_at >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
+                        print(
+                            "WhisperLiveKit gateway silence started: "
+                            f"roomName={room_name}, participantId={participant_id}, "
+                            f"segment_id={current_client_segment_id()}, rms={rms:.6f}, peak={peak:.6f}"
+                        )
+                    audio_silence_duration += audio_duration
+                    if audio_silence_duration >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
+                        print(
+                            "WhisperLiveKit gateway silence threshold reached: "
+                            f"roomName={room_name}, participantId={participant_id}, "
+                            f"segment_id={current_client_segment_id()}, "
+                            f"silence={audio_silence_duration:.2f}s"
+                        )
                         await finalize_current_draft_from_audio_silence(current_client_segment_id())
             else:
                 audio_silence_started_at = None
+                audio_silence_duration = 0.0
+                speech_resume_duration = 0.0
+
+            if is_speech_chunk:
                 if (
                     WHISPERLIVEKIT_MAX_SPEECH_SEC > 0
                     and audio_stream_time - last_soft_reset_stream_time >= WHISPERLIVEKIT_MAX_SPEECH_SEC
