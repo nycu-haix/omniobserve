@@ -1,10 +1,10 @@
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT, TOPIC_DESCRIPTION
+from ..config import FRONTEND_MOCK_TRANSCRIPT_LINES, FRONTEND_MOCK_TRANSCRIPT_TEXT, MOCK_TRANSCRIPT_TEXT
 from ..db import get_db
 from ..schemas import (
     ApiError,
@@ -18,10 +18,10 @@ from ..schemas import (
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
     TaskConfigResponse,
+    TaskTemplateResponse,
     TopicDescriptionResponse,
 )
-from ..task_config import serialize_task_config
-from ..task_config.registry import DEFAULT_TASK_NAME, normalize_task_name
+from ..task_config import serialize_task_config, serialize_task_templates
 from ..services.board_payloads import (
     serialize_frontend_board_idea_block,
     serialize_frontend_board_idea_block_update,
@@ -47,8 +47,23 @@ COMMON_ERROR_RESPONSES = {
     summary="Get Topic Description",
     description="Returns only the ranking task topic description for frontend display.",
 )
-async def get_topic_description() -> TopicDescriptionResponse:
-    return TopicDescriptionResponse(topic_description=TOPIC_DESCRIPTION)
+async def get_topic_description(
+    session_name: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+) -> TopicDescriptionResponse:
+    return TopicDescriptionResponse(
+        topic_description=serialize_task_config(session_name=session_name, task_id=task_id)["topic_description"]
+    )
+
+
+@router.get(
+    "/api/task-templates",
+    response_model=list[TaskTemplateResponse],
+    summary="List Task Templates",
+    description="Returns available task templates and their required session name prefixes.",
+)
+async def get_task_templates() -> list[dict[str, Any]]:
+    return serialize_task_templates()
 
 
 @router.get(
@@ -57,15 +72,17 @@ async def get_topic_description() -> TopicDescriptionResponse:
     summary="Get Task Config",
     description="Returns the active ranking task description and item definitions for frontend display.",
 )
-async def get_task_config() -> dict[str, Any]:
-    return serialize_task_config()
+async def get_task_config(
+    session_name: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    return serialize_task_config(session_name=session_name, task_id=task_id)
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:
     return {
         "id": block.id,
         "session_name": block.session_name,
-        "task_name": block.task_name,
         "participant_id": block.participant_id,
         "visibility": block.visibility.value,
         "content": block.content,
@@ -110,10 +127,8 @@ async def generate_idea_blocks(
     session_name: str,
     user_id: int,
     payload: IdeaBlockGenerateRequest,
-    task_name: str = DEFAULT_TASK_NAME,
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockGenerateResponse:
-    task_name = normalize_task_name(task_name)
     transcript_text = MOCK_TRANSCRIPT_TEXT if payload.use_mock_transcript else (payload.transcript_text or "")
     transcript_text = transcript_text.strip()
     if not transcript_text:
@@ -131,7 +146,6 @@ async def generate_idea_blocks(
             user_id=user_id,
             visibility=payload.visibility,
             transcript_text=transcript_text,
-            task_name=task_name,
         )
         idea_blocks = pipeline_result.idea_blocks
     except ApiError:
@@ -157,10 +171,8 @@ async def generate_idea_blocks(
 )
 async def create_frontend_board_block(
     payload: FrontendBoardBlockCreateRequest,
-    task_name: str = DEFAULT_TASK_NAME,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendBoardBlockCreateResponse:
-    task_name = normalize_task_name(task_name)
     session_name = resolve_payload_session_name(payload)
 
     transcript_text = (payload.transcript_text or "").strip()
@@ -186,7 +198,6 @@ async def create_frontend_board_block(
             visibility=payload.visibility,
             source_transcript_ids=[],
             transcript_text=transcript_text,
-            task_name=task_name,
         )
         await db.commit()
     except ApiError:
@@ -261,10 +272,8 @@ async def get_session_presence(session_name: str) -> dict[str, Any]:
 )
 async def seed_frontend_board_with_mock_transcript(
     payload: FrontendMockBoardSeedRequest,
-    task_name: str = DEFAULT_TASK_NAME,
     db: AsyncSession = Depends(get_db),
 ) -> FrontendMockBoardSeedResponse:
-    task_name = normalize_task_name(task_name)
     session_name = resolve_payload_session_name(payload)
 
     participant_id = (payload.participantId or "1").strip() or "1"
@@ -286,7 +295,6 @@ async def seed_frontend_board_with_mock_transcript(
             visibility=payload.visibility,
             source_transcript_ids=[],
             transcript_text=FRONTEND_MOCK_TRANSCRIPT_TEXT,
-            task_name=task_name,
         )
         await db.commit()
     except ApiError:

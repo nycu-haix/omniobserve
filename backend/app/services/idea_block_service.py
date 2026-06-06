@@ -66,7 +66,6 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         db,
         session_name=payload.session_name,
         user_id=payload.user_id,
-        task_name=payload.task_name,
         title=payload.title,
         summary=payload.summary,
         embedding_vector=idea_block_data["embedding_vector"],

@@ -14,6 +14,7 @@ OPENAPI_TAGS = [
     {"name": "Transcripts", "description": "Create and read transcript records."},
     {"name": "Idea Blocks", "description": "CRUD operations for generated idea blocks."},
     {"name": "Similarities", "description": "Manage similarity pairs between idea blocks."},
+    {"name": "Private Phase Task Items", "description": "Create and prioritize user-authored private phase task items."},
     {"name": "Task Items", "description": "Map idea blocks to external task item ids."},
     {"name": "Poster Task Items", "description": "CRUD operations for enhance-the-poster private task items."},
     {"name": "Idea Block To Transcript", "description": "Map idea blocks to one or more transcripts."},

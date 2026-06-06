@@ -9,9 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from ..config import logger
 from ..db import SessionLocal
-from ..models import IdeaBlock, Transcript, Visibility
+from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
-from ..task_config.registry import DEFAULT_TASK_NAME, normalize_task_name
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
 from .idea_block_deduplication import find_duplicate_idea_block
@@ -25,7 +24,7 @@ IdeaBlockUpdateCallback = Callable[[list[IdeaBlock]], Awaitable[None]]
 @dataclass
 class PipelineResult:
     idea_blocks: list[IdeaBlock]
-    task_items: list[Any]
+    task_items: list[TaskItem]
 
 
 _pending_transcripts: dict[tuple[str, int], list[StreamTranscript]] = defaultdict(list)
@@ -40,10 +39,8 @@ async def handle_transcript_segment(
     transcript: StreamTranscript | None,
     is_final: bool,
     visibility: Visibility,
-    task_name: str = DEFAULT_TASK_NAME,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult | None:
-    task_name = normalize_task_name(task_name)
     key = (session_name, user_id)
     logger.info(
         "pipeline_handle_segment_enter session_name=%s user_id=%s has_transcript=%s is_final=%s visibility=%s",
@@ -97,7 +94,6 @@ async def handle_transcript_segment(
         user_id=user_id,
         visibility=visibility,
         transcripts=transcripts,
-        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
@@ -109,10 +105,8 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     user_id: int,
     visibility: Visibility,
     transcripts: list[StreamTranscript],
-    task_name: str = DEFAULT_TASK_NAME,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
-    task_name = normalize_task_name(task_name)
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
     if not transcript_text:
         logger.info(
@@ -145,7 +139,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(transcript_text),
         )
-        generated_blocks = await build_idea_blocks_with_llm(transcript_text, task_name=task_name)
+        generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name)
         logger.info(
             "pipeline_idea_llm_done session_name=%s user_id=%s count=%s",
             session_name,
@@ -153,7 +147,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             len(generated_blocks),
         )
         idea_blocks: list[IdeaBlock] = []
-        task_items: list[Any] = []
+        task_items: list[TaskItem] = []
 
         for block_index, block_data in enumerate(generated_blocks, start=1):
             summary = str(block_data["summary"]).strip()
@@ -186,7 +180,6 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 db,
                 session_name=session_name,
                 user_id=user_id,
-                task_name=task_name,
                 title=title,
                 summary=summary,
                 embedding_vector=embedding_vector,
@@ -209,7 +202,6 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             idea_block = IdeaBlock(
                 user_id=user_id,
                 session_name=session_name,
-                task_name=task_name,
                 title=title,
                 summary=summary,
                 transcript_id=main_transcript_id,
@@ -240,8 +232,8 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 await generate_and_save_task_items_for_idea_block(
                     db,
                     idea_block_id=idea_block.id,
+                    session_name=session_name,
                     text=summary,
-                    task_name=task_name,
                 )
             )
             logger.info(
@@ -299,7 +291,6 @@ async def generate_idea_blocks_with_task_items_from_text(
     user_id: int,
     visibility: Visibility,
     transcript_text: str,
-    task_name: str = DEFAULT_TASK_NAME,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     transcript = StreamTranscript(segment_id="manual", text=transcript_text)
@@ -309,7 +300,6 @@ async def generate_idea_blocks_with_task_items_from_text(
         user_id=user_id,
         visibility=visibility,
         transcripts=[transcript],
-        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
@@ -321,7 +311,6 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
     user_id: int,
     visibility: Visibility,
     transcript_ids: list[int],
-    task_name: str = DEFAULT_TASK_NAME,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     if not transcript_ids:
@@ -350,7 +339,6 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
         user_id=user_id,
         visibility=visibility,
         transcripts=stream_transcripts,
-        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
@@ -360,7 +348,6 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
         "idea_blocks": [
             {
                 "id": block.id,
-                "task_name": block.task_name,
                 "title": block.title,
                 "summary": block.summary,
                 "transcript_id": block.transcript_id,
@@ -376,7 +363,7 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
             {
                 "id": task_item.id,
                 "idea_block_id": task_item.idea_block_id,
-                **_serialize_task_item_payload(task_item),
+                "task_item_id": task_item.task_item_id,
             }
             for task_item in result.task_items
         ],
@@ -387,7 +374,6 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
     return [
         {
             "id": block.id,
-            "task_name": block.task_name,
             "user_id": block.user_id,
             "title": block.title,
             "summary": block.summary,
@@ -399,16 +385,6 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
         }
         for block in idea_blocks
     ]
-
-
-def _serialize_task_item_payload(task_item: Any) -> dict[str, Any]:
-    if hasattr(task_item, "task_item_id"):
-        return {"task_item_id": task_item.task_item_id}
-    return {
-        "poster_component": task_item.poster_component,
-        "action": task_item.action,
-        "advanced_action": task_item.advanced_action,
-    }
 
 
 async def get_idea_block_for_payload(idea_block_id: int, db: AsyncSession) -> IdeaBlock | None:

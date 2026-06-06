@@ -8,10 +8,12 @@ import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { isValidParticipantId } from "../lib/participantDefaults";
+import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
-import { fetchTaskConfig, type TaskConfigItem } from "../services/api";
+import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
+import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
 import { ShortcutKey } from "./ui/ShortcutKey";
@@ -28,8 +30,7 @@ interface LostAtSeaItem {
 }
 
 type RankingScope = "public" | "private";
-type SessionPhase = "private" | "group";
-type TaskPaneContent = "task-instructions" | "private-ranking" | "public-ranking";
+type TaskPaneContent = "task-instructions" | "phase-task-items" | "private-ranking" | "public-ranking";
 type TaskSplitDirection = "horizontal" | "vertical";
 
 interface TaskPaneLeaf {
@@ -61,6 +62,13 @@ interface RankingSnapshot {
 	items: string[];
 }
 
+function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
+	return (
+		Array.isArray(value) &&
+		value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string")
+	);
+}
+
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
 const MIN_PRIVATE_BOARD_WIDTH = 520;
@@ -75,6 +83,7 @@ const MAX_TASK_PANES = 3;
 const MIN_TASK_PANE_RATIO = 24;
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
+	"phase-task-items": "Task Items",
 	"private-ranking": "Private Ranking",
 	"public-ranking": "Public Ranking"
 };
@@ -187,6 +196,17 @@ function createRankIndexById(items: LostAtSeaItem[]): Map<string, number> {
 	return new Map(items.map((item, index) => [item.id, index + 1]));
 }
 
+function createPhaseLayoutConfigById(phases: Array<{ id?: unknown; default_layout?: TaskPaneLayoutConfig }> | undefined): Partial<Record<SessionPhase, TaskPaneLayoutConfig>> {
+	const layoutsByPhase: Partial<Record<SessionPhase, TaskPaneLayoutConfig>> = {};
+	phases?.forEach(phase => {
+		const phaseId = normalizeSessionPhase(phase.id);
+		if (phaseId && phase.default_layout) {
+			layoutsByPhase[phaseId] = phase.default_layout;
+		}
+	});
+	return layoutsByPhase;
+}
+
 function createTaskPaneLeaf(content: TaskPaneContent): TaskPaneLeaf {
 	return {
 		type: "leaf",
@@ -195,8 +215,51 @@ function createTaskPaneLeaf(content: TaskPaneContent): TaskPaneLeaf {
 	};
 }
 
-function createDefaultTaskPaneLayout(phase: SessionPhase): TaskPaneNode {
-	if (phase === "group") {
+function isTaskPaneContent(value: unknown): value is TaskPaneContent {
+	return typeof value === "string" && value in TASK_PANE_CONTENT_LABELS;
+}
+
+function createTaskPaneLayoutFromConfig(config: TaskPaneLayoutConfig | undefined, phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneNode | null {
+	if (!config) {
+		return null;
+	}
+
+	if (config.type === "leaf") {
+		if (!isTaskPaneContent(config.content) || !getTaskPaneContentAvailability(config.content, phase, phase1BuilderEnabled)) {
+			return null;
+		}
+		return createTaskPaneLeaf(config.content);
+	}
+
+	if (config.type !== "split") {
+		return null;
+	}
+
+	const first = createTaskPaneLayoutFromConfig(config.first, phase, phase1BuilderEnabled);
+	const second = createTaskPaneLayoutFromConfig(config.second, phase, phase1BuilderEnabled);
+	if (!first || !second) {
+		return null;
+	}
+
+	const configuredLayout: TaskPaneSplit = {
+		type: "split",
+		id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		direction: config.direction === "vertical" ? "vertical" : "horizontal",
+		ratio: Math.min(Math.max(Number(config.ratio) || 50, MIN_TASK_PANE_RATIO), 100 - MIN_TASK_PANE_RATIO),
+		first,
+		second
+	};
+
+	return countTaskPaneLeaves(configuredLayout) <= MAX_TASK_PANES ? configuredLayout : null;
+}
+
+function createDefaultTaskPaneLayout(phase: SessionPhase, phase1BuilderEnabled = false, layoutConfig?: TaskPaneLayoutConfig): TaskPaneNode {
+	const configuredLayout = createTaskPaneLayoutFromConfig(layoutConfig, phase, phase1BuilderEnabled);
+	if (configuredLayout) {
+		return configuredLayout;
+	}
+
+	if (isGroupPhase(phase)) {
 		return {
 			type: "split",
 			id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -207,7 +270,27 @@ function createDefaultTaskPaneLayout(phase: SessionPhase): TaskPaneNode {
 		};
 	}
 
+	if (isPrivatePhase1(phase) && phase1BuilderEnabled) {
+		return createTaskPaneLeaf("phase-task-items");
+	}
+
+	if (isPrivatePhase2(phase)) {
+		return createTaskPaneLeaf("private-ranking");
+	}
+
 	return createTaskPaneLeaf("private-ranking");
+}
+
+function getTaskPaneContentOptions(phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent[] {
+	if (isGroupPhase(phase)) {
+		return ["public-ranking", "private-ranking", "task-instructions"];
+	}
+
+	if (isPrivatePhase1(phase)) {
+		return phase1BuilderEnabled ? ["phase-task-items", "task-instructions"] : ["private-ranking", "task-instructions"];
+	}
+
+	return ["private-ranking", "task-instructions"];
 }
 
 function countTaskPaneLeaves(node: TaskPaneNode): number {
@@ -222,8 +305,8 @@ function hasTaskPaneContent(node: TaskPaneNode, content: TaskPaneContent): boole
 	return node.type === "leaf" ? node.content === content : hasTaskPaneContent(node.first, content) || hasTaskPaneContent(node.second, content);
 }
 
-function chooseNewTaskPaneContent(node: TaskPaneNode, phase: SessionPhase): TaskPaneContent {
-	const preferredContents: TaskPaneContent[] = phase === "group" ? ["public-ranking", "private-ranking", "task-instructions"] : ["private-ranking", "task-instructions", "public-ranking"];
+function chooseNewTaskPaneContent(node: TaskPaneNode, phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent {
+	const preferredContents = getTaskPaneContentOptions(phase, phase1BuilderEnabled);
 	return preferredContents.find(content => !hasTaskPaneContent(node, content)) ?? "task-instructions";
 }
 
@@ -281,8 +364,17 @@ function removeTaskPaneNode(node: TaskPaneNode, paneId: string): TaskPaneNode | 
 	};
 }
 
-function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase): boolean {
-	return content !== "public-ranking" || phase === "group";
+function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase, phase1BuilderEnabled = false): boolean {
+	if (content === "phase-task-items") {
+		return isPrivatePhase1(phase) && phase1BuilderEnabled;
+	}
+	if (content === "private-ranking") {
+		return !isPrivatePhase1(phase) || !phase1BuilderEnabled;
+	}
+	if (content === "public-ranking") {
+		return isGroupPhase(phase);
+	}
+	return true;
 }
 
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
@@ -299,7 +391,8 @@ function isBoardStateMessage(message: object | null): message is {
 	ranking?: { items: string[] };
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
-	current_phase?: SessionPhase;
+	ranking_items?: TaskConfigItem[] | null;
+	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
 	return (
@@ -314,15 +407,15 @@ function isBoardStateMessage(message: object | null): message is {
 
 function isPhaseChangedMessage(message: object | null): message is {
 	type: "phase_changed";
-	phase: SessionPhase;
+	phase: unknown;
 	end_time_ms?: number;
 } {
-	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && (message.phase === "private" || message.phase === "group");
+	return !!message && "type" in message && message.type === "phase_changed" && "phase" in message && normalizeSessionPhase(message.phase) !== null;
 }
 
 function isCountdownChangedMessage(message: object | null): message is {
 	type: "countdown_changed";
-	current_phase?: SessionPhase;
+	current_phase?: unknown;
 	timer_end_time_ms?: number;
 	end_time_ms?: number;
 } {
@@ -447,21 +540,37 @@ function TaskWorkspace({
 	currentPhase,
 	taskTitle,
 	taskDetail,
+	referenceImageSrc,
+	referenceImageAlt,
+	sessionId,
+	participantId,
+	taskId,
+	phase1Builder,
+	phaseLayoutConfig,
 	renderPrivateRanking,
 	renderPublicRanking
 }: {
 	currentPhase: SessionPhase;
 	taskTitle: string;
 	taskDetail: string;
+	referenceImageSrc?: string;
+	referenceImageAlt?: string;
+	sessionId: string;
+	participantId: string;
+	taskId: string;
+	phase1Builder?: Phase1BuilderConfig;
+	phaseLayoutConfig?: TaskPaneLayoutConfig;
 	renderPrivateRanking: () => React.ReactNode;
 	renderPublicRanking: () => React.ReactNode;
 }) {
-	const [layout, setLayout] = useState<TaskPaneNode>(() => createDefaultTaskPaneLayout(currentPhase));
+	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
+	const [layout, setLayout] = useState<TaskPaneNode>(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig));
 	const [hasUserCustomizedLayout, setHasUserCustomizedLayout] = useState(false);
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
-	const defaultLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase), [currentPhase]);
+	const defaultLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
 	const visibleLayout = hasUserCustomizedLayout ? layout : defaultLayout;
 	const paneCount = countTaskPaneLeaves(visibleLayout);
+	const contentOptions = useMemo(() => getTaskPaneContentOptions(currentPhase, phase1BuilderEnabled), [currentPhase, phase1BuilderEnabled]);
 
 	useEffect(() => {
 		const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -470,6 +579,14 @@ function TaskWorkspace({
 		mediaQuery.addEventListener("change", handleChange);
 		return () => mediaQuery.removeEventListener("change", handleChange);
 	}, []);
+
+	useEffect(() => {
+		const timer = window.setTimeout(() => {
+			setLayout(defaultLayout);
+			setHasUserCustomizedLayout(false);
+		}, 0);
+		return () => window.clearTimeout(timer);
+	}, [defaultLayout]);
 
 	const markCustomized = () => setHasUserCustomizedLayout(true);
 
@@ -486,7 +603,7 @@ function TaskWorkspace({
 				direction,
 				ratio: 50,
 				first: leaf,
-				second: createTaskPaneLeaf(chooseNewTaskPaneContent(visibleLayout, currentPhase))
+				second: createTaskPaneLeaf(chooseNewTaskPaneContent(visibleLayout, currentPhase, phase1BuilderEnabled))
 			}))
 		);
 	};
@@ -545,7 +662,7 @@ function TaskWorkspace({
 	};
 
 	const renderPaneContent = (content: TaskPaneContent) => {
-		if (!getTaskPaneContentAvailability(content, currentPhase)) {
+		if (!getTaskPaneContentAvailability(content, currentPhase, phase1BuilderEnabled)) {
 			return (
 				<div className="grid h-full min-h-0 place-items-center bg-muted/30 p-4 text-center">
 					<div className="grid max-w-xs gap-2 text-muted-foreground">
@@ -565,9 +682,14 @@ function TaskWorkspace({
 			return renderPublicRanking();
 		}
 
+		if (content === "phase-task-items" && phase1Builder) {
+			return <PrivatePhaseTaskItemsPanel sessionId={sessionId} participantId={participantId} taskId={taskId} builder={phase1Builder} />;
+		}
+
 		return (
 			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
-				<div className="min-h-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
+				<div className="grid min-h-0 flex-1 gap-3 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
+					{referenceImageSrc && <img className="max-h-[60vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
 					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
 				</div>
 			</section>
@@ -595,6 +717,8 @@ function TaskWorkspace({
 					onClosePane={closePane}
 					onChangePaneContent={changePaneContent}
 					onResizeSplit={resizeSplit}
+					contentOptions={contentOptions}
+					phase1BuilderEnabled={phase1BuilderEnabled}
 					renderPaneContent={renderPaneContent}
 				/>
 			</div>
@@ -611,6 +735,8 @@ function TaskPaneRenderer({
 	onClosePane,
 	onChangePaneContent,
 	onResizeSplit,
+	contentOptions,
+	phase1BuilderEnabled,
 	renderPaneContent
 }: {
 	node: TaskPaneNode;
@@ -621,6 +747,8 @@ function TaskPaneRenderer({
 	onClosePane: (paneId: string) => void;
 	onChangePaneContent: (paneId: string, content: TaskPaneContent) => void;
 	onResizeSplit: (splitId: string, ratio: number) => void;
+	contentOptions: TaskPaneContent[];
+	phase1BuilderEnabled: boolean;
 	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
 }) {
 	if (node.type === "leaf") {
@@ -633,6 +761,8 @@ function TaskPaneRenderer({
 				onSplit={direction => onSplitPane(node.id, direction)}
 				onClose={() => onClosePane(node.id)}
 				onChangeContent={content => onChangePaneContent(node.id, content)}
+				contentOptions={contentOptions}
+				phase1BuilderEnabled={phase1BuilderEnabled}
 			>
 				{renderPaneContent(node.content)}
 			</TaskPane>
@@ -656,6 +786,8 @@ function TaskPaneRenderer({
 				onClosePane={onClosePane}
 				onChangePaneContent={onChangePaneContent}
 				onResizeSplit={onResizeSplit}
+				contentOptions={contentOptions}
+				phase1BuilderEnabled={phase1BuilderEnabled}
 				renderPaneContent={renderPaneContent}
 			/>
 			<PaneSeparator split={node} direction={effectiveDirection} onResize={onResizeSplit} />
@@ -668,6 +800,8 @@ function TaskPaneRenderer({
 				onClosePane={onClosePane}
 				onChangePaneContent={onChangePaneContent}
 				onResizeSplit={onResizeSplit}
+				contentOptions={contentOptions}
+				phase1BuilderEnabled={phase1BuilderEnabled}
 				renderPaneContent={renderPaneContent}
 			/>
 		</div>
@@ -682,6 +816,8 @@ function TaskPane({
 	onSplit,
 	onClose,
 	onChangeContent,
+	contentOptions,
+	phase1BuilderEnabled,
 	children
 }: {
 	pane: TaskPaneLeaf;
@@ -691,9 +827,11 @@ function TaskPane({
 	onSplit: (direction: TaskSplitDirection) => void;
 	onClose: () => void;
 	onChangeContent: (content: TaskPaneContent) => void;
+	contentOptions: TaskPaneContent[];
+	phase1BuilderEnabled: boolean;
 	children: React.ReactNode;
 }) {
-	const isLocked = !getTaskPaneContentAvailability(pane.content, currentPhase);
+	const isLocked = !getTaskPaneContentAvailability(pane.content, currentPhase, phase1BuilderEnabled);
 
 	return (
 		<section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border bg-card" aria-label={TASK_PANE_CONTENT_LABELS[pane.content]}>
@@ -722,7 +860,7 @@ function TaskPane({
 						onChange={event => onChangeContent(event.target.value as TaskPaneContent)}
 						onPointerDown={event => event.stopPropagation()}
 					>
-						{(Object.keys(TASK_PANE_CONTENT_LABELS) as TaskPaneContent[]).map(content => (
+						{contentOptions.map(content => (
 							<option key={content} value={content}>
 								{TASK_PANE_CONTENT_LABELS[content]}
 							</option>
@@ -815,14 +953,19 @@ function PaneSeparator({ split, direction, onResize }: { split: TaskPaneSplit; d
 export default function MeetingRoom() {
 	const [micMode, setMicMode] = useState<MicMode>("private");
 	const [micPermission, setMicPermission] = useState<PermissionState | "unknown">("unknown");
+	const [taskId, setTaskId] = useState("lost-at-sea");
 	const [taskTitle, setTaskTitle] = useState("Lost at Sea");
 	const [taskDetail, setTaskDetail] = useState("");
+	const [taskReferenceImageSrc, setTaskReferenceImageSrc] = useState("");
+	const [taskReferenceImageAlt, setTaskReferenceImageAlt] = useState("");
+	const [phase1BuilderConfig, setPhase1BuilderConfig] = useState<Phase1BuilderConfig | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
-	const [currentPhase, setCurrentPhase] = useState<SessionPhase>("private");
+	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
+	const [phaseLayoutConfigById, setPhaseLayoutConfigById] = useState<Partial<Record<SessionPhase, TaskPaneLayoutConfig>>>({});
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
@@ -858,7 +1001,7 @@ export default function MeetingRoom() {
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
-	const shouldHighlightRankConflict = currentPhase === "group";
+	const shouldHighlightRankConflict = isGroupPhase(currentPhase);
 	const meetingLayoutStyle = {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
@@ -900,13 +1043,20 @@ export default function MeetingRoom() {
 
 		const loadTaskConfig = async () => {
 			try {
-				const taskConfig = await fetchTaskConfig(abortController.signal);
+				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				const nextTaskItemsById = Object.fromEntries(taskConfig.items.map(item => [item.id, item]));
 				const nextDefaultItemIds = taskConfig.items.map(item => item.id);
 				const nextItems = createInitialItems(taskConfig.items);
 
+				setTaskId(taskConfig.task_id);
 				setTaskTitle(taskConfig.title);
 				setTaskDetail(taskConfig.task_detail);
+				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
+				setTaskReferenceImageAlt(taskConfig.reference_image_alt || taskConfig.title);
+				setPhase1BuilderConfig(taskConfig.phase1_builder);
+				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
+				setPhaseLayoutConfigById(createPhaseLayoutConfigById(taskConfig.phases));
+				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
 				setTaskItems(taskConfig.items);
 				setPublicItems(current =>
 					current.length > 0
@@ -937,7 +1087,7 @@ export default function MeetingRoom() {
 		void loadTaskConfig();
 
 		return () => abortController.abort();
-	}, []);
+	}, [roomName]);
 
 	const requestMicPermission = async () => {
 		try {
@@ -1166,7 +1316,8 @@ export default function MeetingRoom() {
 	useEffect(() => {
 		if (isPhaseChangedMessage(lastMessage)) {
 			const timer = window.setTimeout(() => {
-				setCurrentPhase(lastMessage.phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1174,7 +1325,8 @@ export default function MeetingRoom() {
 
 		if (isCountdownChangedMessage(lastMessage)) {
 			const timer = window.setTimeout(() => {
-				if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+				const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.timer_end_time_ms ?? lastMessage.end_time_ms ?? 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1185,13 +1337,33 @@ export default function MeetingRoom() {
 			const timerEndTimeMs = lastMessage.timer_end_time_ms;
 			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
 				phaseTimer = window.setTimeout(() => {
-					if (lastMessage.current_phase) setCurrentPhase(lastMessage.current_phase);
+					const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
+					if (nextPhase) setCurrentPhase(nextPhase);
 					if (typeof timerEndTimeMs === "number") setTimerEndTime(timerEndTimeMs);
 				}, 0);
 			}
 
 			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
 			const privateRanking = lastMessage.private_ranking;
+			if (isTaskConfigItemList(lastMessage.ranking_items)) {
+				const nextTaskItems = lastMessage.ranking_items;
+				const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
+				const nextDefaultItemIds = nextTaskItems.map(item => item.id);
+				setTaskItems(nextTaskItems);
+				if (publicRanking) {
+					setPublicRankingRevision(publicRanking.revision);
+					setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+				}
+				if (privateRanking) {
+					setPrivateRankingRevision(privateRanking.revision);
+					setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+				}
+				return () => {
+					if (phaseTimer !== null) {
+						window.clearTimeout(phaseTimer);
+					}
+				};
+			}
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
 			if (publicRanking) {
 				rankings.push(["public", publicRanking]);
@@ -1275,6 +1447,13 @@ export default function MeetingRoom() {
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
 					taskDetail={taskDetail}
+					referenceImageSrc={taskReferenceImageSrc}
+					referenceImageAlt={taskReferenceImageAlt}
+					sessionId={sessionId}
+					participantId={participantId}
+					taskId={taskId}
+					phase1Builder={phase1BuilderConfig}
+					phaseLayoutConfig={phaseLayoutConfigById[currentPhase]}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
 							title="Public 排序"

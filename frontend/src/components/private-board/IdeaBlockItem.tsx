@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -14,10 +15,10 @@ interface IdeaBlockItemProps {
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
-	currentPhase?: string;
+	currentPhase?: SessionPhase;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = "private" }: IdeaBlockItemProps) {
+export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = DEFAULT_SESSION_PHASE }: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -41,8 +42,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
-	const shouldShowCue = block.hasCue && currentPhase === "group";
-	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
+	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
+	const similarityReasonTag =
+		block.similarityIsSameReason == null
+			? null
+			: {
+					label: block.similarityIsSameReason ? "same reason" : "different reason",
+					className: block.similarityIsSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+				};
 	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
 
 	useEffect(() => {
@@ -255,6 +262,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
+							{shouldShowCue && similarityReasonTag && (
+								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
+								</Badge>
+							)}
 							{!isDeleted && !block.isDraft && (
 								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 									<Pencil className="h-4 w-4" />
@@ -321,9 +333,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
-							{similarityReasonLabel && (
-								<Badge className="w-fit" variant={block.similarityIsSameReason ? "default" : "outline"}>
-									{similarityReasonLabel}
+							{similarityReasonTag && (
+								<Badge className={cn("w-fit", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
 								</Badge>
 							)}
 						</div>

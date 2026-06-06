@@ -10,6 +10,8 @@ from .board import (
     IdeaBlockUpdateResponse,
     TaskConfigItemResponse,
     TaskConfigResponse,
+    TaskPhaseResponse,
+    TaskTemplateResponse,
     TopicDescriptionResponse,
 )
 from .chat_message import ChatMessageCreate, ChatMessageCreateRequest, ChatMessageResponse
@@ -25,17 +27,12 @@ from .idea_block import (
     IdeaBlockUpdate,
 )
 from .idea_block_to_transcript import IdeaBlockToTranscriptCreate, IdeaBlockToTranscriptResponse
-from .poster_task_item import (
-    EnhanceThePosterConfigResponse,
-    EnhanceThePosterOptionResponse,
-    PosterRankingCandidatesResponse,
-    PosterTaskItemCreate,
-    PosterTaskItemPatch,
-    PosterTaskItemResponse,
-    PosterTaskItemsCreateRequest,
-    PosterTaskItemsReplaceRequest,
+from .private_phase_task_item import (
+    PrivatePhaseTaskItemCreate,
+    PrivatePhaseTaskItemReorder,
+    PrivatePhaseTaskItemResponse,
+    PrivatePhaseTaskItemUpdate,
 )
-from .poster_idea_block_task_item import PosterIdeaBlockTaskItemResponse
 from .ranking_move import RankingMoveResponse
 from .similarity import (
     SimilarityCreate,
@@ -71,15 +68,10 @@ __all__ = [
     "IdeaBlockUpdate",
     "IdeaBlockUpdateRequest",
     "IdeaBlockUpdateResponse",
-    "EnhanceThePosterConfigResponse",
-    "EnhanceThePosterOptionResponse",
-    "PosterRankingCandidatesResponse",
-    "PosterIdeaBlockTaskItemResponse",
-    "PosterTaskItemCreate",
-    "PosterTaskItemPatch",
-    "PosterTaskItemResponse",
-    "PosterTaskItemsCreateRequest",
-    "PosterTaskItemsReplaceRequest",
+    "PrivatePhaseTaskItemCreate",
+    "PrivatePhaseTaskItemReorder",
+    "PrivatePhaseTaskItemResponse",
+    "PrivatePhaseTaskItemUpdate",
     "RankingMoveResponse",
     "SimilarityCreate",
     "SimilarityResponse",
@@ -90,6 +82,8 @@ __all__ = [
     "TaskItemResponse",
     "TaskConfigItemResponse",
     "TaskConfigResponse",
+    "TaskPhaseResponse",
+    "TaskTemplateResponse",
     "TopicDescriptionResponse",
     "TranscriptCreate",
     "TranscriptCreateRequest",

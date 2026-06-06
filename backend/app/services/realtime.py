@@ -13,7 +13,11 @@ from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import ChatMessageCreate
-from ..task_config import RANKING_ITEMS
+from ..task_config import (
+    get_default_phase_for_session,
+    get_ranking_items_for_session,
+    normalize_phase_for_session,
+)
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
@@ -25,11 +29,10 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
+from .phase_task_item_snapshot_service import initialize_phase_rankings
 from .ranking_move_service import create_ranking_move
 from .transcripts import save_ws_transcript_segment
 
-DEFAULT_RANKING_ITEMS = RANKING_ITEMS
-DEFAULT_RANKING_ITEM_SET = set(DEFAULT_RANKING_ITEMS)
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
 DUPLICATE_PARTICIPANT_MESSAGE = (
     "這個 participant ID 已經在此 session 中，不能重複進入。"
@@ -173,12 +176,13 @@ presence_manager = ConnectionManager()
 audio_connections: dict[str, dict[str, AudioConnectionState]] = defaultdict(dict)
 public_ranking_state: dict[str, dict[str, Any]] = {}
 private_ranking_state: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+session_ranking_item_catalog: dict[str, list[dict[str, Any]]] = {}
 session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 board_blocks: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
     lambda: {"public_blocks": [], "private_blocks": []}
 )
 cue_responses: dict[str, list[dict[str, Any]]] = defaultdict(list)
-session_phases: dict[str, str] = defaultdict(lambda: "private")
+session_phases: dict[str, str] = {}
 session_timers: dict[str, dict[str, Any]] = defaultdict(
     lambda: {"end_time_ms": 0, "duration_s": 0}
 )
@@ -189,9 +193,16 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _normalize_session_phase(value: Any) -> str:
-    phase = str(value or "private").lower()
-    return phase if phase in {"private", "group"} else "private"
+def _get_session_phase(session_id: str) -> str:
+    phase = session_phases.get(session_id)
+    if phase is None:
+        phase = get_default_phase_for_session(session_name=session_id)
+        session_phases[session_id] = phase
+    return phase
+
+
+def _normalize_session_phase(session_id: str, value: Any) -> str:
+    return normalize_phase_for_session(session_name=session_id, phase=value)
 
 
 def _normalize_cue_condition(value: Any) -> str:
@@ -206,7 +217,7 @@ def is_similarity_cue_enabled(session_id: str) -> bool:
 def _phase_state_message(session_id: str) -> dict[str, Any]:
     timer = session_timers[session_id]
     return {
-        "current_phase": session_phases[session_id],
+        "current_phase": _get_session_phase(session_id),
         "timer_end_time_ms": timer["end_time_ms"],
         "duration_s": timer["duration_s"],
         "cue_condition": session_cue_conditions[session_id],
@@ -228,7 +239,7 @@ def _phase_changed_message(session_id: str) -> dict[str, Any]:
     timer = session_timers[session_id]
     return {
         "type": "phase_changed",
-        "phase": session_phases[session_id],
+        "phase": _get_session_phase(session_id),
         "end_time_ms": timer["end_time_ms"],
         "duration_s": timer["duration_s"],
         "cue_condition": session_cue_conditions[session_id],
@@ -241,7 +252,7 @@ def _countdown_changed_message(session_id: str) -> dict[str, Any]:
     timer = session_timers[session_id]
     return {
         "type": "countdown_changed",
-        "current_phase": session_phases[session_id],
+        "current_phase": _get_session_phase(session_id),
         "timer_end_time_ms": timer["end_time_ms"],
         "end_time_ms": timer["end_time_ms"],
         "duration_s": timer["duration_s"],
@@ -399,7 +410,25 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
     }
 
 
-def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
+def _get_default_ranking_items(session_id: str) -> list[str]:
+    return get_ranking_items_for_session(session_name=session_id)
+
+
+def _get_current_ranking_items(session_id: str) -> list[str]:
+    catalog = session_ranking_item_catalog.get(session_id)
+    if catalog:
+        return [str(item["id"]) for item in catalog if item.get("id")]
+    return _get_default_ranking_items(session_id)
+
+
+def _get_current_ranking_item_catalog(session_id: str) -> list[dict[str, Any]] | None:
+    catalog = session_ranking_item_catalog.get(session_id)
+    return [dict(item) for item in catalog] if catalog else None
+
+
+def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    default_ranking_items = _get_current_ranking_items(session_id)
+    default_ranking_item_set = set(default_ranking_items)
     current_items = state.get("items")
     if not isinstance(current_items, list):
         current_items = []
@@ -407,11 +436,11 @@ def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
         item
         for index, item in enumerate(current_items)
         if isinstance(item, str)
-        and item in DEFAULT_RANKING_ITEM_SET
+        and item in default_ranking_item_set
         and current_items.index(item) == index
     ]
     normalized_items.extend(
-        item for item in DEFAULT_RANKING_ITEMS if item not in normalized_items
+        item for item in default_ranking_items if item not in normalized_items
     )
     if normalized_items != current_items:
         state["items"] = normalized_items
@@ -419,26 +448,26 @@ def _normalize_ranking_state(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def _create_ranking_state() -> dict[str, Any]:
+def _create_ranking_state(session_id: str) -> dict[str, Any]:
     return {
         "revision": 0,
-        "items": list(DEFAULT_RANKING_ITEMS),
+        "items": _get_current_ranking_items(session_id),
     }
 
 
 def _get_public_ranking_state(session_id: str) -> dict[str, Any]:
     if session_id not in public_ranking_state:
-        public_ranking_state[session_id] = _create_ranking_state()
+        public_ranking_state[session_id] = _create_ranking_state(session_id)
     else:
-        _normalize_ranking_state(public_ranking_state[session_id])
+        _normalize_ranking_state(session_id, public_ranking_state[session_id])
     return public_ranking_state[session_id]
 
 
 def _get_private_ranking_state(session_id: str, participant_id: str) -> dict[str, Any]:
     if participant_id not in private_ranking_state[session_id]:
-        private_ranking_state[session_id][participant_id] = _create_ranking_state()
+        private_ranking_state[session_id][participant_id] = _create_ranking_state(session_id)
     else:
-        _normalize_ranking_state(private_ranking_state[session_id][participant_id])
+        _normalize_ranking_state(session_id, private_ranking_state[session_id][participant_id])
     return private_ranking_state[session_id][participant_id]
 
 
@@ -477,9 +506,10 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "ranking": {"items": list(public_state["items"])},
         "public_ranking": _ranking_payload(public_state),
         "private_ranking": _ranking_payload(private_state),
+        "ranking_items": _get_current_ranking_item_catalog(session_id),
         "public_blocks": list(blocks["public_blocks"]),
         "private_blocks": private_blocks,
-        "current_phase": session_phases[session_id],
+        "current_phase": _get_session_phase(session_id),
         "timer_end_time_ms": session_timers[session_id]["end_time_ms"],
         "cue_condition": session_cue_conditions[session_id],
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
@@ -499,6 +529,7 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
         "revision": public_state["revision"],
         "public_ranking": _ranking_payload(public_state),
         "private_rankings": private_rankings,
+        "ranking_items": _get_current_ranking_item_catalog(session_id),
     }
 
 
@@ -839,17 +870,73 @@ async def handle_admin_websocket(
                     },
                 )
             elif message_type == "switch_phase":
-                new_phase = _normalize_session_phase(payload.get("phase"))
-                session_phases[session_id] = new_phase
+                previous_phase = _get_session_phase(session_id)
+                new_phase = _normalize_session_phase(session_id, payload.get("phase"))
                 if "duration_s" in payload:
                     _set_session_countdown(
                         session_id, _normalize_int(payload.get("duration_s"), 0)
                     )
 
+                async with session_locks[session_id]:
+                    participant_ids = sorted(
+                        {
+                            *board_manager.get_participants(session_id),
+                            *private_ranking_state[session_id].keys(),
+                        }
+                    )
+                    async with SessionLocal() as db:
+                        try:
+                            ranking_initialization = await initialize_phase_rankings(
+                                db,
+                                session_name=session_id,
+                                from_phase=previous_phase,
+                                to_phase=new_phase,
+                                participant_ids=[
+                                    participant_id
+                                    for participant_id in participant_ids
+                                    if not _is_admin_participant_id(participant_id)
+                                ],
+                            )
+                        except Exception as exc:
+                            await db.rollback()
+                            logger.exception(
+                                "phase_snapshot_initialization_failed session_id=%s from_phase=%s to_phase=%s error=%s",
+                                session_id,
+                                previous_phase,
+                                new_phase,
+                                exc,
+                            )
+                            ranking_initialization = None
+
+                    if ranking_initialization is not None:
+                        session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
+                        if ranking_initialization.private_items_by_participant_id is not None:
+                            for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
+                                private_ranking_state[session_id][participant_id] = {
+                                    "revision": 0,
+                                    "items": list(item_ids),
+                                }
+                        if ranking_initialization.public_items is not None:
+                            public_ranking_state[session_id] = {
+                                "revision": 0,
+                                "items": list(ranking_initialization.public_items),
+                            }
+                    elif new_phase == get_default_phase_for_session(session_name=session_id):
+                        session_ranking_item_catalog.pop(session_id, None)
+
+                    session_phases[session_id] = new_phase
+
                 phase_changed_msg = _phase_changed_message(session_id)
                 await admin_manager.broadcast(session_id, phase_changed_msg)
                 await board_manager.broadcast(session_id, phase_changed_msg)
                 await cue_manager.broadcast(session_id, phase_changed_msg)
+                for participant_id in board_manager.get_participants(session_id):
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        _board_state_message(session_id, participant_id),
+                    )
+                await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
             elif message_type == "set_countdown":
                 _set_session_countdown(
                     session_id, _normalize_int(payload.get("duration_s"), 0)

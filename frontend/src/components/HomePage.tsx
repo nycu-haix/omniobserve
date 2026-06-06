@@ -1,15 +1,60 @@
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { formatLocalDate, getDefaultRoomName } from "../lib/defaultRoomName";
 import { getDefaultParticipantName, getNextAvailableParticipantId, isValidParticipantId, normalizeParticipantId } from "../lib/participantDefaults";
+import { cn } from "../lib/utils";
+import { fetchTaskTemplates, type TaskTemplate } from "../services/api";
 import { fetchSessionParticipants } from "../services/presence";
 import { Button } from "./ui/Button";
 
 const defaultSessionName = getDefaultRoomName();
+const defaultSessionSuffix = formatLocalDate(new Date());
+const fallbackTaskTemplates: TaskTemplate[] = [
+	{
+		task_id: "lost-at-sea",
+		title: "Lost at Sea",
+		session_prefix: "lost-at-sea",
+		description: "海上求生物品排序任務。",
+		is_default: true
+	},
+	{
+		task_id: "enhance-the-poster",
+		title: "Enhance the Poster",
+		session_prefix: "enhance-the-poster",
+		description: "海報改善面向排序任務。",
+		is_default: false
+	}
+];
+
+function getTemplateTaskIds(taskTemplates: TaskTemplate[]) {
+	return (taskTemplates.length > 0 ? taskTemplates : fallbackTaskTemplates).map(template => template.task_id);
+}
+
+function getSessionTemplateId(sessionName: string, taskTemplates: TaskTemplate[]) {
+	const normalizedSessionName = sessionName.trim().toLowerCase();
+	return getTemplateTaskIds(taskTemplates).find(taskId => normalizedSessionName === taskId || normalizedSessionName.startsWith(`${taskId}-`)) || fallbackTaskTemplates[0].task_id;
+}
+
+function getSessionSuffix(sessionName: string, taskTemplates: TaskTemplate[]) {
+	const trimmedSessionName = sessionName.trim();
+	const normalizedSessionName = trimmedSessionName.toLowerCase();
+	const matchedTaskId = getTemplateTaskIds(taskTemplates).find(taskId => normalizedSessionName === taskId || normalizedSessionName.startsWith(`${taskId}-`));
+	if (!matchedTaskId) {
+		return "";
+	}
+	return trimmedSessionName.slice(matchedTaskId.length).replace(/^-+/, "");
+}
+
+function buildSessionNameForTemplate(taskId: string, currentSessionName: string, taskTemplates: TaskTemplate[]) {
+	const suffix = getSessionSuffix(currentSessionName, taskTemplates) || defaultSessionSuffix;
+	return `${taskId}-${suffix}`;
+}
+
+const defaultGeneratedSessionName = buildSessionNameForTemplate(fallbackTaskTemplates[0].task_id, defaultSessionName, fallbackTaskTemplates);
 
 function buildMeetingUrl(sessionName: string, participantId: string, displayName: string) {
 	const params = new URLSearchParams();
-	params.set("room_name", sessionName.trim() || defaultSessionName);
+	params.set("room_name", sessionName.trim() || defaultGeneratedSessionName);
 	params.set("id", normalizeParticipantId(participantId));
 	params.set("name", displayName.trim() || "User");
 
@@ -17,7 +62,8 @@ function buildMeetingUrl(sessionName: string, participantId: string, displayName
 }
 
 export function HomePage() {
-	const [sessionName, setSessionName] = useState(defaultSessionName);
+	const [sessionName, setSessionName] = useState(defaultGeneratedSessionName);
+	const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>(fallbackTaskTemplates);
 	const [participantId, setParticipantId] = useState("1");
 	const [displayName, setDisplayName] = useState(getDefaultParticipantName("1"));
 	const [copied, setCopied] = useState(false);
@@ -27,6 +73,25 @@ export function HomePage() {
 	const displayNameEditedRef = useRef(false);
 	const isParticipantIdValid = isValidParticipantId(participantId);
 	const meetingUrl = useMemo(() => buildMeetingUrl(sessionName, participantId, displayName), [displayName, participantId, sessionName]);
+	const selectedTemplateId = useMemo(() => getSessionTemplateId(sessionName, taskTemplates), [sessionName, taskTemplates]);
+
+	useEffect(() => {
+		const abortController = new AbortController();
+		const loadTaskTemplates = async () => {
+			try {
+				const templates = await fetchTaskTemplates(abortController.signal);
+				setTaskTemplates(templates.length > 0 ? templates : fallbackTaskTemplates);
+			} catch (error) {
+				if (error instanceof DOMException && error.name === "AbortError") {
+					return;
+				}
+				console.error("Failed to load task templates", error);
+			}
+		};
+
+		void loadTaskTemplates();
+		return () => abortController.abort();
+	}, []);
 
 	useEffect(() => {
 		let disposed = false;
@@ -106,6 +171,13 @@ export function HomePage() {
 		}
 	};
 
+	const selectTemplate = (taskId: string) => {
+		participantIdEditedRef.current = false;
+		displayNameEditedRef.current = false;
+		setParticipantIdError("");
+		setSessionName(current => buildSessionNameForTemplate(taskId, current, taskTemplates));
+	};
+
 	return (
 		<main className="min-h-screen bg-background text-foreground">
 			<div className="mx-auto grid min-h-screen w-full max-w-5xl content-center gap-8 px-5 py-10">
@@ -117,6 +189,34 @@ export function HomePage() {
 
 				<section className="grid gap-6 rounded-lg border bg-card p-5 text-card-foreground shadow-sm md:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] md:p-6">
 					<div className="grid gap-4">
+						<div className="grid gap-2">
+							<div className="text-sm font-medium">Task template</div>
+							<div className="grid gap-2 sm:grid-cols-2">
+								{taskTemplates.map(template => {
+									const isSelected = template.task_id === selectedTemplateId;
+									return (
+										<button
+											key={template.task_id}
+											type="button"
+											className={cn(
+												"grid min-h-24 content-start gap-2 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+												isSelected && "border-primary bg-primary/5"
+											)}
+											aria-pressed={isSelected}
+											onClick={() => selectTemplate(template.task_id)}
+										>
+											<span className="flex items-center justify-between gap-2">
+												<span className="min-w-0 truncate text-sm font-semibold">{template.title}</span>
+												{isSelected && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+											</span>
+											<span className="break-all font-mono text-xs text-muted-foreground">{template.session_prefix}</span>
+											<span className="text-xs leading-5 text-muted-foreground">{template.description}</span>
+										</button>
+									);
+								})}
+							</div>
+						</div>
+
 						<label className="grid gap-2 text-sm font-medium">
 							Session name
 							<input
@@ -128,7 +228,7 @@ export function HomePage() {
 									setParticipantIdError("");
 									setSessionName(event.target.value);
 								}}
-								placeholder={defaultSessionName}
+								placeholder={defaultGeneratedSessionName}
 							/>
 						</label>
 
