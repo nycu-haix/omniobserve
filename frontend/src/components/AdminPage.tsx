@@ -76,6 +76,7 @@ interface SimilarityRecord {
 	idea_block_id_1: number;
 	idea_block_id_2: number;
 	reason: string;
+	is_same_reason: boolean;
 	idea_block_1: SimilarityIdeaSummary;
 	idea_block_2: SimilarityIdeaSummary;
 }
@@ -133,6 +134,7 @@ interface PublicChatMessagePayload {
 
 type CueCondition = "experimental" | "control";
 type AdminTab = "ranking" | "transcript" | "chat";
+type ManualCueReasonType = "same" | "different";
 
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
@@ -146,6 +148,10 @@ const ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "omni.admin.leftSidebarWidth";
 const ADMIN_RIGHT_SIDEBAR_WIDTH_STORAGE_KEY = "omni.admin.rightSidebarWidth";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MANUAL_CUE_REASON_PREFIX = "Manual cue from admin:";
+const MANUAL_CUE_REASON_LABELS: Record<ManualCueReasonType, string> = {
+	same: "Same reason",
+	different: "Different reason"
+};
 
 function getAdminAvailableLayoutWidth() {
 	return window.innerWidth - 32 - 32;
@@ -654,6 +660,7 @@ export function AdminPage() {
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
 	const [selectedCueBlockIds, setSelectedCueBlockIds] = useState<number[]>([]);
+	const [manualCueReasonType, setManualCueReasonType] = useState<ManualCueReasonType>("same");
 	const [isCreatingManualCue, setIsCreatingManualCue] = useState(false);
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
@@ -1116,13 +1123,15 @@ export function AdminPage() {
 		setManualCueError(null);
 		try {
 			const [firstBlock, secondBlock] = selectedCueBlocks;
+			const isSameReason = manualCueReasonType === "same";
 			const response = await fetch(buildSessionApiUrl(roomName, "/similarities"), {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					idea_block_id_1: firstBlock.id,
 					idea_block_id_2: secondBlock.id,
-					reason: `${MANUAL_CUE_REASON_PREFIX} idea block #${firstBlock.id} and #${secondBlock.id}`
+					reason: `${MANUAL_CUE_REASON_PREFIX} ${MANUAL_CUE_REASON_LABELS[manualCueReasonType].toLowerCase()} idea block #${firstBlock.id} and #${secondBlock.id}`,
+					is_same_reason: isSameReason
 				})
 			});
 
@@ -1460,7 +1469,28 @@ export function AdminPage() {
 										: "Select 2 idea blocks to cue together"}
 							</p>
 						</div>
-						<div className="flex shrink-0 items-center gap-2">
+						<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+							<div role="radiogroup" aria-label="Manual cue reason type" className="inline-flex rounded-md border bg-muted p-0.5">
+								{(["same", "different"] as const).map(reasonType => {
+									const isSelected = manualCueReasonType === reasonType;
+									return (
+										<button
+											key={reasonType}
+											type="button"
+											role="radio"
+											aria-checked={isSelected}
+											className={cn(
+												"h-7 whitespace-nowrap rounded px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+												isSelected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+											)}
+											onClick={() => setManualCueReasonType(reasonType)}
+											disabled={isCreatingManualCue}
+										>
+											{MANUAL_CUE_REASON_LABELS[reasonType]}
+										</button>
+									);
+								})}
+							</div>
 							{selectedCueBlocks.length > 0 && (
 								<Button type="button" size="sm" variant="ghost" className="gap-1" onClick={() => setSelectedCueBlockIds([])} disabled={isCreatingManualCue}>
 									<X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1487,8 +1517,19 @@ export function AdminPage() {
 								{manualCueHistory.map(similarity => (
 									<div key={similarity.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/70 px-2 py-1.5 text-xs">
 										<div className="min-w-0">
-											<div className="truncate font-medium">
-												#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
+											<div className="flex min-w-0 items-center gap-2 font-medium">
+												<span className="truncate">
+													#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
+												</span>
+												<Badge
+													variant="outline"
+													className={cn(
+														"shrink-0 px-1.5 py-0 text-[10px]",
+														similarity.is_same_reason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+													)}
+												>
+													{similarity.is_same_reason ? MANUAL_CUE_REASON_LABELS.same : MANUAL_CUE_REASON_LABELS.different}
+												</Badge>
 											</div>
 											<div className="truncate text-muted-foreground">
 												{similarity.idea_block_1.summary || "Idea block"} / {similarity.idea_block_2.summary || "Idea block"}
