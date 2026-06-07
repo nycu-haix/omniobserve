@@ -1505,7 +1505,7 @@ export function AdminPage() {
 						{manualCueError && <p className="basis-full text-xs text-destructive">{manualCueError}</p>}
 					</div>
 					{manualCueHistory.length > 0 && (
-						<div className="grid gap-2 rounded-md border bg-background px-3 py-2">
+						<div className="grid min-w-0 gap-2 overflow-hidden rounded-md border bg-background px-3 py-2">
 							<div className="flex items-center justify-between gap-2">
 								<div className="flex items-center gap-2 text-sm font-medium">
 									<Undo2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -1513,12 +1513,12 @@ export function AdminPage() {
 								</div>
 								<Badge variant="outline">{manualCueHistory.length}</Badge>
 							</div>
-							<div className="grid gap-1.5">
+							<div className="grid min-w-0 gap-1.5 overflow-hidden">
 								{manualCueHistory.map(similarity => (
-									<div key={similarity.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/70 px-2 py-1.5 text-xs">
-										<div className="min-w-0">
-											<div className="flex min-w-0 items-center gap-2 font-medium">
-												<span className="truncate">
+									<div key={similarity.id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-hidden rounded-md bg-muted/70 px-2 py-1.5 text-xs">
+										<div className="min-w-0 overflow-hidden">
+											<div className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden font-medium">
+												<span className="min-w-0 truncate">
 													#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
 												</span>
 												<Badge
@@ -1531,7 +1531,10 @@ export function AdminPage() {
 													{similarity.is_same_reason ? MANUAL_CUE_REASON_LABELS.same : MANUAL_CUE_REASON_LABELS.different}
 												</Badge>
 											</div>
-											<div className="truncate text-muted-foreground">
+											<div
+												className="block max-w-full truncate text-muted-foreground"
+												title={`${similarity.idea_block_1.summary || "Idea block"} / ${similarity.idea_block_2.summary || "Idea block"}`}
+											>
 												{similarity.idea_block_1.summary || "Idea block"} / {similarity.idea_block_2.summary || "Idea block"}
 											</div>
 										</div>
