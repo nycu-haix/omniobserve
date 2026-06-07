@@ -414,6 +414,23 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
 async def _handle_similarity_reason_share(
     session_id: str, participant_id: str, payload: dict[str, Any]
 ) -> None:
+    if not is_similarity_cue_enabled(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {
+                "type": "similarity_reason_share_error",
+                "reason": "similarity cues are disabled",
+            },
+        )
+        logger.info(
+            "similarity_reason_share_suppressed session_id=%s participant_id=%s cue_condition=%s",
+            session_id,
+            participant_id,
+            session_cue_conditions[session_id],
+        )
+        return
+
     block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
     participant_user_id = _normalize_int(participant_id, -1)
     if block_id < 0 or participant_user_id < 0:

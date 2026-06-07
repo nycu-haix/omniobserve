@@ -1014,13 +1014,15 @@ export function PrivateBoard({
 
 			setCues(prev => {
 				const alreadyQueued = prev.some(item => item.id === cue.id || (isSimilarityPairCue(item) && item.blockId === cue.blockId));
+				const nextCues = alreadyQueued ? prev : [...prev, cue];
 				console.info("[private-board] similarity cue fallback detected", {
 					blockId: cue.blockId,
 					isSameReason: cue.isSameReason,
 					alreadyQueued,
 					currentBlockExpanded: !!currentBlock?.expanded
 				});
-				return alreadyQueued ? prev : [...prev, cue];
+				cuesRef.current = nextCues;
+				return nextCues;
 			});
 		},
 		[cueCondition]
@@ -1273,13 +1275,16 @@ export function PrivateBoard({
 					const previousBlock = previousBlocksById.get(block.id);
 					return !!previousBlock && !!block.hasCue && !previousBlock.hasCue;
 				});
+				const initiallyLoadedPrivatePhaseCuedBlocks = isGroupPhase(visiblePhase) ? [] : ideaBlocksFromDb.filter(block => block.hasCue && !previousBlocksById.has(block.id));
+				const cueBlocksToQueue = [...newlyCuedBlocks, ...initiallyLoadedPrivatePhaseCuedBlocks];
 				console.info("[private-board] similarity cue refresh check", {
 					sessionId,
 					participantId,
 					newlyCuedBlockIds: newlyCuedBlocks.map(block => block.id),
+					initiallyLoadedPrivatePhaseCuedBlockIds: initiallyLoadedPrivatePhaseCuedBlocks.map(block => block.id),
 					cuedBlockIds: ideaBlocksFromDb.filter(block => block.hasCue).map(block => block.id)
 				});
-				newlyCuedBlocks.forEach(queueSimilarityCueFromBlock);
+				cueBlocksToQueue.forEach(queueSimilarityCueFromBlock);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
 				ideaBlocksFromDb.forEach(block => unreadIdsFromRefresh.delete(block.id));
 			} catch (error) {
@@ -1293,7 +1298,7 @@ export function PrivateBoard({
 		void loadIdeaBlocks();
 
 		return () => controller.abort();
-	}, [ideaBlockRefreshKey, participantId, queueSimilarityCueFromBlock, sessionId]);
+	}, [ideaBlockRefreshKey, participantId, queueSimilarityCueFromBlock, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		ideaBlocksRef.current = ideaBlocks;
