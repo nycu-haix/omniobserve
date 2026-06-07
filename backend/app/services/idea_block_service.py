@@ -274,7 +274,7 @@ async def _create_embedding_or_none(text: str) -> list[float] | None:
         if exc.status_code < 500:
             raise
         logger.warning(
-            "idea_block_embedding_skipped status=%s detail=%s",
+            "idea_block_embedding_skipped reason=embedding_provider_error status=%s detail=%s",
             exc.status_code,
             exc.detail,
         )
