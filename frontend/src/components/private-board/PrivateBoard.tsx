@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
@@ -61,6 +61,10 @@ interface IdeaBlockResponse {
 	similarity_is_same_reason?: boolean | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
+	is_duplicate?: boolean;
+	duplicate_of_id?: number | null;
+	duplicate_reason?: string | null;
+	duplicate_similarity?: number | null;
 }
 
 interface ChatMessageResponse {
@@ -81,6 +85,13 @@ interface PublicChatMessagePayload {
 	message: string;
 	timestampMs?: number;
 	isDeleted?: boolean;
+}
+
+interface IdeaBlockNotice {
+	id: string;
+	blockId: string;
+	title: string;
+	message: string;
 }
 
 interface AudioIdeaBlocksUpdateMessage {
@@ -555,6 +566,20 @@ function normalizeIdeaBlockText(value: string): string {
 		.replace(/[\s\p{P}]/gu, "");
 }
 
+function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
+	const similarity = typeof response.duplicate_similarity === "number" ? Math.round(response.duplicate_similarity * 100) : null;
+	const similarityText = similarity == null ? "" : `相似度 ${similarity}%`;
+	const blockTitle = block.summary.trim() || "既有想法";
+	const message = similarityText ? `已找到相似的既有想法：「${blockTitle}」(${similarityText})` : `已找到相似的既有想法：「${blockTitle}」`;
+
+	return {
+		id: `duplicate-${block.id}-${Date.now()}`,
+		blockId: block.id,
+		title: "這個 idea block 已存在",
+		message
+	};
+}
+
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
 		if (!!left.isDeleted !== !!right.isDeleted) {
@@ -691,6 +716,7 @@ export function PrivateBoard({
 	const [highlightedTranscriptId, setHighlightedTranscriptId] = useState<string | null>(null);
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
+	const [ideaBlockNotice, setIdeaBlockNotice] = useState<IdeaBlockNotice | null>(null);
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
@@ -1138,6 +1164,15 @@ export function PrivateBoard({
 		return () => window.clearTimeout(timer);
 	}, [highlightedTranscriptId, visibleActiveTab]);
 
+	useEffect(() => {
+		if (!ideaBlockNotice) {
+			return;
+		}
+
+		const timer = window.setTimeout(() => setIdeaBlockNotice(null), 4000);
+		return () => window.clearTimeout(timer);
+	}, [ideaBlockNotice]);
+
 	const jumpToBlock = (blockId: string) => {
 		if (!canShowIdeaBlocks) {
 			return;
@@ -1447,7 +1482,9 @@ export function PrivateBoard({
 				throw new Error(await getResponseErrorMessage(response, "Failed to save idea block"));
 			}
 
-			const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
+			const savedIdeaBlockResponse = (await response.json()) as IdeaBlockResponse;
+			const savedBlock = ideaBlockResponseToBlock(savedIdeaBlockResponse);
+			const isDuplicateBlock = savedIdeaBlockResponse.is_duplicate || savedIdeaBlockResponse.duplicate_of_id != null;
 			const isNewActiveBlock = !savedBlock.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === savedBlock.id);
 			setIdeaBlocks(prev => {
 				const withoutGeneratingBlock = prev.filter(block => block.id !== generatingBlock.id);
@@ -1455,7 +1492,10 @@ export function PrivateBoard({
 				ideaBlocksRef.current = nextBlocks;
 				return nextBlocks;
 			});
-			if (lastVisibleActiveTabRef.current === "ideablock") {
+			if (isDuplicateBlock) {
+				setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+				jumpToBlock(savedBlock.id);
+			} else if (lastVisibleActiveTabRef.current === "ideablock") {
 				setHighlightedBlockId(savedBlock.id);
 			} else if (isNewActiveBlock) {
 				setUnreadIdeaBlockCount(current => current + 1);
@@ -1500,6 +1540,19 @@ export function PrivateBoard({
 	return (
 		<>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
+			{ideaBlockNotice && (
+				<div className="fixed right-4 top-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-card p-3 text-card-foreground shadow-lg" role="status" aria-live="polite">
+					<div className="flex items-start gap-3">
+						<button type="button" className="min-w-0 flex-1 text-left" onClick={() => jumpToBlock(ideaBlockNotice.blockId)}>
+							<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
+							<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
+						</button>
+						<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="關閉通知" onClick={() => setIdeaBlockNotice(null)}>
+							<X className="h-4 w-4" />
+						</Button>
+					</div>
+				</div>
+			)}
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex items-center gap-2">

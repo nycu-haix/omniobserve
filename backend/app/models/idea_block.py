@@ -88,6 +88,22 @@ class IdeaBlock(Base):
     def similarity_is_same_reason(self) -> bool | None:
         return getattr(self, "_similarity_is_same_reason", None)
 
+    @property
+    def is_duplicate(self) -> bool:
+        return self.duplicate_of_id is not None
+
+    @property
+    def duplicate_of_id(self) -> int | None:
+        return getattr(self, "_duplicate_of_id", None)
+
+    @property
+    def duplicate_reason(self) -> str | None:
+        return getattr(self, "_duplicate_reason", None)
+
+    @property
+    def duplicate_similarity(self) -> float | None:
+        return getattr(self, "_duplicate_similarity", None)
+
     @similarity_is_same_reason.setter
     def similarity_is_same_reason(self, value: bool | None) -> None:
         self._similarity_is_same_reason = value

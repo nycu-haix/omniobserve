@@ -83,7 +83,11 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
             duplicate_match.reason,
             duplicate_match.similarity,
         )
-        return await get_idea_block(duplicate_match.idea_block_id, db)
+        duplicate_block = await get_idea_block(duplicate_match.idea_block_id, db)
+        duplicate_block._duplicate_of_id = duplicate_match.idea_block_id
+        duplicate_block._duplicate_reason = duplicate_match.reason
+        duplicate_block._duplicate_similarity = duplicate_match.similarity
+        return duplicate_block
 
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
