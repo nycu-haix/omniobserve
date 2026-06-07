@@ -31,6 +31,10 @@ from .phase_task_item_snapshot import (
     PhaseTaskItemSnapshotItemResponse,
     PhaseTaskItemSnapshotResponse,
 )
+from .poster_idea_block_task_item import (
+    PosterIdeaBlockTaskItemResponse,
+    PosterIdeaBlockTaskItemsForIdeaBlockResponse,
+)
 from .private_phase_task_item import (
     PrivatePhaseTaskItemCreate,
     PrivatePhaseTaskItemReorder,
@@ -76,6 +80,8 @@ __all__ = [
     "EffectiveRankingStateResponse",
     "PhaseTaskItemSnapshotItemResponse",
     "PhaseTaskItemSnapshotResponse",
+    "PosterIdeaBlockTaskItemResponse",
+    "PosterIdeaBlockTaskItemsForIdeaBlockResponse",
     "PrivatePhaseTaskItemCreate",
     "PrivatePhaseTaskItemReorder",
     "PrivatePhaseTaskItemResponse",
