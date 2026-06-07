@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
-from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
+from ..config import IDEA_BLOCK_SYSTEM_PROMPT, IDEA_LLM_ENABLE_THINKING, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
 from ..task_config import get_llm_topic_description_for_session
@@ -84,6 +84,7 @@ async def build_idea_blocks_with_llm(transcript_text: str, *, session_name: str 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            extra_body={"enable_thinking": IDEA_LLM_ENABLE_THINKING},
         )
         raw_content = completion.choices[0].message.content or "{}"
         logger.info(
