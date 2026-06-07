@@ -10,6 +10,10 @@ export interface IdeaBlock {
 	hasCue?: boolean;
 	cueText?: string;
 	similarityIsSameReason?: boolean | null;
+	publicContextRelevant?: boolean;
+	publicContextScore?: number | null;
+	publicContextReason?: string;
+	publicContextExpiresAtMs?: number;
 	expanded?: boolean;
 	isUnread?: boolean;
 	isDeleted?: boolean;

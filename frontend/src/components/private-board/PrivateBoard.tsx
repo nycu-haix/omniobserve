@@ -35,6 +35,7 @@ type BoardMessage =
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityCueData }
+	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
@@ -88,6 +89,21 @@ interface PublicChatMessagePayload {
 	message: string;
 	timestampMs?: number;
 	isDeleted?: boolean;
+}
+
+interface PublicContextMatchPayload {
+	ideaBlockId?: string | number | null;
+	userId?: string | number | null;
+	score?: number | null;
+	reason?: string | null;
+	taskItemIds?: number[];
+}
+
+interface PublicContextMatchesPayload {
+	transcriptId?: string | number | null;
+	participantId?: string | number | null;
+	textChars?: number;
+	matches?: PublicContextMatchPayload[];
 }
 
 interface IdeaBlockNotice {
@@ -163,6 +179,7 @@ const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
+const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
@@ -199,6 +216,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "update_idea_block" ||
 		message.type === "new_transcript_line" ||
 		message.type === "similarity_cue" ||
+		message.type === "public_context_matches" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
@@ -456,8 +474,7 @@ function transcriptSourceFromAudioMessage(message: AudioDraftTargetMessage): Tra
 function stripWhisperArtifacts(text: string): string {
 	const cjkPattern = /[\u3400-\u9fff]/;
 	const artifactPattern = /\b(?:audio|drop|out|sound|silence|noise|else|elsewhat\w*|going|so)\b/gi;
-	const promptLeakPattern =
-		/(?:請以|请以)?(?:繁體|繁体)?(?:用)?中文(?:逐字稿|逐字轉錄|转录|輸出|输出|字幕|中文字幕|輸請用中文字幕)?|只保留明確英文專有名詞|明確英文專有名詞|英文專有名詞/g;
+	const promptLeakPattern = /(?:請以|请以)?(?:繁體|繁体)?(?:用)?中文(?:逐字稿|逐字轉錄|转录|輸出|输出|字幕|中文字幕|輸請用中文字幕)?|只保留明確英文專有名詞|明確英文專有名詞|英文專有名詞/g;
 	const labelPattern =
 		/^(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声|台語|臺語|台语|閩南語|闽南语|客語|客家話|粵語|粤语|廣東話|广东话|英文|英語|中文|普通話|國語|国语|日語|韓語)$/;
 	let cleaned = text
@@ -583,15 +600,13 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 	if (!existingLine) {
 		if (!line.isDraft && (line.source === "public" || line.source === "private")) {
 			const lineTimestampMs = line.timestampMs ?? Date.now();
-			const duplicateFinalLine = lines.find(
-				item => {
-					if (item.isDraft || item.source !== line.source || item.userId !== line.userId || item.text.trim() !== normalizedText) {
-						return false;
-					}
-					const itemTimestampMs = item.timestampMs ?? lineTimestampMs;
-					return Math.abs(lineTimestampMs - itemTimestampMs) <= AUDIO_FINAL_DUPLICATE_WINDOW_MS;
+			const duplicateFinalLine = lines.find(item => {
+				if (item.isDraft || item.source !== line.source || item.userId !== line.userId || item.text.trim() !== normalizedText) {
+					return false;
 				}
-			);
+				const itemTimestampMs = item.timestampMs ?? lineTimestampMs;
+				return Math.abs(lineTimestampMs - itemTimestampMs) <= AUDIO_FINAL_DUPLICATE_WINDOW_MS;
+			});
 			if (duplicateFinalLine) {
 				return lines;
 			}
@@ -628,10 +643,7 @@ function replaceTranscriptLine(lines: TranscriptLineType[], draftLineId: string,
 }
 
 function audioTranscriptDraftSegmentId(message: AudioDraftTargetMessage): string | undefined {
-	const segmentId =
-		message.replace_segment_id ??
-		message.client_segment_id ??
-		(message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id);
+	const segmentId = message.replace_segment_id ?? message.client_segment_id ?? (message.type === "transcript_update" ? message.transcript_segment_id : message.segment_id);
 	return segmentId == null ? undefined : String(segmentId);
 }
 
@@ -717,6 +729,10 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 								cueText: nextBlock.cueText ?? block.cueText,
 								hasCue: block.hasCue || nextBlock.hasCue,
 								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+								publicContextRelevant: block.publicContextRelevant || nextBlock.publicContextRelevant,
+								publicContextScore: nextBlock.publicContextScore ?? block.publicContextScore,
+								publicContextReason: nextBlock.publicContextReason ?? block.publicContextReason,
+								publicContextExpiresAtMs: Math.max(block.publicContextExpiresAtMs ?? 0, nextBlock.publicContextExpiresAtMs ?? 0) || undefined,
 								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 							}
 						: block
@@ -772,10 +788,73 @@ function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaB
 	};
 }
 
+function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMatchesPayload): IdeaBlock[] {
+	const matches = Array.isArray(payload.matches) ? payload.matches : [];
+	if (matches.length === 0) {
+		return blocks;
+	}
+
+	const expiresAtMs = Date.now() + PUBLIC_CONTEXT_RELEVANCE_MS;
+	const matchesByBlockId = new Map<string, PublicContextMatchPayload>();
+	for (const match of matches) {
+		if (match.ideaBlockId == null) {
+			continue;
+		}
+		matchesByBlockId.set(String(match.ideaBlockId), match);
+	}
+	if (matchesByBlockId.size === 0) {
+		return blocks;
+	}
+
+	return blocks.map(block => {
+		const match = matchesByBlockId.get(block.id);
+		if (!match || block.isDeleted) {
+			return block;
+		}
+		return {
+			...block,
+			publicContextRelevant: true,
+			publicContextScore: typeof match.score === "number" ? match.score : null,
+			publicContextReason: typeof match.reason === "string" ? match.reason : undefined,
+			publicContextExpiresAtMs: expiresAtMs
+		};
+	});
+}
+
+function clearExpiredPublicContextMatches(blocks: IdeaBlock[], nowMs: number): IdeaBlock[] {
+	let didChange = false;
+	const nextBlocks = blocks.map(block => {
+		if (!block.publicContextRelevant || !block.publicContextExpiresAtMs || block.publicContextExpiresAtMs > nowMs) {
+			return block;
+		}
+		didChange = true;
+		return {
+			...block,
+			publicContextRelevant: false,
+			publicContextScore: null,
+			publicContextReason: undefined,
+			publicContextExpiresAtMs: undefined
+		};
+	});
+	return didChange ? nextBlocks : blocks;
+}
+
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
 		if (!!left.isDeleted !== !!right.isDeleted) {
-			return left.isDeleted ? -1 : 1;
+			return left.isDeleted ? 1 : -1;
+		}
+
+		if (!!left.publicContextRelevant !== !!right.publicContextRelevant) {
+			return left.publicContextRelevant ? -1 : 1;
+		}
+
+		if (left.publicContextRelevant && right.publicContextRelevant) {
+			const leftScore = left.publicContextScore ?? 0;
+			const rightScore = right.publicContextScore ?? 0;
+			if (leftScore !== rightScore) {
+				return rightScore - leftScore;
+			}
 		}
 
 		if ((left.status === "generating") !== (right.status === "generating")) {
@@ -919,6 +998,7 @@ export function PrivateBoard({
 	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
 	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const previousIdeaBlockTopsRef = useRef<Record<string, number>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -987,6 +1067,16 @@ export function PrivateBoard({
 	);
 
 	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
+
+	const captureIdeaBlockPositions = useCallback(() => {
+		const nextTops: Record<string, number> = {};
+		Object.entries(blockRefs.current).forEach(([blockId, node]) => {
+			if (node) {
+				nextTops[blockId] = node.getBoundingClientRect().top;
+			}
+		});
+		previousIdeaBlockTopsRef.current = nextTops;
+	}, []);
 
 	const selectBoardTab = useCallback((tab: BoardTab) => {
 		if (tab === "ideablock") {
@@ -1182,6 +1272,26 @@ export function PrivateBoard({
 	}, [ideaBlocks]);
 
 	useEffect(() => {
+		if (!ideaBlocks.some(block => block.publicContextRelevant)) {
+			return;
+		}
+
+		const interval = window.setInterval(() => {
+			captureIdeaBlockPositions();
+			setIdeaBlocks(prev => {
+				const clearedBlocks = clearExpiredPublicContextMatches(prev, Date.now());
+				if (clearedBlocks === prev) {
+					return prev;
+				}
+				const nextBlocks = sortIdeaBlocks(clearedBlocks);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
+		}, 1000);
+		return () => window.clearInterval(interval);
+	}, [captureIdeaBlockPositions, ideaBlocks]);
+
+	useEffect(() => {
 		publicChatMessagesRef.current = publicChatMessages;
 	}, [publicChatMessages]);
 
@@ -1279,12 +1389,7 @@ export function PrivateBoard({
 				// Older finalized entries remain in the map for late acknowledgements, so
 				// selecting the first final entry can overwrite a previous transcript box.
 				const frozenDraftCandidates = [...activeTranscriptDraftsRef.current.entries()]
-					.filter(([, draft]) =>
-						draft.isFinal &&
-						isUnpersistedTranscriptDraftId(draft.id) &&
-						draft.source === newLine.source &&
-						draft.userId === newLine.userId
-					)
+					.filter(([, draft]) => draft.isFinal && isUnpersistedTranscriptDraftId(draft.id) && draft.source === newLine.source && draft.userId === newLine.userId)
 					.sort(([, left], [, right]) => {
 						const leftTextMatches = left.text.trim() === newLine.text.trim() ? 1 : 0;
 						const rightTextMatches = right.text.trim() === newLine.text.trim() ? 1 : 0;
@@ -1300,14 +1405,7 @@ export function PrivateBoard({
 					// Keep the DB ID available for the transcript_update acknowledgement.
 					activeTranscriptDraftsRef.current.set(key, { ...draft, id: newLine.id });
 				}
-				setTranscriptLines(prev =>
-					linkTranscriptLinesToBlocks(
-						frozenDraftId
-							? replaceTranscriptLine(prev, frozenDraftId, newLine)
-							: appendTranscriptLine(prev, newLine),
-						ideaBlocksRef.current
-					)
-				);
+				setTranscriptLines(prev => linkTranscriptLinesToBlocks(frozenDraftId ? replaceTranscriptLine(prev, frozenDraftId, newLine) : appendTranscriptLine(prev, newLine), ideaBlocksRef.current));
 			}
 
 			if (lastMessage.type === "similarity_cue") {
@@ -1342,6 +1440,25 @@ export function PrivateBoard({
 				);
 			}
 
+			if (lastMessage.type === "public_context_matches") {
+				const matchedIds = (lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id);
+				if (matchedIds.length > 0) {
+					const visibleMatchedIds = matchedIds.filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
+					captureIdeaBlockPositions();
+					setIdeaBlocks(prev => {
+						const nextBlocks = sortIdeaBlocks(applyPublicContextMatches(prev, lastMessage.payload));
+						ideaBlocksRef.current = nextBlocks;
+						return nextBlocks;
+					});
+					const firstVisibleMatchId = visibleMatchedIds[0];
+					if (firstVisibleMatchId && visibleActiveTab === "ideablock") {
+						setHighlightedBlockId(firstVisibleMatchId);
+					} else if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
+						setUnreadIdeaBlockCount(current => current + visibleMatchedIds.length);
+					}
+				}
+			}
+
 			if (lastMessage.type === "public_chat_message") {
 				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
 				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
@@ -1354,7 +1471,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
+	}, [captureIdeaBlockPositions, cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
@@ -1392,12 +1509,7 @@ export function PrivateBoard({
 				isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId),
 				isDraft: false
 			};
-			setTranscriptLines(prev =>
-				linkTranscriptLinesToBlocks(
-					matchingDraft ? replaceTranscriptLine(prev, matchingDraft.id, frozenLine) : appendTranscriptLine(prev, frozenLine),
-					ideaBlocks
-				)
-			);
+			setTranscriptLines(prev => linkTranscriptLinesToBlocks(matchingDraft ? replaceTranscriptLine(prev, matchingDraft.id, frozenLine) : appendTranscriptLine(prev, frozenLine), ideaBlocks));
 		}, 0);
 
 		return () => window.clearTimeout(timer);
@@ -1420,19 +1532,14 @@ export function PrivateBoard({
 					(lastAudioMessage.reason === MAX_SPEECH_TRANSCRIPT_REASON || lastAudioMessage.reason === LIVE_TRANSCRIPT_REASON) &&
 					(lastAudioMessage.persisted === false || lastAudioMessage.persisted == null);
 				const isTranscriptFinal =
-					lastAudioMessage.type === "transcript" &&
-					FINAL_TRANSCRIPT_REASONS.has(String(lastAudioMessage.reason ?? "")) &&
-					(lastAudioMessage.persisted === false || lastAudioMessage.persisted == null);
+					lastAudioMessage.type === "transcript" && FINAL_TRANSCRIPT_REASONS.has(String(lastAudioMessage.reason ?? "")) && (lastAudioMessage.persisted === false || lastAudioMessage.persisted == null);
 				const isPersistedFinal = lastAudioMessage.type === "transcript_update" && lastAudioMessage.persisted === true;
 				let displayLine = transcriptLine;
 				let replaceDraftLineId: string | null = null;
 				let persistedReplacementDraft: { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean } | null = null;
 				const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
 				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
-				const matchingFinalDraft =
-					isTranscriptFinal && matchingDraft && !matchingDraft.isFinal
-						? matchingDraft
-						: null;
+				const matchingFinalDraft = isTranscriptFinal && matchingDraft && !matchingDraft.isFinal ? matchingDraft : null;
 
 				if (isLiveTranscriptDraft) {
 					if (matchingDraft?.isFinal) {
@@ -1440,19 +1547,15 @@ export function PrivateBoard({
 					}
 					const draftUserId = transcriptLine.userId ?? participantId;
 					const currentDraft =
-						matchingDraft &&
-						!matchingDraft.isFinal &&
-						matchingDraft.source === transcriptLine.source &&
-						matchingDraft.userId === draftUserId
+						matchingDraft && !matchingDraft.isFinal && matchingDraft.source === transcriptLine.source && matchingDraft.userId === draftUserId
 							? matchingDraft
-							:
-						{
-							id: `live-batch-${draftUserId}-${transcriptLine.source ?? "unknown"}-${Date.now()}`,
-							text: "",
-							source: transcriptLine.source,
-							userId: draftUserId,
-							timestampMs: transcriptLine.timestampMs
-						};
+							: {
+									id: `live-batch-${draftUserId}-${transcriptLine.source ?? "unknown"}-${Date.now()}`,
+									text: "",
+									source: transcriptLine.source,
+									userId: draftUserId,
+									timestampMs: transcriptLine.timestampMs
+								};
 					const mergedText = mergeTranscriptText(currentDraft.text, transcriptLine.text);
 					const draftText = lastAudioMessage.replaceDraft === true ? transcriptLine.text : mergedText;
 					activeTranscriptDraftsRef.current.set(draftKey, {
@@ -1551,19 +1654,14 @@ export function PrivateBoard({
 					return;
 				}
 				lastDisplayedAudioTranscriptRef.current = { signature, displayedAt: now };
-				setTranscriptLines(prev =>
-					{
-						const nextLine = {
-							...displayLine,
-							displayName: displayLine.displayName ?? displayName,
-							isOwn: displayLine.userId == null ? true : isOwnTranscriptUser(displayLine.userId, participantId)
-						};
-						return linkTranscriptLinesToBlocks(
-							replaceDraftLineId ? replaceTranscriptLine(prev, replaceDraftLineId, nextLine) : appendTranscriptLine(prev, nextLine),
-							ideaBlocks
-						);
-					}
-				);
+				setTranscriptLines(prev => {
+					const nextLine = {
+						...displayLine,
+						displayName: displayLine.displayName ?? displayName,
+						isOwn: displayLine.userId == null ? true : isOwnTranscriptUser(displayLine.userId, participantId)
+					};
+					return linkTranscriptLinesToBlocks(replaceDraftLineId ? replaceTranscriptLine(prev, replaceDraftLineId, nextLine) : appendTranscriptLine(prev, nextLine), ideaBlocks);
+				});
 			}
 		}, 0);
 
@@ -1758,6 +1856,63 @@ export function PrivateBoard({
 			splitResizeCleanupRef.current?.();
 		};
 	}, []);
+
+	useLayoutEffect(() => {
+		const previousTops = previousIdeaBlockTopsRef.current;
+		if (Object.keys(previousTops).length === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+			previousIdeaBlockTopsRef.current = {};
+			return;
+		}
+
+		const animatedNodes: HTMLDivElement[] = [];
+		Object.entries(blockRefs.current).forEach(([blockId, node]) => {
+			if (!node) {
+				return;
+			}
+			const previousTop = previousTops[blockId];
+			if (previousTop == null) {
+				return;
+			}
+			const nextTop = node.getBoundingClientRect().top;
+			const deltaY = previousTop - nextTop;
+			if (Math.abs(deltaY) < 1) {
+				return;
+			}
+			node.style.transition = "none";
+			node.style.transform = `translateY(${deltaY}px)`;
+			node.style.willChange = "transform";
+			animatedNodes.push(node);
+		});
+		previousIdeaBlockTopsRef.current = {};
+
+		if (animatedNodes.length === 0) {
+			return;
+		}
+
+		const animationFrame = window.requestAnimationFrame(() => {
+			animatedNodes.forEach(node => {
+				node.style.transition = "transform 650ms cubic-bezier(0.22, 1, 0.36, 1)";
+				node.style.transform = "";
+			});
+		});
+
+		const cleanupTimer = window.setTimeout(() => {
+			animatedNodes.forEach(node => {
+				node.style.transition = "";
+				node.style.willChange = "";
+			});
+		}, 700);
+
+		return () => {
+			window.cancelAnimationFrame(animationFrame);
+			window.clearTimeout(cleanupTimer);
+			animatedNodes.forEach(node => {
+				node.style.transition = "";
+				node.style.transform = "";
+				node.style.willChange = "";
+			});
+		};
+	}, [ideaBlocks]);
 
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;

@@ -43,6 +43,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
+	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const similarityReasonTag =
 		block.similarityIsSameReason == null
 			? null
@@ -263,6 +264,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
+							{shouldShowPublicContext && (
+								<Badge className="shrink-0 whitespace-nowrap border-primary/30 text-primary" variant="outline">
+									公開討論相關
+								</Badge>
+							)}
 							{shouldShowCue && similarityReasonTag && (
 								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
 									{similarityReasonTag.label}

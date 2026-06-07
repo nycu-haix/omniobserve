@@ -29,6 +29,7 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
+from .public_context_matching import find_public_context_matches
 from .ranking_move_service import create_ranking_move
 from .transcripts import save_ws_transcript_segment
 
@@ -375,6 +376,74 @@ async def broadcast_public_transcript_line(
             },
         },
     )
+    _schedule_public_context_matching(
+        session_id=session_id,
+        participant_id=participant_id,
+        text=text,
+        transcript_segment_id=transcript_segment_id,
+    )
+
+
+def _schedule_public_context_matching(
+    *,
+    session_id: str,
+    participant_id: str,
+    text: str,
+    transcript_segment_id: str | int | None,
+) -> None:
+    if not text.strip():
+        return
+
+    async def run_matching() -> None:
+        try:
+            async with SessionLocal() as db:
+                matches = await find_public_context_matches(
+                    db,
+                    session_name=session_id,
+                    public_text=text,
+                )
+            if not matches:
+                return
+
+            await board_manager.broadcast(
+                session_id,
+                {
+                    "type": "public_context_matches",
+                    "payload": {
+                        "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                        "participantId": participant_id,
+                        "textChars": len(text),
+                        "matches": [
+                            {
+                                "ideaBlockId": str(match.idea_block_id),
+                                "userId": str(match.user_id),
+                                "score": match.score,
+                                "reason": match.reason,
+                                "taskItemIds": match.task_item_ids,
+                            }
+                            for match in matches
+                        ],
+                    },
+                },
+            )
+        except Exception as exc:
+            logger.exception(
+                "public_context_matching_failed session_id=%s participant_id=%s transcript_segment_id=%s error_type=%s error=%s",
+                session_id,
+                participant_id,
+                transcript_segment_id,
+                exc.__class__.__name__,
+                exc,
+            )
+
+    logger.info(
+        "public_context_matching_scheduled session_id=%s participant_id=%s transcript_segment_id=%s text_chars=%s",
+        session_id,
+        participant_id,
+        transcript_segment_id,
+        len(text),
+    )
+    asyncio.create_task(run_matching())
 
 
 def _normalize_int(value: Any, default: int) -> int:
