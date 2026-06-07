@@ -103,6 +103,8 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         db,
         idea_block_id=idea_block.id,
         task_item_ids=task_item_ids,
+        session_name=payload.session_name,
+        text=payload.summary,
     )
     await db.commit()
     if task_items_are_current:

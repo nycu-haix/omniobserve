@@ -257,6 +257,8 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     db,
                     idea_block_id=idea_block.id,
                     task_item_ids=task_item_ids,
+                    session_name=session_name,
+                    text=summary,
                 )
             )
             logger.info(

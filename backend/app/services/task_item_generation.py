@@ -120,6 +120,8 @@ async def generate_and_save_task_items_for_idea_block(
         db,
         idea_block_id=idea_block_id,
         task_item_ids=task_item_ids,
+        session_name=session_name,
+        text=text,
     )
 
 
@@ -128,7 +130,12 @@ async def save_task_items_for_idea_block_ids(
     *,
     idea_block_id: int,
     task_item_ids: list[int],
+    session_name: str | None = None,
+    text: str | None = None,
 ) -> list[TaskItem]:
+    idea_block = await db.get(IdeaBlock, idea_block_id)
+    resolved_session_name = session_name or (idea_block.session_name if idea_block is not None else None)
+    mapping_text = text if text is not None else (idea_block.summary if idea_block is not None else "")
     task_items = [
         TaskItem(idea_block_id=idea_block_id, task_item_id=task_item_id)
         for task_item_id in task_item_ids
@@ -141,8 +148,8 @@ async def save_task_items_for_idea_block_ids(
         await replace_poster_component_mappings_for_idea_block(
             db,
             idea_block_id=idea_block_id,
-            session_name=session_name,
-            text=text,
+            session_name=resolved_session_name,
+            text=mapping_text,
         )
         return []
 
@@ -151,8 +158,8 @@ async def save_task_items_for_idea_block_ids(
     await replace_poster_component_mappings_for_idea_block(
         db,
         idea_block_id=idea_block_id,
-        session_name=session_name,
-        text=text,
+        session_name=resolved_session_name,
+        text=mapping_text,
     )
     logger.info(
         "task_item_rows_saved idea_block_id=%s count=%s",

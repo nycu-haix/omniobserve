@@ -216,6 +216,8 @@ async def generate_and_save_idea_blocks(
             db,
             idea_block_id=idea_block.id,
             task_item_ids=task_item_ids,
+            session_name=session_name,
+            text=summary,
         )
         idea_blocks.append(idea_block)
 
