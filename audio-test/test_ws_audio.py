@@ -9,7 +9,7 @@ DURATION_SEC = 3
 FREQ = 440
 
 async def main():
-    url = "ws://localhost:8000/sessions/localtest/audio-stream?participant_id=test_user&asr=funasr"
+    url = "ws://localhost:8000/sessions/localtest/audio-stream?participant_id=test_user"
 
     async with websockets.connect(url) as ws:
         await ws.send(json.dumps({
@@ -26,7 +26,7 @@ async def main():
             "channels": 1,
             "encoding": "float32",
             "format": "float32",
-            "asrModel": "funasr",
+            "asrModel": "whisperlivekit",
         }))
 
         total_samples = SAMPLE_RATE * DURATION_SEC

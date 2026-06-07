@@ -17,10 +17,12 @@ async def save_ws_transcript_segment(
     transcript_text: str,
     started_at: datetime,
     ended_at: datetime,
+    display_name: str | None = None,
 ) -> StreamTranscript | None:
     transcript = Transcript(
         user_id=_numeric_id(participant_id),
         session_name=session_name,
+        display_name=display_name.strip() if display_name else None,
         visibility=visibility.value,
         transcript=transcript_text,
     )

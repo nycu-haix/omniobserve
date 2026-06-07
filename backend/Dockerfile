@@ -9,7 +9,8 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN if [ -f requirements.local.txt ]; then pip install --no-cache-dir -r requirements.local.txt; fi
+ARG INSTALL_LOCAL_REQUIREMENTS=0
+RUN if [ "$INSTALL_LOCAL_REQUIREMENTS" = "1" ] && [ -f requirements.local.txt ]; then pip install --no-cache-dir -r requirements.local.txt; fi
 
 EXPOSE 8000
 

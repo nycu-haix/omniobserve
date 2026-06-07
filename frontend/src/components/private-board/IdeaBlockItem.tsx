@@ -43,7 +43,13 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
-	const similarityReasonLabel = block.similarityIsSameReason == null ? null : block.similarityIsSameReason ? "Same reason" : "Different reason";
+	const similarityReasonTag =
+		block.similarityIsSameReason == null
+			? null
+			: {
+					label: block.similarityIsSameReason ? "same reason" : "different reason",
+					className: block.similarityIsSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+				};
 	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
 
 	useEffect(() => {
@@ -171,7 +177,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
@@ -191,6 +197,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				onToggle(block.id);
 			}}
 		>
+			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{isGenerating ? (
 				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			) : isDeleted ? (
@@ -256,6 +263,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
+							{shouldShowCue && similarityReasonTag && (
+								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
+								</Badge>
+							)}
 							{!isDeleted && !block.isDraft && (
 								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 									<Pencil className="h-4 w-4" />
@@ -322,9 +334,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
-							{similarityReasonLabel && (
-								<Badge className="w-fit" variant={block.similarityIsSameReason ? "default" : "outline"}>
-									{similarityReasonLabel}
+							{similarityReasonTag && (
+								<Badge className={cn("w-fit", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
 								</Badge>
 							)}
 						</div>

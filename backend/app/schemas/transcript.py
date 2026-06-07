@@ -8,17 +8,20 @@ class TranscriptCreate(BaseModel):
     session_name: str
     transcript: str
     visibility: str = "private"
+    display_name: str | None = None
 
 
 class TranscriptCreateRequest(BaseModel):
     transcript: str
     visibility: str = "private"
+    display_name: str | None = None
 
 
 class TranscriptResponse(BaseModel):
     id: int
     user_id: int
     session_name: str
+    display_name: str | None = None
     visibility: str = "private"
     time_stamp: datetime
     transcript: str

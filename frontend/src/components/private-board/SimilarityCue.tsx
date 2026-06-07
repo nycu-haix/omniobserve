@@ -1,5 +1,5 @@
 import { Lightbulb, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -7,11 +7,12 @@ interface SimilarityCueProps {
 	cues: SimilarityCueData[];
 	onJump: (blockId: string) => void;
 	onDismiss: (cueId: string) => void;
+	topContent?: ReactNode;
 }
 
 const CUE_AUTO_DISMISS_MS = 5000;
 
-export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, topContent }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -33,6 +34,7 @@ export function SimilarityCue({ cues, onJump, onDismiss }: SimilarityCueProps) {
 
 	return (
 		<div className="fixed bottom-20 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+			{topContent}
 			{cues.map(cue => {
 				const message = (cue.isSameReason ?? true) ? "有人和你想法一樣，要不要試著發表？" : "有人和你有相似的想法但原因略有不同，要不要分享交流？";
 				return (

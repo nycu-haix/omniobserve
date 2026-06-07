@@ -978,6 +978,7 @@ export default function MeetingRoom() {
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
+	const autoStartedMicKeyRef = useRef<string | null>(null);
 	const { participantId, displayName, roomName } = useParticipantIdentity();
 	const isParticipantIdValid = isValidParticipantId(participantId);
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
@@ -1102,6 +1103,21 @@ export default function MeetingRoom() {
 		},
 		[hasAudioConnectionError, micMode, startAudioStream]
 	);
+
+	useEffect(() => {
+		if (!connectionParticipantId || joinRejectedMessage) {
+			return;
+		}
+
+		const autoStartKey = `${sessionId}:${connectionParticipantId}`;
+		if (autoStartedMicKeyRef.current === autoStartKey) {
+			return;
+		}
+
+		autoStartedMicKeyRef.current = autoStartKey;
+		setMicMode("private");
+		void startAudioStream("private");
+	}, [connectionParticipantId, joinRejectedMessage, sessionId, startAudioStream]);
 
 	useEffect(() => {
 		const handleMicShortcutKeyDown = (event: KeyboardEvent) => {
@@ -1682,6 +1698,8 @@ export default function MeetingRoom() {
 						currentPhase={currentPhase}
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
+						isCollapsed={isPrivateBoardCollapsed}
+						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
 					/>
 				</div>
 			</aside>

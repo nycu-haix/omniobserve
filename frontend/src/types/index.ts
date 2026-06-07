@@ -11,6 +11,7 @@ export interface IdeaBlock {
 	cueText?: string;
 	similarityIsSameReason?: boolean | null;
 	expanded?: boolean;
+	isUnread?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
 	createdAtMs?: number;
@@ -27,6 +28,7 @@ export interface TranscriptLine {
 	userId?: string;
 	displayName?: string;
 	isOwn?: boolean;
+	isDraft?: boolean;
 	linkedBlockId?: string;
 }
 
