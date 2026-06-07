@@ -452,6 +452,8 @@ function stripWhisperArtifacts(text: string): string {
 	let cleaned = text
 		.replace(/<\|[^>]*\|>/g, "")
 		.replace(/<\|\d+(?:\.\d*)?(?:\|>)?/g, "")
+		.replace(/<\|[^\s>]*/g, "")
+		.replace(/[<>]/g, "")
 		.replace(promptLeakPattern, "")
 		.replace(/[[(【（]([^\])】）]{0,80})[\])】）]/g, (_match, content: string) => {
 			const trimmed = content.trim();
@@ -624,6 +626,10 @@ function audioTranscriptDraftSegmentId(message: AudioDraftTargetMessage): string
 
 function transcriptDraftTargetKey(message: AudioDraftTargetMessage, line: TranscriptLineType, participantId: string): string {
 	return [line.source ?? "unknown", line.userId ?? participantId, audioTranscriptDraftSegmentId(message) ?? "active"].join("|");
+}
+
+function isUnpersistedTranscriptDraftId(id: string): boolean {
+	return id.startsWith("live-batch-") || id.startsWith("wlk-live-") || id.startsWith("audio-");
 }
 
 function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] {
@@ -1236,15 +1242,43 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "new_transcript_line") {
+				const newLine = {
+					...lastMessage.payload,
+					origin: "live" as const,
+					isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId),
+					timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
+					time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
+				};
+				// Only an unpersisted live ID may be replaced by this DB-backed broadcast.
+				// Older finalized entries remain in the map for late acknowledgements, so
+				// selecting the first final entry can overwrite a previous transcript box.
+				const frozenDraftCandidates = [...activeTranscriptDraftsRef.current.entries()]
+					.filter(([, draft]) =>
+						draft.isFinal &&
+						isUnpersistedTranscriptDraftId(draft.id) &&
+						draft.source === newLine.source &&
+						draft.userId === newLine.userId
+					)
+					.sort(([, left], [, right]) => {
+						const leftTextMatches = left.text.trim() === newLine.text.trim() ? 1 : 0;
+						const rightTextMatches = right.text.trim() === newLine.text.trim() ? 1 : 0;
+						if (leftTextMatches !== rightTextMatches) {
+							return rightTextMatches - leftTextMatches;
+						}
+						return (right.timestampMs ?? 0) - (left.timestampMs ?? 0);
+					});
+				const frozenDraftEntry = frozenDraftCandidates[0] ?? null;
+				const frozenDraftId = frozenDraftEntry?.[1].id ?? null;
+				if (frozenDraftEntry) {
+					const [key, draft] = frozenDraftEntry;
+					// Keep the DB ID available for the transcript_update acknowledgement.
+					activeTranscriptDraftsRef.current.set(key, { ...draft, id: newLine.id });
+				}
 				setTranscriptLines(prev =>
 					linkTranscriptLinesToBlocks(
-						appendTranscriptLine(prev, {
-							...lastMessage.payload,
-							origin: "live",
-							isOwn: isOwnTranscriptUser(lastMessage.payload.userId, participantId),
-							timestampMs: lastMessage.payload.timestampMs ?? Date.now(),
-							time: lastMessage.payload.time ?? formatTranscriptTime(Date.now())
-						}),
+						frozenDraftId
+							? replaceTranscriptLine(prev, frozenDraftId, newLine)
+							: appendTranscriptLine(prev, newLine),
 						ideaBlocksRef.current
 					)
 				);

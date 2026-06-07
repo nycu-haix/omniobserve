@@ -21,7 +21,10 @@ services:
     restart: unless-stopped
     command: uvicorn server_gateway:app --host 0.0.0.0 --port 8000
     depends_on:
-      - whisperlivekit
+      whisperlivekit-0:
+        condition: service_healthy
+      whisperlivekit-1:
+        condition: service_healthy
     # Dokploy routes this service through Traefik; avoid binding host port 8001,
     # which can collide with other deployments on the shared server.
     expose:
@@ -58,7 +61,7 @@ services:
       MODELSCOPE_CACHE: /root/.cache/modelscope
       HF_HOME: /root/.cache/huggingface
       ASR_ENGINE: ${ASR_ENGINE:-whisperlivekit}
-      WHISPERLIVEKIT_WS_URL: ${WHISPERLIVEKIT_WS_URL:-ws://whisperlivekit:8000/asr}
+      WHISPERLIVEKIT_WS_URLS: ${WHISPERLIVEKIT_WS_URLS:-ws://whisperlivekit-0:8000/asr,ws://whisperlivekit-1:8000/asr}
       WHISPERLIVEKIT_MODE: ${WHISPERLIVEKIT_MODE:-full}
       WHISPERLIVEKIT_FINAL_SILENCE_SEC: ${WHISPERLIVEKIT_FINAL_SILENCE_SEC:-2.0}
       WHISPERLIVEKIT_GATEWAY_SILENCE_RMS: ${WHISPERLIVEKIT_GATEWAY_SILENCE_RMS:-0.0012}
@@ -91,7 +94,7 @@ services:
     networks:
       - dokploy-network
 
-  whisperlivekit:
+  whisperlivekit-0:
     build:
       context: ./whisperlivekit
     restart: unless-stopped
@@ -120,7 +123,7 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       HF_HOME: /root/.cache/huggingface
-      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_VISIBLE_DEVICES: "0"
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     healthcheck:
       test:
@@ -139,7 +142,57 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["0"]
+              capabilities: [gpu]
+    networks:
+      - dokploy-network
+
+  whisperlivekit-1:
+    build:
+      context: ./whisperlivekit
+    restart: unless-stopped
+    command:
+      - "--backend"
+      - "whisper"
+      - "--model-path"
+      - "${WHISPERLIVEKIT_MODEL_PATH:-MediaTek-Research/Breeze-ASR-25}"
+      - "--language"
+      - "zh"
+      - "--backend-policy"
+      - "simulstreaming"
+      - "--frame-threshold"
+      - "${WHISPERLIVEKIT_FRAME_THRESHOLD:-15}"
+      - "--static-init-prompt"
+      - "${WHISPERLIVEKIT_STATIC_INIT_PROMPT:-繁體中文會議內容，可能包含英文人名、縮寫與技術名詞。}"
+      - "--pcm-input"
+    expose:
+      - "8000"
+    volumes:
+      - ${BREEZE_ASR_25_MODEL_PATH:-../models/Breeze-ASR-25}:/models/Breeze-ASR-25:ro
+      - model-cache:/root/.cache
+    environment:
+      PYTHONUNBUFFERED: "1"
+      HF_HOME: /root/.cache/huggingface
+      NVIDIA_VISIBLE_DEVICES: "1"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
               capabilities: [gpu]
     networks:
       - dokploy-network
