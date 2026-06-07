@@ -38,12 +38,22 @@ export interface TranscriptLine {
 	linkedBlockId?: string;
 }
 
-export interface SimilarityCueData {
+export interface SimilarityPairCueData {
+	kind?: "pair";
 	id: string;
 	blockId: string;
 	blockSummary: string;
 	isSameReason?: boolean;
 }
+
+export interface SimilaritySummaryCueData {
+	kind: "phase-transition-summary";
+	id: string;
+	sameReasonCount: number;
+	differentReasonCount: number;
+}
+
+export type SimilarityCueData = SimilarityPairCueData | SimilaritySummaryCueData;
 
 export interface SimilarityReasonSharedData extends SharedSimilarityReason {
 	blockId: string;
