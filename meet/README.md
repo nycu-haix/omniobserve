@@ -98,6 +98,6 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
 - `COLIBRI_WEBSOCKET_PORT=9090` is the JVB public HTTP port inside the Docker network. Do not set it to 443; TLS terminates at Traefik/web and the web container proxies `/colibri-ws/...` to JVB over plain HTTP.
 - `COLIBRI_WEBSOCKET_REGEX=jvb` must match the first path segment in `/colibri-ws/jvb/...`; if it is empty, nginx falls back to serving the Jitsi HTML page instead of upgrading the WebSocket.
 - TURN is not bundled here. If participants are on networks that block or mangle UDP, configure a TURN service and set `TURN_HOST` / `TURNS_HOST` plus credentials in Dokploy. The Jitsi Docker handbook documents these external TURN variables under "TURN server configuration".
-- Default video is capped to 360p (`RESOLUTION=360`, `RESOLUTION_WIDTH=640`) because the meeting pane is small and this reduces JVB bandwidth pressure for 3+ participants.
+- Default video is 720p (`RESOLUTION=720`, `RESOLUTION_WIDTH=1280`). Lower these in Dokploy's environment only if bandwidth or CPU pressure becomes a measured problem.
 - Jitsi's generated runtime config is stored in Docker named volumes so Dokploy volume backups can include it.
 - If the web page loads but participants cannot see or hear each other, check `JVB_ADVERTISE_IPS`, `JVB_ADVERTISE_PRIVATE_CANDIDATES`, firewall/NAT rules, whether `10000/udp` is still published, and whether TURN credentials are being announced instead of `service-unavailable`.
