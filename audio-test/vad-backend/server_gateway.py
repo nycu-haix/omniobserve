@@ -1,22 +1,32 @@
+from __future__ import annotations
+
 import asyncio
+import difflib
 import json
 import math
 import os
+import re
 import time
 import wave
 from collections import deque
 from pathlib import Path
-from typing import Optional
-from urllib.parse import quote, urlparse
+from typing import Any, Optional
+from urllib.parse import quote, urlencode, urlparse
 
 import numpy as np
-import torch
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
-# from funasr import AutoModel
 # from transcript_normalizer import to_traditional
+
+ASR_ENGINE = os.getenv("ASR_ENGINE", "whisperlivekit").strip().lower()
+if ASR_ENGINE == "local":
+    import torch
+    from transformers import WhisperProcessor, WhisperForConditionalGeneration
+else:
+    torch = None
+    WhisperProcessor = None
+    WhisperForConditionalGeneration = None
 
 app = FastAPI()
 
@@ -58,6 +68,12 @@ PRE_BUFFER_CHUNKS = int((PRE_BUFFER_MS / 1000) * SAMPLE_RATE / CHUNK_SIZE)
 
 RMS_SILENCE_THRESHOLD = 0.00005
 MIN_SAVE_DURATION_SEC = 0.8
+LIVE_TRANSCRIPT_REASON = "sliding_window"
+STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
+STREAM_STEP_SECONDS = float(os.getenv("STREAM_STEP_SECONDS", "2"))
+STREAM_WINDOW_SAMPLES = max(CHUNK_SIZE, int(round(STREAM_WINDOW_SECONDS * SAMPLE_RATE)))
+STREAM_STEP_CHUNKS = max(1, int(round(STREAM_STEP_SECONDS * SAMPLE_RATE / CHUNK_SIZE)))
+STREAM_MIN_LIVE_CHUNKS = max(MIN_SPEECH_CHUNKS, int(round(MIN_SAVE_DURATION_SEC * SAMPLE_RATE / CHUNK_SIZE)))
 
 SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
@@ -65,9 +81,82 @@ SEGMENT_DIR.mkdir(exist_ok=True)
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
 DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").strip().rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
+PIPELINE_PERSIST_TIMEOUT_SEC = float(os.getenv("PIPELINE_PERSIST_TIMEOUT_SEC", "10"))
+PIPELINE_FINAL_RELAY_RETRIES = int(os.getenv("PIPELINE_FINAL_RELAY_RETRIES", "3"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
 ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
+_wlk_urls_env = os.getenv("WHISPERLIVEKIT_WS_URLS", "").strip()
+if _wlk_urls_env:
+    WHISPERLIVEKIT_WS_URLS: list[str] = [u.strip() for u in _wlk_urls_env.split(",") if u.strip()]
+else:
+    _fallback = os.getenv("WHISPERLIVEKIT_WS_URL", "ws://whisperlivekit:8000/asr").strip()
+    WHISPERLIVEKIT_WS_URLS = [_fallback]
+WHISPERLIVEKIT_WS_URL = WHISPERLIVEKIT_WS_URLS[0]
+_wlk_rr_counter = 0
+_wlk_active_connections = {url: 0 for url in WHISPERLIVEKIT_WS_URLS}
+
+
+def acquire_wlk_url() -> str:
+    global _wlk_rr_counter
+    minimum_connections = min(_wlk_active_connections.values())
+    candidates = [
+        url
+        for url in WHISPERLIVEKIT_WS_URLS
+        if _wlk_active_connections[url] == minimum_connections
+    ]
+    url = candidates[_wlk_rr_counter % len(candidates)]
+    _wlk_rr_counter += 1
+    _wlk_active_connections[url] += 1
+    return url
+
+
+def release_wlk_url(url: str) -> None:
+    if url in _wlk_active_connections:
+        _wlk_active_connections[url] = max(0, _wlk_active_connections[url] - 1)
+
+
+WHISPERLIVEKIT_MODE = os.getenv("WHISPERLIVEKIT_MODE", "full").strip()
+WHISPERLIVEKIT_FINAL_SILENCE_SEC = float(os.getenv("WHISPERLIVEKIT_FINAL_SILENCE_SEC", "2.0"))
+WHISPERLIVEKIT_GATEWAY_SILENCE_RMS = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SILENCE_RMS", "0.0012"))
+WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK = float(os.getenv("WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK", "0.012"))
+WHISPERLIVEKIT_SPEECH_RESUME_SEC = float(os.getenv("WHISPERLIVEKIT_SPEECH_RESUME_SEC", "0.2"))
+WHISPERLIVEKIT_MAX_SPEECH_SEC = float(os.getenv("WHISPERLIVEKIT_MAX_SPEECH_SEC", "0"))
+WHISPERLIVEKIT_SEND_QUEUE_CHUNKS = int(os.getenv("WHISPERLIVEKIT_SEND_QUEUE_CHUNKS", "48"))
+WHISPERLIVEKIT_SEND_TIMEOUT_SEC = float(os.getenv("WHISPERLIVEKIT_SEND_TIMEOUT_SEC", "2.0"))
+WHISPERLIVEKIT_MAX_QUEUE_LAG_SEC = float(os.getenv("WHISPERLIVEKIT_MAX_QUEUE_LAG_SEC", "3.0"))
+WHISPERLIVEKIT_TRANSCRIPT_STALL_SEC = float(os.getenv("WHISPERLIVEKIT_TRANSCRIPT_STALL_SEC", "15.0"))
+WHISPERLIVEKIT_RECOVERY_BUFFER_SEC = float(os.getenv("WHISPERLIVEKIT_RECOVERY_BUFFER_SEC", "5.0"))
+WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS = int(os.getenv("WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS", "10"))
+WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_RATIO = float(os.getenv("WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_RATIO", "0.0"))
+WHISPERLIVEKIT_DRAFT_MIN_LOCKED_PREFIX_CHARS = int(os.getenv("WHISPERLIVEKIT_DRAFT_MIN_LOCKED_PREFIX_CHARS", "8"))
+WHISPERLIVEKIT_SILENCE_PREROLL_SEC = float(os.getenv("WHISPERLIVEKIT_SILENCE_PREROLL_SEC", "0.4"))
+WHISPERLIVEKIT_SILENCE_TAIL_SEC = float(os.getenv("WHISPERLIVEKIT_SILENCE_TAIL_SEC", "0.8"))
+ASR_MARKER_PATTERN = re.compile(
+    r"\s*(?:"
+    r"<\|[^>]*\|>"
+    r"|<\|\d+(?:\.\d*)?(?:\|>)?"
+    r")\s*"
+)
+ASR_DANGLING_MARKER_PATTERN = re.compile(r"<\|[^\s>]*|[<>]")
+ASR_BRACKET_MARKER_PATTERN = re.compile(r"[\[【（(]([^\]】）)]{0,80})[\]】）)]")
+ASR_BRACKET_LABEL_PATTERN = re.compile(
+    r"^(?:聽不清|听不清|不清楚|無法辨識|无法辨识|噪音|雜音|杂音|音樂|音乐|笑聲|笑声|掌聲|掌声|"
+    r"台語|臺語|台语|閩南語|闽南语|客語|客家話|粵語|粤语|廣東話|广东话|英文|英語|中文|普通話|國語|国语|日語|韓語)$"
+)
+ASR_CJK_PATTERN = re.compile(r"[\u3400-\u9fff]")
+ASR_ASCII_ARTIFACT_PATTERN = re.compile(
+    r"\b(?:audio\s+drop(?:ped)?\s*out|dropout|no\s+(?:audio|sound)|unintelligible|inaudible|silence|background\s+noise)\b",
+    re.IGNORECASE,
+)
+ASR_ASCII_WORD_PATTERN = re.compile(r"[A-Za-z]+")
+ASR_PROMPT_LEAK_PATTERN = re.compile(
+    r"(?:請以|请以)?(?:繁體|繁体)?(?:用)?中文(?:逐字稿|逐字轉錄|转录|輸出|输出|字幕|中文字幕|輸請用中文字幕)?|"
+    r"只保留明確英文專有名詞|明確英文專有名詞|英文專有名詞|"
+    r"繁體中文會議內容[，,]?(?:可能)?包含英文人名[、,]縮寫(?:與|和)技術名詞",
+)
+ASR_SENTENCE_FRAGMENT_PATTERN = re.compile(r"[^。！？!?]+[。！？!?]?")
+ASR_EDGE_PUNCTUATION_PATTERN = re.compile(r"^[\s,，.。:：;；、!?！？'\"`~\-–—…]+|[\s,，:：;；、'\"`~\-–—…]+$")
 
 
 def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
@@ -100,9 +189,15 @@ def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
 @app.get("/asr-status")
 async def asr_status():
     return {
+        "engine": ASR_ENGINE,
         "mock": ASR_MOCK,
         "model": ASR_MODEL_NAME,
-        "device": str(asr_device),
+        "device": str(asr_device) if ASR_ENGINE == "local" else None,
+        "whisperlivekit_ws_urls": WHISPERLIVEKIT_WS_URLS if ASR_ENGINE != "local" else None,
+        "whisperlivekit_balancing": "least_active_connections",
+        "whisperlivekit_active_connections": dict(_wlk_active_connections)
+        if ASR_ENGINE != "local"
+        else None,
     }
 
 # Clear old wav / transcript files on backend startup
@@ -143,18 +238,23 @@ clear_output_files()
 # Load Silero VAD
 # =========================
 
-print("Loading Silero VAD model...")
+if ASR_ENGINE == "local":
+    print("Loading Silero VAD model...")
 
-vad_model, vad_utils = torch.hub.load(
-    repo_or_dir="snakers4/silero-vad",
-    model="silero_vad",
-    force_reload=False,
-    trust_repo=True,
-)
+    vad_model, vad_utils = torch.hub.load(
+        repo_or_dir="snakers4/silero-vad",
+        model="silero_vad",
+        force_reload=False,
+        trust_repo=True,
+    )
 
-vad_model.eval()
+    vad_model.eval()
 
-print("Silero VAD loaded")
+    print("Silero VAD loaded")
+else:
+    vad_model = None
+    vad_utils = None
+    print(f"ASR_ENGINE={ASR_ENGINE}. Local Silero VAD loading is skipped.")
 
 # =========================
 # Load Breeze ASR
@@ -171,7 +271,12 @@ def resolve_asr_device() -> torch.device:
 
     return torch.device(configured_device)
 
-if ASR_MOCK:
+if ASR_ENGINE != "local":
+    asr_device = "whisperlivekit"
+    asr_processor = None
+    asr_model = None
+    print("Local Breeze ASR model loading is skipped; using WhisperLiveKit proxy.")
+elif ASR_MOCK:
     asr_device = torch.device("cpu")
     asr_processor = None
     asr_model = None
@@ -233,30 +338,6 @@ else:
 #     except Exception as e:
 #         print(f"Failed to inspect CUDA device: {e}")
 
-
-# =========================
-# Load FunASR
-# =========================
-
-# log_torch_runtime()
-
-# asr_device = resolve_asr_device()
-# punc_model = None if os.getenv("FUNASR_DISABLE_PUNC") == "1" else "ct-punc"
-
-# print(f"Loading FunASR on {asr_device}...")
-
-# asr_model = AutoModel(
-#     model="paraformer-zh",
-#     punc_model=punc_model,
-#     device=asr_device,
-#     disable_update=True,
-#     hub="hf",
-# )
-
-# print(f"FunASR loaded on {asr_device}")
-
-# # Avoid multiple ASR tasks using FunASR at the same time.
-# ASR_GLOBAL_LOCK = asyncio.Lock()
 
 # =========================
 # Utility functions
@@ -328,6 +409,142 @@ def save_transcript_jsonl(
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def merge_transcript_text(previous_text: str, next_text: str) -> str:
+    previous = previous_text.strip()
+    next_value = next_text.strip()
+    if not previous:
+        return next_value
+    if not next_value:
+        return previous
+    if previous.endswith(next_value) or next_value in previous:
+        return previous
+    if next_value.startswith(previous) or previous in next_value:
+        return next_value
+
+    max_overlap = min(len(previous), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if previous[-overlap:] == next_value[:overlap]:
+            return f"{previous}{next_value[overlap:]}"
+
+    return f"{previous}{next_value}"
+
+
+def merge_transcript_text_with_editable_tail(
+    previous_text: str,
+    next_text: str,
+    editable_tail_chars: int,
+    editable_tail_ratio: float,
+    min_locked_prefix_chars: int,
+) -> str:
+    previous = previous_text.strip()
+    next_value = next_text.strip()
+    if not previous:
+        return next_value
+    if not next_value:
+        return previous
+    if next_value.startswith(previous) or previous in next_value:
+        return next_value
+    if previous.startswith(next_value):
+        return previous
+
+    editable_chars = max(0, editable_tail_chars)
+    if editable_tail_ratio > 0:
+        editable_chars = min(
+            editable_chars,
+            max(1, int(len(previous) * editable_tail_ratio)),
+        )
+    if len(previous) <= editable_chars:
+        return next_value
+    locked_len = max(0, len(previous) - editable_chars)
+    locked_len = max(locked_len, min(max(0, min_locked_prefix_chars), len(previous)))
+
+    locked_prefix = previous[:locked_len]
+    if next_value.startswith(locked_prefix):
+        return next_value
+
+    max_overlap = min(len(previous), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if previous[-overlap:] == next_value[:overlap]:
+            return f"{previous}{next_value[overlap:]}"
+
+    matcher = difflib.SequenceMatcher(a=previous, b=next_value, autojunk=False)
+    aligned_blocks = [
+        block
+        for block in matcher.get_matching_blocks()
+        if block.size >= 2 and block.a + block.size >= locked_len
+    ]
+    if aligned_blocks:
+        block = max(aligned_blocks, key=lambda item: (item.a + item.size, item.size))
+        aligned_tail_offset = max(0, block.a - locked_len)
+        candidate_start = max(0, block.b - aligned_tail_offset)
+        candidate_tail = next_value[candidate_start:]
+        if candidate_tail:
+            return f"{locked_prefix}{candidate_tail}"
+
+    return previous
+
+
+def strip_finalized_transcript_prefix(finalized_text: str, next_text: str) -> str:
+    finalized = finalized_text.strip()
+    next_value = next_text.strip()
+    if not finalized or not next_value:
+        return next_value
+    if next_value in finalized:
+        return ""
+    if next_value.startswith(finalized):
+        return next_value[len(finalized):].strip()
+
+    max_overlap = min(len(finalized), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if finalized[-overlap:] == next_value[:overlap]:
+            return next_value[overlap:].strip()
+
+    return next_value
+
+
+def clean_asr_bracket_marker(match: re.Match[str]) -> str:
+    content = match.group(1).strip()
+    if not content or ASR_BRACKET_LABEL_PATTERN.fullmatch(content):
+        return ""
+    if not ASR_CJK_PATTERN.search(content):
+        return ""
+    cleaned_content = ASR_ASCII_ARTIFACT_PATTERN.sub("", content)
+    cleaned_content = re.sub(r"\b(?:no)\b", "", cleaned_content, flags=re.IGNORECASE)
+    cleaned_content = ASR_EDGE_PUNCTUATION_PATTERN.sub("", cleaned_content)
+    return cleaned_content.strip()
+
+
+def clean_asr_transcript_text(text: str) -> str:
+    cleaned = ASR_MARKER_PATTERN.sub("", text)
+    cleaned = ASR_DANGLING_MARKER_PATTERN.sub("", cleaned)
+    cleaned = ASR_PROMPT_LEAK_PATTERN.sub("", cleaned)
+    cleaned = ASR_BRACKET_MARKER_PATTERN.sub(clean_asr_bracket_marker, cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    ascii_words = ASR_ASCII_WORD_PATTERN.findall(cleaned)
+    if ascii_words and not ASR_CJK_PATTERN.search(cleaned):
+        if ASR_ASCII_ARTIFACT_PATTERN.search(cleaned):
+            return ""
+    if ASR_CJK_PATTERN.search(cleaned):
+        kept_fragments: list[str] = []
+        for match in ASR_SENTENCE_FRAGMENT_PATTERN.finditer(cleaned):
+            fragment = match.group(0).strip()
+            if not fragment:
+                continue
+            has_cjk = bool(ASR_CJK_PATTERN.search(fragment))
+            has_ascii = bool(re.search(r"[A-Za-z]", fragment))
+            if has_ascii and not has_cjk and ASR_ASCII_ARTIFACT_PATTERN.search(fragment):
+                continue
+            kept_fragments.append(fragment)
+        cleaned = "".join(kept_fragments) if kept_fragments else cleaned
+    cleaned = re.sub(r"\s*([。！？!?])\s*", r"\1", cleaned)
+    cleaned = re.sub(r"\s*([,，、:：;；])\s*", r"\1", cleaned)
+    cleaned = re.sub(r"([,，、:：;；])([。！？!?])", r"\2", cleaned)
+    cleaned = re.sub(r"([。！？!?]){2,}", r"\1", cleaned)
+    cleaned = re.sub(r"([,，、:：;；]){2,}", r"\1", cleaned)
+    cleaned = ASR_EDGE_PUNCTUATION_PATTERN.sub("", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 async def relay_transcript_to_pipeline(
     websocket: WebSocket,
     send_lock: asyncio.Lock,
@@ -345,6 +562,10 @@ async def relay_transcript_to_pipeline(
     end: float,
     duration: float,
     pipeline_ws_base_url: Optional[str],
+    retranscribed_final: bool = False,
+    client_segment_id: Optional[str] = None,
+    timestamp_ms: Optional[int] = None,
+    persisted_event: Optional[asyncio.Event] = None,
 ) -> list[dict]:
     pipeline_base_url = normalize_pipeline_ws_base_url(pipeline_ws_base_url)
 
@@ -385,11 +606,13 @@ async def relay_transcript_to_pipeline(
         "displayName": display_name,
         "source": source,
         "agentType": agent_type,
+        "retranscribedFinal": retranscribed_final,
+        "client_segment_id": client_segment_id,
     }
     terminal_types = (
-        {"task_items_update", "pipeline_error"}
+        {"task_items_update", "transcript_error", "pipeline_error"}
         if reason in PIPELINE_FINAL_REASONS
-        else {"transcript", "pipeline_error"}
+        else {"transcript", "transcript_error", "pipeline_error"}
     )
     pipeline_messages = []
 
@@ -421,12 +644,24 @@ async def relay_transcript_to_pipeline(
                     continue
 
                 message_type = message.get("type")
+                if persisted_event is not None and (
+                    (message_type == "transcript_update" and message.get("persisted") is True)
+                    or message_type in {"transcript_error", "pipeline_error"}
+                ):
+                    persisted_event.set()
                 if isinstance(message, dict) and message_type in {
+                    "transcript",
                     "transcript_update",
+                    "transcript_error",
                     "idea_blocks_update",
                     "task_items_update",
                     "pipeline_error",
                 }:
+                    if client_segment_id and message_type == "transcript_update":
+                        message["client_segment_id"] = client_segment_id
+                        message["replace_segment_id"] = client_segment_id
+                    if timestamp_ms and message_type in {"transcript", "transcript_update"}:
+                        message["timestamp_ms"] = timestamp_ms
                     pipeline_messages.append(message)
                     try:
                         async with send_lock:
@@ -461,6 +696,8 @@ async def relay_transcript_to_pipeline(
                     )
                     return pipeline_messages
     except Exception as exc:
+        if persisted_event is not None:
+            persisted_event.set()
         print(
             "Pipeline relay failed: "
             f"roomName={room_name}, participantId={relay_participant_id}, "
@@ -477,6 +714,13 @@ def get_audio_stats(audio_chunk: np.ndarray):
     peak = float(np.max(np.abs(audio_chunk)))
 
     return rms, peak
+
+
+def is_gateway_speech_chunk(rms: float, peak: float) -> bool:
+    return (
+        rms >= WHISPERLIVEKIT_GATEWAY_SILENCE_RMS
+        and peak >= WHISPERLIVEKIT_GATEWAY_SPEECH_PEAK
+    )
 
 
 def decode_audio_bytes(
@@ -601,55 +845,6 @@ def transcribe_audio_float32(audio_float32: np.ndarray) -> str:
 
     return text.strip()
 
-# def extract_funasr_text(result) -> str:
-#     """
-#     Extract text from FunASR generate() result.
-#     Common output:
-#       [{'key': '...', 'text': '...'}]
-#     """
-#     if not result:
-#         return ""
-
-#     if isinstance(result, list):
-#         if len(result) == 0:
-#             return ""
-#         item = result[0]
-#     else:
-#         item = result
-
-#     if isinstance(item, dict):
-#         return str(item.get("text", "")).strip()
-
-#     return str(item).strip()
-
-
-# def transcribe_audio_file(filename: Path, audio_float32: np.ndarray) -> str:
-#     """
-#     Transcribe saved wav segment using FunASR.
-#     The segment has already been saved as 16kHz mono wav.
-#     """
-#     audio_float32 = np.asarray(audio_float32, dtype=np.float32)
-
-#     if len(audio_float32) == 0:
-#         return ""
-
-#     audio_float32 = np.clip(audio_float32, -1.0, 1.0)
-
-#     segment_rms = float(np.sqrt(np.mean(audio_float32 ** 2)))
-
-#     if segment_rms < 0.0008:
-#         print("Skip ASR: segment rms too low")
-#         return ""
-
-#     result = asr_model.generate(
-#         input=str(filename),
-#         language="zh",
-#         use_itn=True,
-#         batch_size_s=20,
-#     )
-
-#     return extract_funasr_text(result)
-
 async def transcribe_and_send(
     websocket: WebSocket,
     send_lock: asyncio.Lock,
@@ -668,6 +863,10 @@ async def transcribe_and_send(
     participant_id: Optional[str],
     user_id: Optional[str],
     display_name: Optional[str],
+    retranscribed_final: bool = False,
+    save_transcript: bool = True,
+    relay_to_pipeline: bool = True,
+    on_transcript=None,
 ):
     try:
         # print(f"Transcribing segment: {filename}")
@@ -688,6 +887,14 @@ async def transcribe_and_send(
             #     segment_audio,
             # )
 
+        transcript = clean_asr_transcript_text(transcript)
+        if not transcript:
+            print(
+                "ASR transcript skipped after marker cleanup: "
+                f"roomName={room_name}, participantId={participant_id or user_id}, reason={reason}"
+            )
+            return
+
         # raw_transcript = transcript
         # traditional_transcript = to_traditional(raw_transcript)
         
@@ -697,23 +904,26 @@ async def transcribe_and_send(
             f"roomName={room_name}, participantId={participant_id or user_id}, "
             f"reason={reason}, chars={len(transcript)}, text={transcript}"
         )
+        if on_transcript is not None and transcript.strip():
+            on_transcript(transcript)
 
-        save_transcript_jsonl(
-            file=str(filename),
-            start=start_time,
-            end=end_time,
-            duration=duration,
-            text=transcript,
-            # text=traditional_transcript,
-            source=source,
-            scope=scope,
-            agent_type=agent_type,
-            room_name=room_name,
-            participant_id=participant_id,
-            user_id=user_id,
-            display_name=display_name,
-            reason=reason,
-        )
+        if save_transcript:
+            save_transcript_jsonl(
+                file=str(filename),
+                start=start_time,
+                end=end_time,
+                duration=duration,
+                text=transcript,
+                # text=traditional_transcript,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                reason=reason,
+            )
 
         try:
             # print("[ASR raw]", raw_transcript)
@@ -732,32 +942,36 @@ async def transcribe_and_send(
                     "file": str(filename),
                     "start": round(start_time, 2),
                     "end": round(end_time, 2),
-                    "duration": round(duration, 2),
-                    "reason": reason,
-                    "text": transcript,
-                    # "text": traditional_transcript,
-                })
+                "duration": round(duration, 2),
+                "reason": reason,
+                "text": transcript,
+                "persisted": False if not relay_to_pipeline else None,
+                "retranscribedFinal": retranscribed_final,
+                # "text": traditional_transcript,
+            })
         except Exception:
             print("Cannot send transcript because websocket is closed")
 
-        async with relay_lock:
-            await relay_transcript_to_pipeline(
-                websocket=websocket,
-                send_lock=send_lock,
-                text=transcript,
-                reason=reason,
-                source=source,
-                scope=scope,
-                agent_type=agent_type,
-                room_name=room_name,
-                participant_id=participant_id,
-                user_id=user_id,
-                display_name=display_name,
-                start=start_time,
-                end=end_time,
-                duration=duration,
-                pipeline_ws_base_url=pipeline_ws_base_url,
-            )
+        if relay_to_pipeline:
+            async with relay_lock:
+                await relay_transcript_to_pipeline(
+                    websocket=websocket,
+                    send_lock=send_lock,
+                    text=transcript,
+                    reason=reason,
+                    source=source,
+                    scope=scope,
+                    agent_type=agent_type,
+                    room_name=room_name,
+                    participant_id=participant_id,
+                    user_id=user_id,
+                    display_name=display_name,
+                    start=start_time,
+                    end=end_time,
+                    duration=duration,
+                    pipeline_ws_base_url=pipeline_ws_base_url,
+                    retranscribed_final=retranscribed_final,
+                )
 
     except Exception as e:
         print(f"ASR error for {filename}: {e}")
@@ -777,6 +991,960 @@ async def transcribe_and_send(
 # WebSocket endpoint
 # =========================
 
+def build_whisperlivekit_ws_url(base_url: str | None = None) -> str:
+    url = base_url or WHISPERLIVEKIT_WS_URL
+    query = {
+        "language": "zh",
+        "mode": WHISPERLIVEKIT_MODE or "full",
+    }
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlencode(query)}"
+
+
+def encode_pcm_s16le(audio: np.ndarray) -> bytes:
+    audio = np.asarray(audio, dtype=np.float32)
+    if len(audio) == 0:
+        return b""
+    audio = np.clip(audio, -1.0, 1.0)
+    return (audio * 32767).astype("<i2").tobytes()
+
+
+def parse_whisperlivekit_timestamp(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    if not isinstance(value, str):
+        return 0.0
+    parts = value.strip().split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        if len(parts) == 1 and parts[0]:
+            return float(parts[0])
+    except ValueError:
+        return 0.0
+    return 0.0
+
+
+async def handle_whisperlivekit_audio_ws(
+    websocket: WebSocket,
+    *,
+    session_id: Optional[str],
+    participant_id: Optional[str],
+    pipeline_ws_base_url: Optional[str],
+) -> None:
+    send_lock = asyncio.Lock()
+    relay_lock = asyncio.Lock()
+    wlk_base_url = acquire_wlk_url()
+    wlk_url = build_whisperlivekit_ws_url(wlk_base_url)
+    print(
+        "WhisperLiveKit assignment: "
+        f"participantId={participant_id}, backend={wlk_base_url}, "
+        f"active_connections={_wlk_active_connections}"
+    )
+
+    source = "unknown"
+    scope = "unknown"
+    agent_type = "unknown"
+    room_name = session_id
+    user_id = participant_id
+    display_name = participant_id
+    input_sample_rate = SAMPLE_RATE
+    encoding = "float32"
+    channels = 1
+    connection_pipeline_ws_base_url = normalize_pipeline_ws_base_url(pipeline_ws_base_url)
+
+    latest_buffer_text = ""
+    current_draft_text = ""
+    current_final_candidate_text = ""
+    last_final_text = ""
+    current_segment_timestamp_ms: int | None = None
+    connection_segment_prefix = f"{int(time.time() * 1000)}-{id(websocket) & 0xffff:x}"
+    current_segment_index = 1
+    finalized_client_segment_ids: set[str] = set()
+    finalized_silence_keys: set[str] = set()
+    last_finalized_state_line_count = 0
+    state_lines: list[dict[str, Any]] = []
+    pending_silence_task: asyncio.Task | None = None
+    pending_silence_key: str | None = None
+    pending_audio_silence_segment_id: str | None = None
+    pending_draft_idle_task: asyncio.Task | None = None
+    pending_draft_idle_segment_id: str | None = None
+    audio_stream_time = 0.0
+    audio_silence_started_at: float | None = None
+    audio_silence_duration = 0.0
+    speech_resume_duration = 0.0
+    awaiting_new_speech_after_final = False
+    session_started = False
+    last_soft_reset_stream_time = 0.0
+    wlk_send_queue: asyncio.Queue[tuple[bytes, bool, float] | None] = asyncio.Queue(
+        maxsize=WHISPERLIVEKIT_SEND_QUEUE_CHUNKS
+    )
+    pipeline_relay_tasks: set[asyncio.Task] = set()
+    silence_preroll_chunks: deque[tuple[bytes, float]] = deque()
+    silence_preroll_duration = 0.0
+    recovery_audio_chunks: deque[tuple[bytes, bool, float]] = deque()
+    recovery_audio_duration = 0.0
+    wlk_has_pending_speech = False
+    wlk_tail_silence_duration = 0.0
+    restart_wlk_after_final = False
+    wlk_session_generation = 0
+    wlk_restart_lock = asyncio.Lock()
+    wlk_last_progress_at = time.monotonic()
+    wlk_recovery_task: asyncio.Task | None = None
+
+    async def send_client_json(payload: dict[str, Any]) -> None:
+        try:
+            async with send_lock:
+                await websocket.send_json(payload)
+        except Exception:
+            print("Cannot send WhisperLiveKit proxy payload because websocket is closed")
+
+    def track_pipeline_relay(task: asyncio.Task) -> None:
+        pipeline_relay_tasks.add(task)
+        task.add_done_callback(pipeline_relay_tasks.discard)
+
+    def remember_silence_preroll(chunk: bytes, duration: float) -> None:
+        nonlocal silence_preroll_duration
+        if WHISPERLIVEKIT_SILENCE_PREROLL_SEC <= 0:
+            return
+
+        silence_preroll_chunks.append((chunk, duration))
+        silence_preroll_duration += duration
+        while silence_preroll_duration > WHISPERLIVEKIT_SILENCE_PREROLL_SEC and silence_preroll_chunks:
+            _, dropped_duration = silence_preroll_chunks.popleft()
+            silence_preroll_duration = max(0.0, silence_preroll_duration - dropped_duration)
+
+    def flush_silence_preroll() -> None:
+        nonlocal silence_preroll_duration
+        while silence_preroll_chunks:
+            chunk, _ = silence_preroll_chunks.popleft()
+            enqueue_wlk_audio_chunk(chunk, False)
+        silence_preroll_duration = 0.0
+
+    def remember_recovery_audio(chunk: bytes, is_speech: bool, duration: float) -> None:
+        nonlocal recovery_audio_duration
+        recovery_audio_chunks.append((chunk, is_speech, duration))
+        recovery_audio_duration += duration
+        while recovery_audio_duration > WHISPERLIVEKIT_RECOVERY_BUFFER_SEC and recovery_audio_chunks:
+            _, _, dropped_duration = recovery_audio_chunks.popleft()
+            recovery_audio_duration = max(0.0, recovery_audio_duration - dropped_duration)
+
+    async def flush_recovery_audio() -> bool:
+        nonlocal recovery_audio_duration
+        contains_speech = False
+        while recovery_audio_chunks:
+            chunk, is_speech, duration = recovery_audio_chunks.popleft()
+            recovery_audio_duration = max(0.0, recovery_audio_duration - duration)
+            contains_speech = contains_speech or is_speech
+            await wlk_send_queue.put((chunk, is_speech, time.monotonic()))
+        recovery_audio_duration = 0.0
+        return contains_speech
+
+    def enqueue_wlk_audio_chunk(chunk: bytes, is_speech: bool) -> None:
+        item = (chunk, is_speech, time.monotonic())
+        try:
+            wlk_send_queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            pass
+
+        if not is_speech:
+            return
+
+        pending_items: list[tuple[bytes, bool, float] | None] = []
+        dropped_queued_item = False
+        while True:
+            try:
+                queued_item = wlk_send_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            if queued_item is None:
+                pending_items.append(queued_item)
+                continue
+
+            _, queued_is_speech, _ = queued_item
+            if not dropped_queued_item and not queued_is_speech:
+                dropped_queued_item = True
+                continue
+            pending_items.append(queued_item)
+
+        if not dropped_queued_item:
+            for index, queued_item in enumerate(pending_items):
+                if queued_item is not None:
+                    pending_items.pop(index)
+                    dropped_queued_item = True
+                    break
+
+        for queued_item in pending_items:
+            try:
+                wlk_send_queue.put_nowait(queued_item)
+            except asyncio.QueueFull:
+                break
+
+        if dropped_queued_item:
+            try:
+                wlk_send_queue.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+
+    def whisperlivekit_line_text(line: dict[str, Any]) -> str:
+        return clean_asr_transcript_text(str(line.get("text") or line.get("transcription") or ""))
+
+    def whisperlivekit_line_is_silence(line: dict[str, Any]) -> bool:
+        return line.get("speaker") == -2
+
+    def whisperlivekit_line_start(line: dict[str, Any]) -> float:
+        return parse_whisperlivekit_timestamp(line.get("start", line.get("beg")))
+
+    def whisperlivekit_line_end(line: dict[str, Any]) -> float:
+        return parse_whisperlivekit_timestamp(line.get("end"))
+
+    def whisperlivekit_line_key(line: dict[str, Any], line_index: int, text: str = "") -> str:
+        start_time = whisperlivekit_line_start(line)
+        end_time = whisperlivekit_line_end(line)
+        return f"{line_index}|{start_time:.2f}|{end_time:.2f}|{text}"
+
+    def latest_speech_line(lines: list[dict[str, Any]]) -> tuple[int, dict[str, Any]] | None:
+        for line_index in range(len(lines), 0, -1):
+            line = lines[line_index - 1]
+            if isinstance(line, dict) and not whisperlivekit_line_is_silence(line) and whisperlivekit_line_text(line):
+                return line_index, line
+        return None
+
+    def build_live_text(lines: list[dict[str, Any]], buffer_text: str) -> str:
+        latest = latest_speech_line(lines)
+        latest_line_text = whisperlivekit_line_text(latest[1]) if latest else ""
+
+        normalized_buffer = buffer_text.strip()
+        if latest_line_text and normalized_buffer:
+            return merge_transcript_text(latest_line_text, normalized_buffer)
+        return latest_line_text or normalized_buffer
+
+    def active_state_lines() -> list[dict[str, Any]]:
+        return state_lines[last_finalized_state_line_count:]
+
+    def current_client_segment_id() -> str:
+        return f"wlk-live-{participant_id or user_id or 'unknown'}-{connection_segment_prefix}-{current_segment_index}"
+
+    def current_final_text() -> str:
+        return current_final_candidate_text or current_draft_text
+
+    def current_transcript_timestamp_ms() -> int:
+        return current_segment_timestamp_ms or int(time.time() * 1000)
+
+    def has_gateway_final_silence() -> bool:
+        return (
+            audio_silence_started_at is not None
+            and audio_stream_time - audio_silence_started_at >= WHISPERLIVEKIT_FINAL_SILENCE_SEC
+        )
+
+    def finalized_tail_silence_key() -> str | None:
+        if not state_lines:
+            return None
+        tail_index = len(state_lines)
+        if tail_index <= last_finalized_state_line_count:
+            return None
+        tail_line = state_lines[-1]
+        if not isinstance(tail_line, dict) or not whisperlivekit_line_is_silence(tail_line):
+            return None
+        return whisperlivekit_line_key(tail_line, tail_index)
+
+    async def forward_draft(text: str) -> None:
+        nonlocal latest_buffer_text, current_draft_text, current_final_candidate_text, current_segment_timestamp_ms, wlk_last_progress_at
+        normalized_text = clean_asr_transcript_text(text)
+        if not normalized_text:
+            return
+        if current_segment_timestamp_ms is None:
+            current_segment_timestamp_ms = int(time.time() * 1000)
+        timestamp_ms = current_transcript_timestamp_ms()
+        display_text = merge_transcript_text_with_editable_tail(
+            current_draft_text,
+            normalized_text,
+            WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_CHARS,
+            WHISPERLIVEKIT_DRAFT_EDITABLE_TAIL_RATIO,
+            WHISPERLIVEKIT_DRAFT_MIN_LOCKED_PREFIX_CHARS,
+        )
+        if display_text == latest_buffer_text:
+            return
+        latest_buffer_text = display_text
+        current_draft_text = display_text
+        current_final_candidate_text = display_text
+        wlk_last_progress_at = time.monotonic()
+        await send_client_json({
+            "type": "transcript",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": current_client_segment_id(),
+            "start": 0,
+            "end": 0,
+            "duration": 0,
+            "reason": LIVE_TRANSCRIPT_REASON,
+            "text": display_text,
+            "timestamp_ms": timestamp_ms,
+            "persisted": False,
+            "replaceDraft": True,
+        })
+        schedule_draft_idle_finalize()
+
+    async def forward_final_text(text: str, line: dict[str, Any] | None = None) -> None:
+        nonlocal current_draft_text, current_final_candidate_text, current_segment_timestamp_ms, current_segment_index, latest_buffer_text, pending_silence_key, awaiting_new_speech_after_final, pending_draft_idle_segment_id, pending_audio_silence_segment_id, wlk_has_pending_speech, wlk_tail_silence_duration, last_final_text, restart_wlk_after_final, wlk_session_generation, wlk_last_progress_at, audio_silence_started_at, audio_silence_duration, speech_resume_duration
+        text = clean_asr_transcript_text(text)
+        final_text = text
+        if not final_text:
+            return
+        text = final_text
+        line_id = current_client_segment_id()
+        if line_id in finalized_client_segment_ids:
+            return
+        finalized_client_segment_ids.add(line_id)
+        timestamp_ms = current_transcript_timestamp_ms()
+        start_time = whisperlivekit_line_start(line) if line else 0.0
+        end_time = whisperlivekit_line_end(line) if line else 0.0
+        duration = max(0.0, end_time - start_time)
+        latest_buffer_text = ""
+        current_draft_text = ""
+        current_final_candidate_text = ""
+        current_segment_timestamp_ms = None
+        pending_silence_key = None
+        pending_draft_idle_segment_id = None
+        pending_audio_silence_segment_id = None
+        wlk_has_pending_speech = False
+        wlk_tail_silence_duration = 0.0
+        wlk_last_progress_at = time.monotonic()
+        audio_silence_started_at = None
+        audio_silence_duration = 0.0
+        speech_resume_duration = 0.0
+        last_final_text = text
+        restart_wlk_after_final = True
+        wlk_session_generation += 1
+        current_segment_index += 1
+        awaiting_new_speech_after_final = True
+        print(
+            "WhisperLiveKit final created: "
+            f"roomName={room_name}, participantId={participant_id}, "
+            f"segment_id={line_id}, chars={len(text)}, reason=silence"
+        )
+        await send_client_json({
+            "type": "transcript_boundary",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": line_id,
+            "start": round(start_time, 2),
+            "end": round(end_time, 2),
+            "duration": round(duration, 2),
+            "reason": "silence",
+            "text": text,
+            "timestamp_ms": timestamp_ms,
+            "persisted": False,
+            "client_segment_id": line_id,
+            "replace_segment_id": line_id,
+        })
+        payload = {
+            "type": "transcript",
+            "source": source,
+            "scope": scope,
+            "agentType": agent_type,
+            "roomName": room_name,
+            "participantId": participant_id,
+            "userId": user_id,
+            "displayName": display_name,
+            "segment_id": line_id,
+            "start": round(start_time, 2),
+            "end": round(end_time, 2),
+            "duration": round(duration, 2),
+            "reason": "silence",
+            "text": text,
+            "timestamp_ms": timestamp_ms,
+            "persisted": None,
+            "client_segment_id": line_id,
+            "replace_segment_id": line_id,
+            "retranscribedFinal": False,
+        }
+        await send_client_json(payload)
+        save_transcript_jsonl(
+            file=line_id,
+            start=start_time,
+            end=end_time,
+            duration=duration,
+            text=text,
+            source=source,
+            scope=scope,
+            agent_type=agent_type,
+            room_name=room_name,
+            participant_id=participant_id,
+            user_id=user_id,
+            display_name=display_name,
+            reason="silence",
+        )
+        relay_kwargs = {
+            "text": text,
+            "reason": "silence",
+            "source": source,
+            "scope": scope,
+            "agent_type": agent_type,
+            "room_name": room_name,
+            "participant_id": participant_id,
+            "user_id": user_id,
+            "display_name": display_name,
+            "start": start_time,
+            "end": end_time,
+            "duration": duration,
+            "pipeline_ws_base_url": connection_pipeline_ws_base_url,
+            "retranscribed_final": False,
+            "client_segment_id": line_id,
+            "timestamp_ms": timestamp_ms,
+        }
+
+        async def relay_final_to_pipeline() -> None:
+            attempts = max(1, PIPELINE_FINAL_RELAY_RETRIES)
+            for attempt in range(1, attempts + 1):
+                persisted_event = asyncio.Event()
+                persist_timed_out = False
+                async with relay_lock:
+                    relay_task = asyncio.create_task(
+                        relay_transcript_to_pipeline(
+                            websocket=websocket,
+                            send_lock=send_lock,
+                            persisted_event=persisted_event,
+                            **relay_kwargs,
+                        )
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            persisted_event.wait(),
+                            timeout=PIPELINE_PERSIST_TIMEOUT_SEC,
+                        )
+                    except asyncio.TimeoutError:
+                        persist_timed_out = True
+                        relay_task.cancel()
+                        await asyncio.gather(relay_task, return_exceptions=True)
+                        print(
+                            "Pipeline persist acknowledgement timed out: "
+                            f"segment_id={line_id}, attempt={attempt}/{attempts}"
+                        )
+                        if attempt < attempts:
+                            await asyncio.sleep(min(attempt, 2))
+                            continue
+
+                pipeline_messages = [] if persist_timed_out else await relay_task
+                persisted_update = next(
+                    (
+                        message
+                        for message in pipeline_messages
+                        if message.get("type") == "transcript_update"
+                        and message.get("persisted") is True
+                    ),
+                    None,
+                )
+                if persisted_update is not None:
+                    print(
+                        "Pipeline final persisted: "
+                        f"roomName={room_name}, participantId={participant_id}, "
+                        f"client_segment_id={line_id}, "
+                        f"transcript_segment_id={persisted_update.get('transcript_segment_id')}"
+                    )
+                    return
+
+                print(
+                    "Pipeline final was not persisted: "
+                    f"segment_id={line_id}, attempt={attempt}/{attempts}"
+                )
+                if attempt < attempts:
+                    await asyncio.sleep(min(attempt, 2))
+
+        track_pipeline_relay(asyncio.create_task(relay_final_to_pipeline()))
+
+    async def finalize_current_draft_from_silence(silence_key: str) -> None:
+        nonlocal last_finalized_state_line_count
+        if not state_lines:
+            return
+        tail_index = len(state_lines)
+        if tail_index <= last_finalized_state_line_count:
+            return
+        tail_line = state_lines[-1]
+        if not isinstance(tail_line, dict) or not whisperlivekit_line_is_silence(tail_line):
+            return
+
+        if silence_key in finalized_silence_keys:
+            return
+
+        latest = latest_speech_line(state_lines[last_finalized_state_line_count:-1])
+        source_line = latest[1] if latest else None
+        if not current_draft_text:
+            return
+
+        finalized_silence_keys.add(silence_key)
+        last_finalized_state_line_count = tail_index
+        await forward_final_text(current_final_text(), source_line)
+
+    async def finalize_current_draft_from_audio_silence(segment_id: str) -> None:
+        nonlocal last_finalized_state_line_count, pending_audio_silence_segment_id
+        if segment_id != current_client_segment_id() or not current_draft_text:
+            return
+        if not has_gateway_final_silence():
+            pending_audio_silence_segment_id = None
+            return
+
+        latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
+        last_finalized_state_line_count = len(state_lines)
+        pending_audio_silence_segment_id = segment_id
+        await forward_final_text(current_final_text(), latest[1] if latest else None)
+
+    async def finalize_current_draft_from_idle(segment_id: str) -> None:
+        nonlocal last_finalized_state_line_count, pending_draft_idle_segment_id
+        try:
+            await asyncio.sleep(WHISPERLIVEKIT_FINAL_SILENCE_SEC)
+        except asyncio.CancelledError:
+            return
+        if segment_id != current_client_segment_id() or not current_draft_text:
+            return
+        if not has_gateway_final_silence():
+            pending_draft_idle_segment_id = None
+            return
+
+        latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
+        last_finalized_state_line_count = len(state_lines)
+        pending_draft_idle_segment_id = None
+        await forward_final_text(current_final_text(), latest[1] if latest else None)
+
+    def cancel_pending_draft_idle_finalize() -> None:
+        nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if pending_draft_idle_task and not pending_draft_idle_task.done():
+            pending_draft_idle_task.cancel()
+        pending_draft_idle_task = None
+        pending_draft_idle_segment_id = None
+
+    def schedule_draft_idle_finalize() -> None:
+        nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if not current_draft_text:
+            return
+        segment_id = current_client_segment_id()
+        if pending_draft_idle_segment_id == segment_id and pending_draft_idle_task and not pending_draft_idle_task.done():
+            pending_draft_idle_task.cancel()
+
+        pending_draft_idle_segment_id = segment_id
+        pending_draft_idle_task = asyncio.create_task(finalize_current_draft_from_idle(segment_id))
+
+    def cancel_pending_silence_finalize() -> None:
+        nonlocal pending_silence_task, pending_silence_key
+        if pending_silence_task and not pending_silence_task.done():
+            pending_silence_task.cancel()
+        pending_silence_task = None
+        pending_silence_key = None
+
+    def schedule_silence_finalize(silence_key: str) -> None:
+        nonlocal pending_silence_task, pending_silence_key
+        if not current_draft_text or silence_key in finalized_silence_keys:
+            return
+        if pending_silence_key == silence_key and pending_silence_task and not pending_silence_task.done():
+            return
+
+        cancel_pending_silence_finalize()
+        pending_silence_key = silence_key
+
+        async def delayed_finalize() -> None:
+            try:
+                await asyncio.sleep(WHISPERLIVEKIT_FINAL_SILENCE_SEC)
+                if pending_silence_key != silence_key:
+                    return
+                await finalize_current_draft_from_silence(silence_key)
+            except asyncio.CancelledError:
+                return
+
+        pending_silence_task = asyncio.create_task(delayed_finalize())
+
+    async def handle_wlk_message(raw_message: str, generation: int) -> None:
+        nonlocal state_lines, last_finalized_state_line_count, awaiting_new_speech_after_final
+        if generation != wlk_session_generation:
+            return
+        try:
+            message = json.loads(raw_message)
+        except Exception:
+            return
+        if not isinstance(message, dict):
+            return
+        if generation != wlk_session_generation:
+            return
+
+        message_type = message.get("type")
+        if message_type == "config":
+            print("WhisperLiveKit config:", message)
+            return
+        if message_type == "ready_to_stop":
+            cancel_pending_silence_finalize()
+            if current_draft_text:
+                latest = latest_speech_line(state_lines)
+                await forward_final_text(current_final_text(), latest[1] if latest else None)
+            print("WhisperLiveKit ready_to_stop")
+            return
+        if message.get("error"):
+            await send_client_json({"type": "asr_error", "error": str(message.get("error"))})
+            return
+
+        if message_type == "snapshot":
+            state_lines = list(message.get("lines") or [])
+            last_finalized_state_line_count = min(last_finalized_state_line_count, len(state_lines))
+        elif message_type == "diff":
+            pruned = int(message.get("lines_pruned") or 0)
+            if pruned > 0:
+                state_lines = state_lines[pruned:]
+                last_finalized_state_line_count = max(0, last_finalized_state_line_count - pruned)
+            state_lines.extend(list(message.get("new_lines") or []))
+        elif "lines" in message:
+            state_lines = list(message.get("lines") or [])
+            last_finalized_state_line_count = min(last_finalized_state_line_count, len(state_lines))
+
+        buffer_text = str(message.get("buffer_transcription") or "")
+        tail_silence_key = finalized_tail_silence_key()
+        live_text = (
+            build_live_text(active_state_lines(), buffer_text)
+            if tail_silence_key is None
+            else build_live_text(active_state_lines()[:-1], buffer_text)
+        )
+        if awaiting_new_speech_after_final:
+            live_text = strip_finalized_transcript_prefix(last_final_text, live_text)
+            if not live_text:
+                return
+            awaiting_new_speech_after_final = False
+
+        if tail_silence_key is None:
+            cancel_pending_silence_finalize()
+            await forward_draft(live_text)
+        elif tail_silence_key not in finalized_silence_keys:
+            await forward_draft(live_text)
+            schedule_silence_finalize(tail_silence_key)
+
+    wlk_ws = None
+    receiver_task: asyncio.Task | None = None
+    sender_task: asyncio.Task | None = None
+
+    async def connect_wlk_session():
+        for attempt in range(1, 11):
+            try:
+                return await websockets.connect(
+                    wlk_url,
+                    max_size=None,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=3,
+                )
+            except OSError as exc:
+                if attempt >= 10:
+                    raise
+                wait_seconds = min(attempt, 5)
+                print(
+                    "WhisperLiveKit proxy connect failed "
+                    f"(attempt {attempt}/10): {exc}; retrying in {wait_seconds}s"
+                )
+                await asyncio.sleep(wait_seconds)
+        raise RuntimeError("WhisperLiveKit proxy connection was not created")
+
+    def drain_wlk_send_queue() -> None:
+        while True:
+            try:
+                wlk_send_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
+    async def receive_wlk_messages(ws, generation: int) -> None:
+        async for raw_message in ws:
+            if generation != wlk_session_generation:
+                return
+            if isinstance(raw_message, str):
+                await handle_wlk_message(raw_message, generation)
+
+    async def wlk_audio_sender(ws, generation: int) -> None:
+        while True:
+            queue_item = await wlk_send_queue.get()
+            if generation != wlk_session_generation:
+                break
+            if queue_item is None:
+                break
+            chunk, _, enqueued_at = queue_item
+            queue_lag = time.monotonic() - enqueued_at
+            if queue_lag > WHISPERLIVEKIT_MAX_QUEUE_LAG_SEC:
+                print(
+                    "[wlk-sender] queued audio is stale; restarting session "
+                    f"(queue_lag={queue_lag:.2f}s, limit={WHISPERLIVEKIT_MAX_QUEUE_LAG_SEC:.2f}s)"
+                )
+                break
+            try:
+                await asyncio.wait_for(ws.send(chunk), timeout=WHISPERLIVEKIT_SEND_TIMEOUT_SEC)
+            except asyncio.TimeoutError:
+                print(
+                    "[wlk-sender] audio send timed out; restarting session "
+                    f"(timeout={WHISPERLIVEKIT_SEND_TIMEOUT_SEC:.2f}s)"
+                )
+                break
+            except Exception as exc:
+                print(f"[wlk-sender] send error: {exc}")
+                break
+
+    async def stop_wlk_session(send_stop: bool = True) -> None:
+        nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
+        ws = wlk_ws
+        wlk_session_generation += 1
+        if ws is not None and send_stop:
+            try:
+                await ws.send(b"")
+            except Exception:
+                pass
+
+        drain_wlk_send_queue()
+        try:
+            wlk_send_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            drain_wlk_send_queue()
+            wlk_send_queue.put_nowait(None)
+
+        if sender_task is not None:
+            try:
+                await asyncio.wait_for(sender_task, timeout=3)
+            except Exception:
+                sender_task.cancel()
+                await asyncio.gather(sender_task, return_exceptions=True)
+        if receiver_task is not None:
+            receiver_task.cancel()
+            await asyncio.gather(receiver_task, return_exceptions=True)
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        wlk_ws = None
+        receiver_task = None
+        sender_task = None
+
+    async def start_wlk_session() -> None:
+        nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
+        drain_wlk_send_queue()
+        wlk_ws = await connect_wlk_session()
+        wlk_session_generation += 1
+        generation = wlk_session_generation
+        print(f"Connected to WhisperLiveKit: {wlk_url}")
+        receiver_task = asyncio.create_task(receive_wlk_messages(wlk_ws, generation))
+        sender_task = asyncio.create_task(wlk_audio_sender(wlk_ws, generation))
+
+    def wlk_session_needs_recovery() -> bool:
+        transcript_stalled = (
+            wlk_has_pending_speech
+            and time.monotonic() - wlk_last_progress_at >= WHISPERLIVEKIT_TRANSCRIPT_STALL_SEC
+        )
+        if transcript_stalled:
+            print(
+                "[wlk-watchdog] transcript stopped progressing; restarting session "
+                f"(idle={time.monotonic() - wlk_last_progress_at:.2f}s, "
+                f"limit={WHISPERLIVEKIT_TRANSCRIPT_STALL_SEC:.2f}s)"
+            )
+        return (
+            wlk_ws is None
+            or receiver_task is None
+            or receiver_task.done()
+            or sender_task is None
+            or sender_task.done()
+            or transcript_stalled
+        )
+
+    async def restart_wlk_session(force: bool = False) -> None:
+        nonlocal state_lines, last_finalized_state_line_count, awaiting_new_speech_after_final, restart_wlk_after_final, wlk_last_progress_at
+        async with wlk_restart_lock:
+            if not restart_wlk_after_final and not force:
+                return
+            restart_reason = "finalized transcript" if restart_wlk_after_final else "stopped sender/receiver"
+            print(f"Restarting WhisperLiveKit session after {restart_reason}")
+            restart_wlk_after_final = False
+            await stop_wlk_session(send_stop=False)
+            state_lines = []
+            last_finalized_state_line_count = 0
+            finalized_silence_keys.clear()
+            awaiting_new_speech_after_final = False
+            wlk_last_progress_at = time.monotonic()
+            try:
+                await start_wlk_session()
+            except Exception:
+                restart_wlk_after_final = True
+                raise
+
+    def schedule_wlk_recovery(force: bool = False) -> None:
+        nonlocal wlk_recovery_task, wlk_has_pending_speech, wlk_tail_silence_duration
+        if wlk_recovery_task is not None and not wlk_recovery_task.done():
+            return
+
+        async def recover() -> None:
+            nonlocal wlk_has_pending_speech, wlk_tail_silence_duration
+            try:
+                await restart_wlk_session(force=force)
+                if await flush_recovery_audio():
+                    wlk_has_pending_speech = True
+                    wlk_tail_silence_duration = 0.0
+            except Exception as exc:
+                print(f"WhisperLiveKit session recovery failed; browser audio reception continues: {exc}")
+                await send_client_json({
+                    "type": "asr_error",
+                    "error": str(exc),
+                    "engine": "whisperlivekit",
+                    "recoverable": True,
+                })
+
+        wlk_recovery_task = asyncio.create_task(recover())
+
+    try:
+        await start_wlk_session()
+        while True:
+            data = await websocket.receive()
+            if data.get("type") == "websocket.disconnect":
+                break
+
+            raw_text = data.get("text")
+            if raw_text is not None:
+                try:
+                    msg = json.loads(raw_text)
+                except Exception:
+                    continue
+                if not isinstance(msg, dict):
+                    continue
+
+                msg_type = msg.get("type")
+                if msg_type == "start":
+                    source = msg.get("source", source)
+                    scope = msg.get("scope", scope)
+                    agent_type = msg.get("agentType", agent_type)
+                    room_name = msg.get("roomName", room_name)
+                    user_id = msg.get("userId", user_id)
+                    display_name = msg.get("displayName", display_name)
+                    input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
+                    encoding = msg.get("encoding", msg.get("format", encoding))
+                    channels = int(msg.get("channels", channels))
+                    connection_pipeline_ws_base_url = normalize_pipeline_ws_base_url(
+                        msg.get("pipelineWsBaseUrl")
+                        or msg.get("pipeline_ws_base_url")
+                        or connection_pipeline_ws_base_url
+                    )
+                    session_started = True
+                    await send_client_json({
+                        "type": "joined",
+                        "session_name": room_name,
+                        "participant_id": participant_id,
+                        "engine": "whisperlivekit",
+                    })
+                    continue
+                if msg_type == "stop":
+                    break
+                if msg_type == "reset_outputs":
+                    result = clear_output_files()
+                    await send_client_json({"type": "reset_outputs_done", **result})
+                    continue
+                continue
+
+            pcm_bytes = data.get("bytes")
+            if pcm_bytes is None or not session_started:
+                continue
+
+            try:
+                decoded_audio = decode_audio_bytes(
+                    pcm_bytes,
+                    encoding=encoding,
+                    input_sample_rate=input_sample_rate,
+                )
+            except Exception as exc:
+                print(f"WhisperLiveKit proxy decode error: {exc}")
+                continue
+            if channels != 1:
+                print(f"Warning: channels={channels}. WhisperLiveKit proxy expects mono PCM.")
+
+            audio_duration = len(decoded_audio) / float(SAMPLE_RATE)
+            audio_stream_time += audio_duration
+            rms, peak = get_audio_stats(decoded_audio)
+            is_speech_chunk = is_gateway_speech_chunk(rms, peak)
+            if current_draft_text:
+                if is_speech_chunk:
+                    speech_resume_duration += audio_duration
+                    if speech_resume_duration >= WHISPERLIVEKIT_SPEECH_RESUME_SEC:
+                        audio_silence_started_at = None
+                        audio_silence_duration = 0.0
+                else:
+                    speech_resume_duration = 0.0
+                    if audio_silence_started_at is None:
+                        audio_silence_started_at = max(0.0, audio_stream_time - audio_duration)
+                        print(
+                            "WhisperLiveKit gateway silence started: "
+                            f"roomName={room_name}, participantId={participant_id}, "
+                            f"segment_id={current_client_segment_id()}, rms={rms:.6f}, peak={peak:.6f}"
+                        )
+                    audio_silence_duration += audio_duration
+                    if audio_silence_duration >= WHISPERLIVEKIT_FINAL_SILENCE_SEC:
+                        print(
+                            "WhisperLiveKit gateway silence threshold reached: "
+                            f"roomName={room_name}, participantId={participant_id}, "
+                            f"segment_id={current_client_segment_id()}, "
+                            f"silence={audio_silence_duration:.2f}s"
+                        )
+                        await finalize_current_draft_from_audio_silence(current_client_segment_id())
+            else:
+                audio_silence_started_at = None
+                audio_silence_duration = 0.0
+                speech_resume_duration = 0.0
+
+            if is_speech_chunk:
+                if (
+                    WHISPERLIVEKIT_MAX_SPEECH_SEC > 0
+                    and audio_stream_time - last_soft_reset_stream_time >= WHISPERLIVEKIT_MAX_SPEECH_SEC
+                    and current_draft_text
+                ):
+                    last_soft_reset_stream_time = audio_stream_time
+
+            encoded_audio = encode_pcm_s16le(decoded_audio)
+            if encoded_audio:
+                recovery_in_progress = wlk_recovery_task is not None and not wlk_recovery_task.done()
+                session_needs_recovery = wlk_session_needs_recovery()
+                if restart_wlk_after_final or session_needs_recovery or recovery_in_progress:
+                    remember_recovery_audio(encoded_audio, is_speech_chunk, audio_duration)
+                    if not recovery_in_progress:
+                        schedule_wlk_recovery(force=session_needs_recovery)
+                    continue
+                if is_speech_chunk:
+                    if not wlk_has_pending_speech:
+                        wlk_last_progress_at = time.monotonic()
+                        flush_silence_preroll()
+                    wlk_has_pending_speech = True
+                    wlk_tail_silence_duration = 0.0
+                    enqueue_wlk_audio_chunk(encoded_audio, True)
+                else:
+                    remember_silence_preroll(encoded_audio, audio_duration)
+                    if wlk_has_pending_speech and wlk_tail_silence_duration < WHISPERLIVEKIT_SILENCE_TAIL_SEC:
+                        enqueue_wlk_audio_chunk(encoded_audio, False)
+                        wlk_tail_silence_duration += audio_duration
+    except Exception as exc:
+        print(f"WhisperLiveKit proxy error: {exc}")
+        await send_client_json({"type": "asr_error", "error": str(exc), "engine": "whisperlivekit"})
+    finally:
+        cancel_pending_silence_finalize()
+        cancel_pending_draft_idle_finalize()
+        if wlk_recovery_task is not None and not wlk_recovery_task.done():
+            wlk_recovery_task.cancel()
+            await asyncio.gather(wlk_recovery_task, return_exceptions=True)
+        await stop_wlk_session(send_stop=True)
+        release_wlk_url(wlk_base_url)
+        print(
+            "WhisperLiveKit released: "
+            f"participantId={participant_id}, backend={wlk_base_url}, "
+            f"active_connections={_wlk_active_connections}"
+        )
+
 @app.websocket("/ws/audio")
 @app.websocket("/sessions/{session_id}/audio-stream")
 async def audio_ws(
@@ -786,6 +1954,15 @@ async def audio_ws(
     pipeline_ws_base_url: Optional[str] = Query(None),
 ):
     await websocket.accept()
+
+    if ASR_ENGINE != "local":
+        await handle_whisperlivekit_audio_ws(
+            websocket,
+            session_id=session_id,
+            participant_id=participant_id,
+            pipeline_ws_base_url=pipeline_ws_base_url,
+        )
+        return
 
     url_participant_id = participant_id
 
@@ -800,6 +1977,7 @@ async def audio_ws(
     send_lock = asyncio.Lock()
     relay_lock = asyncio.Lock()
     asr_tasks = set()
+    live_asr_tasks = set()
 
     # Metadata from URL first, then start message can override it
     source = "unknown"
@@ -818,6 +1996,8 @@ async def audio_ws(
 
     # Per-connection audio state
     pending_audio = np.zeros(0, dtype=np.float32)
+    max_speech_batch_audio_segments = []
+    max_speech_batch_start_time = None
 
     chunk_count = 0
     segment_count = 0
@@ -826,6 +2006,9 @@ async def audio_ws(
     speech_chunks = 0
     silence_chunks = 0
     speech_start_time = None
+    next_live_speech_chunk = 0
+    live_window_count = 0
+    merged_live_transcript = ""
 
     pre_buffer = deque(maxlen=PRE_BUFFER_CHUNKS)
     segment_buffer = []
@@ -840,12 +2023,20 @@ async def audio_ws(
         nonlocal speech_start_time
         nonlocal segment_buffer
         nonlocal segment_count
+        nonlocal max_speech_batch_audio_segments
+        nonlocal max_speech_batch_start_time
+        nonlocal next_live_speech_chunk
+        nonlocal live_window_count
+        nonlocal merged_live_transcript
 
         if not speech_started or not segment_buffer:
             speech_started = False
             speech_chunks = 0
             silence_chunks = 0
             speech_start_time = None
+            next_live_speech_chunk = 0
+            live_window_count = 0
+            merged_live_transcript = ""
             segment_buffer = []
             return
 
@@ -873,8 +2064,38 @@ async def audio_ws(
         except Exception:
             print("Cannot send VAD end because websocket is closed")
 
-        if duration >= MIN_SAVE_DURATION_SEC:
+        if live_asr_tasks:
+            print(f"Waiting for {len(live_asr_tasks)} live ASR task(s) before finalizing segment...")
+            await asyncio.gather(*list(live_asr_tasks), return_exceptions=True)
+
+        final_transcript = merged_live_transcript.strip()
+
+        if duration >= MIN_SAVE_DURATION_SEC and final_transcript:
             segment_count += 1
+            asr_start_time = start_time
+            asr_end_time = end_time
+            asr_duration = duration
+
+            if end_reason == "max_speech_ms":
+                if max_speech_batch_start_time is None:
+                    max_speech_batch_start_time = start_time
+                max_speech_batch_audio_segments.append(final_transcript)
+            elif end_reason in PIPELINE_FINAL_REASONS and max_speech_batch_audio_segments:
+                combined_segments = [*max_speech_batch_audio_segments, final_transcript]
+                combined_text = ""
+                for segment_text in combined_segments:
+                    combined_text = merge_transcript_text(combined_text, segment_text)
+                if combined_text:
+                    final_transcript = combined_text
+                    asr_start_time = float(max_speech_batch_start_time if max_speech_batch_start_time is not None else start_time)
+                    asr_end_time = end_time
+                    asr_duration = max(0.0, asr_end_time - asr_start_time)
+                    print(
+                        "Merged max_speech transcript batch without final ASR: "
+                        f"duration={asr_duration:.2f}s, segments={len(combined_segments)}"
+                    )
+                max_speech_batch_audio_segments = []
+                max_speech_batch_start_time = None
 
             safe_scope = sanitize_filename_part(scope)
             safe_room = sanitize_filename_part(room_name)
@@ -917,16 +2138,50 @@ async def audio_ws(
             except Exception:
                 print("Cannot send segment_saved because websocket is closed")
 
-            task = asyncio.create_task(
-                transcribe_and_send(
+            save_transcript_jsonl(
+                file=str(filename),
+                start=asr_start_time,
+                end=asr_end_time,
+                duration=asr_duration,
+                text=final_transcript,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                reason=end_reason,
+            )
+
+            try:
+                async with send_lock:
+                    await websocket.send_json({
+                        "type": "transcript",
+                        "source": source,
+                        "scope": scope,
+                        "agentType": agent_type,
+                        "roomName": room_name,
+                        "participantId": participant_id,
+                        "userId": user_id,
+                        "displayName": display_name,
+                        "file": str(filename),
+                        "start": round(asr_start_time, 2),
+                        "end": round(asr_end_time, 2),
+                        "duration": round(asr_duration, 2),
+                        "reason": end_reason,
+                        "text": final_transcript,
+                        "persisted": None,
+                        "retranscribedFinal": False,
+                    })
+            except Exception:
+                print("Cannot send final transcript because websocket is closed")
+
+            async with relay_lock:
+                await relay_transcript_to_pipeline(
                     websocket=websocket,
                     send_lock=send_lock,
-                    relay_lock=relay_lock,
-                    filename=filename,
-                    segment_audio=segment_audio.copy(),
-                    start_time=start_time,
-                    end_time=end_time,
-                    duration=duration,
+                    text=final_transcript,
                     reason=end_reason,
                     pipeline_ws_base_url=connection_pipeline_ws_base_url,
                     source=source,
@@ -936,20 +2191,90 @@ async def audio_ws(
                     participant_id=participant_id,
                     user_id=user_id,
                     display_name=display_name,
+                    start=asr_start_time,
+                    end=asr_end_time,
+                    duration=asr_duration,
+                    retranscribed_final=False,
                 )
-            )
-
-            asr_tasks.add(task)
-            task.add_done_callback(asr_tasks.discard)
 
         else:
-            print(f"Skipped short segment: duration={duration:.2f}s")
+            print(
+                "Skipped final segment: "
+                f"duration={duration:.2f}s, has_live_transcript={bool(final_transcript)}"
+            )
 
         speech_started = False
         speech_chunks = 0
         silence_chunks = 0
         speech_start_time = None
+        next_live_speech_chunk = 0
+        live_window_count = 0
+        merged_live_transcript = ""
         segment_buffer = []
+
+    def schedule_live_transcript(current_time: float) -> bool:
+        nonlocal live_window_count, merged_live_transcript
+
+        def remember_live_transcript(transcript: str) -> None:
+            nonlocal merged_live_transcript
+            merged_live_transcript = merge_transcript_text(merged_live_transcript, transcript)
+
+        if live_asr_tasks or not segment_buffer:
+            return False
+
+        segment_audio = np.concatenate(segment_buffer).astype(np.float32)
+        if len(segment_audio) < STREAM_MIN_LIVE_CHUNKS * CHUNK_SIZE:
+            return False
+
+        live_window_count += 1
+        window_audio = segment_audio[-STREAM_WINDOW_SAMPLES:].copy() if len(segment_audio) > STREAM_WINDOW_SAMPLES else segment_audio.copy()
+        duration = len(window_audio) / SAMPLE_RATE
+        end_time = current_time
+        start_time = max(0.0, end_time - duration)
+
+        safe_reason = sanitize_filename_part(LIVE_TRANSCRIPT_REASON)
+        filename = SEGMENT_DIR / (
+            f"live_{live_window_count:03d}_"
+            f"{round(start_time, 2)}_"
+            f"{round(end_time, 2)}_"
+            f"{safe_reason}.wav"
+        )
+
+        print(
+            "Live ASR window scheduled: "
+            f"roomName={room_name}, participantId={participant_id or user_id}, "
+            f"start={start_time:.2f}, end={end_time:.2f}, duration={duration:.2f}s"
+        )
+
+        task = asyncio.create_task(
+            transcribe_and_send(
+                websocket=websocket,
+                send_lock=send_lock,
+                relay_lock=relay_lock,
+                filename=filename,
+                segment_audio=window_audio,
+                start_time=start_time,
+                end_time=end_time,
+                duration=duration,
+                reason=LIVE_TRANSCRIPT_REASON,
+                pipeline_ws_base_url=connection_pipeline_ws_base_url,
+                source=source,
+                scope=scope,
+                agent_type=agent_type,
+                room_name=room_name,
+                participant_id=participant_id,
+                user_id=user_id,
+                display_name=display_name,
+                save_transcript=False,
+                relay_to_pipeline=False,
+                on_transcript=remember_live_transcript,
+            )
+        )
+        asr_tasks.add(task)
+        live_asr_tasks.add(task)
+        task.add_done_callback(asr_tasks.discard)
+        task.add_done_callback(live_asr_tasks.discard)
+        return True
 
     try:
         while True:
@@ -1170,6 +2495,8 @@ async def audio_ws(
                         speech_started = True
                         speech_chunks = 0
                         silence_chunks = 0
+                        next_live_speech_chunk = 0
+                        merged_live_transcript = ""
                         speech_start_time = current_time
 
                         # Include pre-buffer to avoid cutting the first syllable
@@ -1194,6 +2521,10 @@ async def audio_ws(
                 # Already in speech
                 speech_chunks += 1
                 segment_buffer.append(audio_chunk.copy())
+
+                if speech_chunks >= next_live_speech_chunk and len(segment_buffer) * CHUNK_SIZE >= STREAM_MIN_LIVE_CHUNKS * CHUNK_SIZE:
+                    if schedule_live_transcript(current_time):
+                        next_live_speech_chunk = speech_chunks + STREAM_STEP_CHUNKS
 
                 if effective_prob < END_THRESHOLD:
                     silence_chunks += 1

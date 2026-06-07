@@ -25,11 +25,16 @@ DEFAULT_OPENAI_BASE_URL = "https://opencode.ai/zen/go/v1"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL).strip() or DEFAULT_OPENAI_BASE_URL
+IDEA_LLM_ENABLE_THINKING = os.getenv("IDEA_LLM_ENABLE_THINKING", "0").lower() in {"1", "true", "yes", "on"}
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "bge-m3")
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "30"))
 
 STREAM_CHUNK_SAMPLES = 16000
+STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
+STREAM_STEP_SECONDS = float(os.getenv("STREAM_STEP_SECONDS", "2"))
+STREAM_MIN_FINAL_SECONDS = float(os.getenv("STREAM_MIN_FINAL_SECONDS", "0.8"))
+ENABLE_BUILTIN_AUDIO_STREAM = os.getenv("ENABLE_BUILTIN_AUDIO_STREAM", "").lower() in {"1", "true", "yes", "on"}
 FRONTEND_MOCK_TRANSCRIPT_LINES = [
     "我覺得我們先不要馬上排序，可以先確認大家是不是都把目標理解成海上求生，而不是自己航行到岸邊。",
     "20L 飲用水一定要在前面吧，因為沒有淡水的話，就算我們有海圖或食物也撐不了太久。",

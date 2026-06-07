@@ -163,6 +163,7 @@ class AudioConnectionState:
     websocket: WebSocket
     sample_rate: int = 16000
     mic_mode: str = "private"
+    display_name: str | None = None
     is_speaking: bool = False
     audio_buffer: bytearray = field(default_factory=bytearray)
 
@@ -1273,7 +1274,11 @@ async def handle_audio_websocket(
             if aligned_size <= 0:
                 return
             chunk = raw_bytes[:aligned_size]
-            transcript_text = await transcribe_ws_chunk(chunk)
+            transcript_text = await transcribe_ws_chunk(
+                pcm16_bytes=chunk,
+                sample_rate=state.sample_rate,
+                channels=1,
+            )
             if not transcript_text:
                 return
             if state.mic_mode != "private":
@@ -1293,6 +1298,7 @@ async def handle_audio_websocket(
                     transcript_text=transcript_text,
                     started_at=now,
                     ended_at=now,
+                    display_name=state.display_name,
                 )
                 segment_id = saved_segment.segment_id if saved_segment else None
                 await audio_manager.send_to(
@@ -1335,6 +1341,7 @@ async def handle_audio_websocket(
                 transcript_text=transcript_text,
                 started_at=now,
                 ended_at=now,
+                display_name=state.display_name,
             )
             if saved_segment:
                 transcript_segments.append(saved_segment)
@@ -1406,6 +1413,7 @@ async def handle_audio_websocket(
                         ).strip()
                         or None
                     )
+                    state.display_name = display_name
                     client_id = (
                         str(
                             payload.get("clientId") or payload.get("client_id") or ""

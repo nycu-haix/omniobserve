@@ -116,6 +116,19 @@ async def generate_and_save_task_items_for_idea_block(
         idea_block_id,
         task_item_ids,
     )
+    return await save_task_items_for_idea_block_ids(
+        db,
+        idea_block_id=idea_block_id,
+        task_item_ids=task_item_ids,
+    )
+
+
+async def save_task_items_for_idea_block_ids(
+    db: AsyncSession,
+    *,
+    idea_block_id: int,
+    task_item_ids: list[int],
+) -> list[TaskItem]:
     task_items = [
         TaskItem(idea_block_id=idea_block_id, task_item_id=task_item_id)
         for task_item_id in task_item_ids

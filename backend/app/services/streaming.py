@@ -8,7 +8,7 @@ import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from ..config import STREAM_CHUNK_SAMPLES, logger
+from ..config import STREAM_MIN_FINAL_SECONDS, STREAM_STEP_SECONDS, STREAM_WINDOW_SECONDS, logger
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
@@ -19,6 +19,52 @@ from .participant_status import mark_audio_disconnected, update_audio_status
 from .realtime import broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
+
+LIVE_TRANSCRIPT_REASON = "sliding_window"
+_SILENCE_ENERGY_THRESHOLD = 300.0  # int16 RMS (0-32768 scale)
+_SILENCE_DURATION_SECONDS = 2.0
+
+
+def _bounded_stream_seconds(value: float, *, default: float, minimum: float) -> float:
+    if value <= 0:
+        return default
+    return max(value, minimum)
+
+
+def _stream_window_samples(sample_rate: int) -> int:
+    seconds = _bounded_stream_seconds(STREAM_WINDOW_SECONDS, default=4.0, minimum=0.5)
+    return max(int(round(sample_rate * seconds)), 1)
+
+
+def _stream_step_samples(sample_rate: int) -> int:
+    window_samples = _stream_window_samples(sample_rate)
+    seconds = _bounded_stream_seconds(STREAM_STEP_SECONDS, default=2.0, minimum=0.25)
+    return max(1, min(int(round(sample_rate * seconds)), window_samples))
+
+
+def _stream_min_final_samples(sample_rate: int) -> int:
+    seconds = _bounded_stream_seconds(STREAM_MIN_FINAL_SECONDS, default=0.8, minimum=0.1)
+    return max(1, int(round(sample_rate * seconds)))
+
+
+def merge_transcript_text(previous_text: str, next_text: str) -> str:
+    previous = previous_text.strip()
+    next_value = next_text.strip()
+    if not previous:
+        return next_value
+    if not next_value:
+        return previous
+    if previous.endswith(next_value) or next_value in previous:
+        return previous
+    if next_value.startswith(previous) or previous in next_value:
+        return next_value
+
+    max_overlap = min(len(previous), len(next_value))
+    for overlap in range(max_overlap, 1, -1):
+        if previous[-overlap:] == next_value[:overlap]:
+            return f"{previous}{next_value[overlap:]}"
+
+    return f"{previous}{next_value}"
 
 
 def parse_stream_start_message(raw_text: str, *, expected_session_name: str | None = None) -> StreamContext:
@@ -85,12 +131,27 @@ def parse_stream_start_message(raw_text: str, *, expected_session_name: str | No
 
 
 async def send_ws_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> None:
-    if websocket.client_state != WebSocketState.CONNECTED:
+    if (
+        websocket.client_state != WebSocketState.CONNECTED
+        or websocket.application_state != WebSocketState.CONNECTED
+    ):
         return
     try:
         await websocket.send_json(payload)
     except Exception as exc:
         logger.warning("Failed to send WebSocket message: %s", exc)
+
+
+async def close_ws_safe(websocket: WebSocket, *, code: int = 1000) -> None:
+    if (
+        websocket.client_state != WebSocketState.CONNECTED
+        or websocket.application_state != WebSocketState.CONNECTED
+    ):
+        return
+    try:
+        await websocket.close(code=code)
+    except Exception as exc:
+        logger.warning("Failed to close WebSocket safely: %s", exc)
 
 
 async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_name: str, participant_id: str, idea_blocks: list[Any]) -> None:
@@ -126,27 +187,97 @@ async def handle_audio_stream_websocket(
     stream_context: StreamContext | None = None
     transcript_segments: list[StreamTranscript] = []
     int16_buffer = np.empty(0, dtype=np.int16)
-    buffered_chunk_start_at: datetime | None = None
+    buffer_start_sample = 0
+    total_samples_received = 0
+    next_window_start_sample = 0
+    first_audio_received_at: datetime | None = None
+    merged_transcript_text = ""
+    last_sent_live_text = ""
+    final_transcript_saved = False
     stop_received = False
+    silence_start_at: datetime | None = None
+    segment_started_at: datetime | None = None
+    segment_index = 0
 
     async with SessionLocal() as db:
 
-        async def flush_buffer(force: bool) -> None:
-            nonlocal int16_buffer, buffered_chunk_start_at
+        def sample_timestamp(sample_index: int) -> datetime:
+            if stream_context is None or first_audio_received_at is None:
+                return utc_now()
+            return first_audio_received_at + timedelta(
+                seconds=sample_index / max(stream_context.sample_rate, 1)
+            )
+
+        def trim_processed_audio() -> None:
+            nonlocal int16_buffer, buffer_start_sample
+            trim_samples = next_window_start_sample - buffer_start_sample
+            if trim_samples <= 0:
+                return
+            trim_samples = min(trim_samples, int16_buffer.size)
+            int16_buffer = int16_buffer[trim_samples:].copy()
+            buffer_start_sample += trim_samples
+
+        async def send_live_transcript(*, started_at: datetime, ended_at: datetime) -> None:
+            if stream_context is None or not merged_transcript_text.strip():
+                return
+            timestamp_ms = int(ended_at.timestamp() * 1000)
+            payload = {
+                "type": "transcript",
+                "text": merged_transcript_text.strip(),
+                "participant_id": participant_id,
+                "segment_id": f"live-{participant_id}",
+                "scope": stream_context.scope.value,
+                "is_final": False,
+                "reason": LIVE_TRANSCRIPT_REASON,
+                "persisted": False,
+                "timestamp_ms": timestamp_ms,
+                "window_started_at": started_at.isoformat(),
+                "window_ended_at": ended_at.isoformat(),
+            }
+            await send_ws_json_safe(websocket, payload)
+            await broadcast_admin_transcript(
+                session_name,
+                participant_id=participant_id,
+                scope=stream_context.scope.value,
+                text=merged_transcript_text.strip(),
+                is_final=False,
+                persisted=False,
+                transcript_segment_id=None,
+                reason=LIVE_TRANSCRIPT_REASON,
+            )
+
+        async def process_audio_buffer(force: bool) -> None:
+            nonlocal int16_buffer, next_window_start_sample, merged_transcript_text, last_sent_live_text
             if stream_context is None:
                 return
+            if first_audio_received_at is None or int16_buffer.size == 0:
+                return
 
-            while int16_buffer.size >= STREAM_CHUNK_SAMPLES or (force and int16_buffer.size > 0):
-                chunk_samples = (
-                    STREAM_CHUNK_SAMPLES if int16_buffer.size >= STREAM_CHUNK_SAMPLES else int16_buffer.size
-                )
-                chunk = int16_buffer[:chunk_samples]
-                int16_buffer = int16_buffer[chunk_samples:]
+            sample_rate = max(stream_context.sample_rate, 1)
+            window_samples = _stream_window_samples(sample_rate)
+            step_samples = _stream_step_samples(sample_rate)
+            min_final_samples = _stream_min_final_samples(sample_rate)
 
-                chunk_started_at = buffered_chunk_start_at or utc_now()
-                chunk_ended_at = chunk_started_at + timedelta(
-                    seconds=chunk_samples / max(stream_context.sample_rate, 1)
-                )
+            while True:
+                available_end_sample = buffer_start_sample + int16_buffer.size
+                remaining_samples = available_end_sample - next_window_start_sample
+
+                if remaining_samples >= window_samples:
+                    chunk_samples = window_samples
+                elif force and remaining_samples >= min_final_samples:
+                    chunk_samples = remaining_samples
+                else:
+                    break
+
+                buffer_offset = max(0, next_window_start_sample - buffer_start_sample)
+                chunk = int16_buffer[buffer_offset : buffer_offset + chunk_samples].copy()
+                if chunk.size == 0:
+                    break
+
+                chunk_start_sample = next_window_start_sample
+                chunk_end_sample = chunk_start_sample + chunk.size
+                chunk_started_at = sample_timestamp(chunk_start_sample)
+                chunk_ended_at = sample_timestamp(chunk_end_sample)
 
                 transcript_text = await transcribe_ws_chunk(
                     pcm16_bytes=chunk.tobytes(),
@@ -154,95 +285,117 @@ async def handle_audio_stream_websocket(
                     channels=stream_context.channels,
                 )
                 if transcript_text:
-                    if stream_context.scope != Visibility.PRIVATE:
-                        logger.info(
-                            "Audio stream transcript skipped for non-private scope session_name=%s participant_id=%s scope=%s chars=%s",
-                            session_name,
-                            participant_id,
-                            stream_context.scope.value,
-                            len(transcript_text),
-                        )
-                        saved_segment = await save_ws_transcript_segment(
-                            db,
-                            session_name=session_name,
-                            participant_id=participant_id,
-                            visibility=Visibility.PUBLIC,
-                            transcript_text=transcript_text,
+                    merged_transcript_text = merge_transcript_text(merged_transcript_text, transcript_text)
+                    if merged_transcript_text.strip() != last_sent_live_text:
+                        last_sent_live_text = merged_transcript_text.strip()
+                        await send_live_transcript(
                             started_at=chunk_started_at,
                             ended_at=chunk_ended_at,
                         )
-                        segment_id = saved_segment.segment_id if saved_segment else None
-                        await send_ws_json_safe(
-                            websocket,
-                            {
-                                "type": "transcript",
-                                "text": transcript_text,
-                                "participant_id": participant_id,
-                                "segment_id": segment_id,
-                                "is_final": False,
-                                "persisted": saved_segment is not None,
-                            },
-                        )
-                        await broadcast_admin_transcript(
-                            session_name,
-                            participant_id=participant_id,
-                            scope=stream_context.scope.value,
-                            text=transcript_text,
-                            is_final=False,
-                            persisted=saved_segment is not None,
-                            transcript_segment_id=segment_id,
-                        )
-                        await broadcast_public_transcript_line(
-                            session_name,
-                            participant_id=participant_id,
-                            text=transcript_text,
-                            transcript_segment_id=segment_id,
-                        )
-                        continue
 
-                    saved_segment = await save_ws_transcript_segment(
-                        db,
-                        session_name=session_name,
-                        participant_id=participant_id,
-                        visibility=stream_context.scope,
-                        transcript_text=transcript_text,
-                        started_at=chunk_started_at,
-                        ended_at=chunk_ended_at,
-                    )
-                    if saved_segment:
-                        transcript_segments.append(saved_segment)
-                        await handle_transcript_segment(
-                            db,
-                            session_name=session_name,
-                            user_id=_participant_id_to_int(participant_id),
-                            transcript=saved_segment,
-                            is_final=False,
-                            visibility=stream_context.scope,
-                            task_name=task_name,
-                        )
-                        await send_ws_json_safe(
-                            websocket,
-                            {
-                                "type": "transcript_update",
-                                "transcript_segment_id": saved_segment.segment_id,
-                                "participant_id": participant_id,
-                                "scope": stream_context.scope.value,
-                                "text": saved_segment.text,
-                                "is_final": False,
-                                "persisted": True,
-                            },
-                        )
-                        await broadcast_admin_transcript(
-                            session_name,
-                            participant_id=participant_id,
-                            scope=stream_context.scope.value,
-                            text=saved_segment.text,
-                            is_final=False,
-                            persisted=True,
-                            transcript_segment_id=saved_segment.segment_id,
-                        )
+                next_window_start_sample = chunk_end_sample if force else chunk_start_sample + step_samples
+                trim_processed_audio()
 
-                buffered_chunk_start_at = chunk_ended_at if int16_buffer.size > 0 else None
+                if force:
+                    break
+
+        async def finalize_stream_transcript() -> StreamTranscript | None:
+            nonlocal final_transcript_saved
+            if final_transcript_saved:
+                return transcript_segments[-1] if transcript_segments else None
+
+            await process_audio_buffer(force=True)
+            final_text = merged_transcript_text.strip()
+            final_transcript_saved = True
+
+            if stream_context is None or not final_text:
+                return None
+
+            sample_rate = max(stream_context.sample_rate, 1)
+            started_at = first_audio_received_at or utc_now()
+            ended_at = started_at + timedelta(seconds=total_samples_received / sample_rate)
+            visibility = stream_context.scope if stream_context.scope == Visibility.PRIVATE else Visibility.PUBLIC
+            saved_segment = await save_ws_transcript_segment(
+                db,
+                session_name=session_name,
+                participant_id=participant_id,
+                visibility=visibility,
+                transcript_text=final_text,
+                started_at=started_at,
+                ended_at=ended_at,
+                display_name=str(stream_context.start_message.get("displayName") or "").strip() or None,
+            )
+            if saved_segment:
+                transcript_segments.append(saved_segment)
+            return saved_segment
+
+        async def finalize_silence_segment() -> StreamTranscript | None:
+            nonlocal merged_transcript_text, last_sent_live_text, next_window_start_sample
+            nonlocal silence_start_at, segment_started_at, segment_index
+
+            await process_audio_buffer(force=True)
+            final_text = merged_transcript_text.strip()
+            seg_started_at = segment_started_at or first_audio_received_at or utc_now()
+            ended_at = utc_now()
+
+            # Reset state for next segment before any awaits that could interleave
+            merged_transcript_text = ""
+            last_sent_live_text = ""
+            next_window_start_sample = buffer_start_sample + int16_buffer.size
+            trim_processed_audio()
+            silence_start_at = None
+            segment_started_at = None
+
+            if not final_text or stream_context is None:
+                return None
+
+            visibility = stream_context.scope if stream_context.scope == Visibility.PRIVATE else Visibility.PUBLIC
+            saved_segment = await save_ws_transcript_segment(
+                db,
+                session_name=session_name,
+                participant_id=participant_id,
+                visibility=visibility,
+                transcript_text=final_text,
+                started_at=seg_started_at,
+                ended_at=ended_at,
+                display_name=str(stream_context.start_message.get("displayName") or "").strip() or None,
+            )
+            if saved_segment:
+                transcript_segments.append(saved_segment)
+
+            segment_id = saved_segment.segment_id if saved_segment else f"silence-{segment_index}"
+            timestamp_ms = int(ended_at.timestamp() * 1000)
+            await send_ws_json_safe(websocket, {
+                "type": "transcript",
+                "text": final_text,
+                "participant_id": participant_id,
+                "segment_id": str(segment_id),
+                "scope": stream_context.scope.value,
+                "is_final": True,
+                "reason": "silence",
+                "persisted": None,
+                "timestamp_ms": timestamp_ms,
+            })
+            await broadcast_admin_transcript(
+                session_name,
+                participant_id=participant_id,
+                scope=stream_context.scope.value,
+                text=final_text,
+                is_final=True,
+                persisted=saved_segment is not None,
+                transcript_segment_id=str(segment_id),
+                reason="silence",
+            )
+            if stream_context.scope != Visibility.PRIVATE:
+                await broadcast_public_transcript_line(
+                    session_name,
+                    participant_id=participant_id,
+                    text=final_text,
+                    transcript_segment_id=str(segment_id),
+                )
+
+            segment_index += 1
+            return saved_segment
 
         try:
             first_message = await websocket.receive_text()
@@ -268,8 +421,7 @@ async def handle_audio_stream_websocket(
             return
         except Exception as exc:
             logger.warning("Invalid start message for audio stream: %s", exc)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1003)
+            await close_ws_safe(websocket, code=1003)
             return
 
         try:
@@ -305,13 +457,33 @@ async def handle_audio_stream_websocket(
                     if int16_array.size == 0:
                         continue
 
+                    if first_audio_received_at is None:
+                        first_audio_received_at = utc_now()
+
                     if int16_buffer.size == 0:
-                        buffered_chunk_start_at = utc_now()
+                        buffer_start_sample = total_samples_received
                         int16_buffer = int16_array
                     else:
                         int16_buffer = np.concatenate((int16_buffer, int16_array))
+                    total_samples_received += int16_array.size
 
-                    await flush_buffer(force=False)
+                    chunk_rms = float(np.sqrt(np.mean(int16_array.astype(np.float64) ** 2)))
+                    if chunk_rms > _SILENCE_ENERGY_THRESHOLD:
+                        silence_start_at = None
+                        if segment_started_at is None:
+                            segment_started_at = utc_now()
+                    elif silence_start_at is None:
+                        silence_start_at = utc_now()
+
+                    if (
+                        silence_start_at is not None
+                        and merged_transcript_text
+                        and (utc_now() - silence_start_at).total_seconds() >= _SILENCE_DURATION_SECONDS
+                    ):
+                        await finalize_silence_segment()
+                        continue
+
+                    await process_audio_buffer(force=False)
                     continue
 
                 raw_text = message.get("text")
@@ -329,7 +501,7 @@ async def handle_audio_stream_websocket(
 
                 if payload.get("type") == "stop":
                     stop_received = True
-                    await flush_buffer(force=True)
+                    saved_final_segment = await finalize_stream_transcript()
                     idea_blocks_payload: list[dict[str, Any]] = []
                     task_items_payload: list[dict[str, Any]] = []
                     if transcript_segments and stream_context.scope == Visibility.PRIVATE:
@@ -369,8 +541,9 @@ async def handle_audio_stream_websocket(
                             idea_blocks_payload = serialized_result["idea_blocks"]
                             task_items_payload = serialized_result["task_items"]
 
-                    last_segment_id = transcript_segments[-1].segment_id if transcript_segments else None
-                    last_text = transcript_segments[-1].text if transcript_segments else ""
+                    last_segment_id = saved_final_segment.segment_id if saved_final_segment else None
+                    last_text = saved_final_segment.text if saved_final_segment else merged_transcript_text.strip()
+                    final_persisted = saved_final_segment is not None
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -380,7 +553,7 @@ async def handle_audio_stream_websocket(
                             "scope": stream_context.scope.value,
                             "text": last_text,
                             "is_final": True,
-                            "persisted": stream_context.scope == Visibility.PRIVATE,
+                            "persisted": final_persisted,
                         },
                     )
                     if last_text:
@@ -390,14 +563,22 @@ async def handle_audio_stream_websocket(
                             scope=stream_context.scope.value,
                             text=last_text,
                             is_final=True,
-                            persisted=stream_context.scope == Visibility.PRIVATE,
+                            persisted=final_persisted,
                             transcript_segment_id=last_segment_id,
                         )
+                        if stream_context.scope != Visibility.PRIVATE:
+                            await broadcast_public_transcript_line(
+                                session_name,
+                                participant_id=participant_id,
+                                text=last_text,
+                                transcript_segment_id=last_segment_id,
+                            )
                     await send_ws_json_safe(
                         websocket,
                         {
                             "type": "idea_blocks_update",
                             "idea_blocks": idea_blocks_payload,
+                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"] if pipeline_result is not None else [],
                         },
                     )
                     await broadcast_admin_idea_blocks_update(
@@ -412,8 +593,7 @@ async def handle_audio_stream_websocket(
                             "task_items": task_items_payload,
                         },
                     )
-                    if websocket.client_state == WebSocketState.CONNECTED:
-                        await websocket.close()
+                    await close_ws_safe(websocket)
                     return
 
         except WebSocketDisconnect:
@@ -422,18 +602,17 @@ async def handle_audio_stream_websocket(
                 session_name,
                 participant_id,
             )
-            await flush_buffer(force=True)
+            await finalize_stream_transcript()
         except Exception as exc:
             logger.exception("Unhandled WebSocket audio stream error: %s", exc)
-            await flush_buffer(force=True)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+            await finalize_stream_transcript()
+            await close_ws_safe(websocket, code=1011)
         finally:
             mark_audio_disconnected(session_name, participant_id)
             await broadcast_presence_state(session_name)
-            if not stop_received and websocket.client_state == WebSocketState.CONNECTED:
+            if not stop_received:
                 # Keep connection open unless stop arrives; close only in error paths above.
-                await websocket.close()
+                await close_ws_safe(websocket)
 
 
 def _normalize_visibility(value: Any) -> Visibility:
@@ -452,6 +631,27 @@ def _timestamp_from_seconds(value: Any) -> datetime:
 FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 _pending_transcript_batch_texts: dict[tuple[str, str], list[str]] = defaultdict(list)
 _pending_transcript_batch_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
+_persisted_client_segments: dict[tuple[str, str, str, str], tuple[str, str]] = {}
+_MAX_PERSISTED_CLIENT_SEGMENTS = 10000
+
+
+def _client_segment_cache_key(
+    session_name: str,
+    participant_id: str,
+    visibility: Visibility,
+    client_segment_id: str,
+) -> tuple[str, str, str, str]:
+    return (session_name, participant_id, visibility.value, client_segment_id)
+
+
+def _remember_persisted_client_segment(
+    key: tuple[str, str, str, str],
+    segment_id: str,
+    text: str,
+) -> None:
+    _persisted_client_segments[key] = (segment_id, text)
+    while len(_persisted_client_segments) > _MAX_PERSISTED_CLIENT_SEGMENTS:
+        _persisted_client_segments.pop(next(iter(_persisted_client_segments)))
 
 
 async def handle_transcript_segments_websocket(
@@ -489,7 +689,7 @@ async def handle_transcript_segments_websocket(
                         participant_id,
                     )
                     await send_ws_json_safe(websocket, {"type": "transcript_segments_stopped"})
-                    await websocket.close()
+                    await close_ws_safe(websocket)
                     return
                 if message_type != "transcript_segment":
                     logger.info(
@@ -503,6 +703,8 @@ async def handle_transcript_segments_websocket(
                 text = str(payload.get("text") or "").strip()
                 reason = str(payload.get("reason") or "").strip().lower()
                 visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
+                retranscribed_final = payload.get("retranscribedFinal") is True
+                client_segment_id = str(payload.get("client_segment_id") or "").strip()
                 if not text:
                     logger.info(
                         "pipeline_ws_skip_empty_transcript session_name=%s participant_id=%s reason=%s",
@@ -530,39 +732,126 @@ async def handle_transcript_segments_websocket(
                     )
                     segment_id = None
                     is_final = reason in FINAL_TRANSCRIPT_REASONS
-                    if is_final:
-                        timestamp = _timestamp_from_seconds(payload.get("start"))
-                        saved_segment = await save_ws_transcript_segment(
-                            db,
-                            session_name=session_name,
-                            participant_id=participant_id,
-                            visibility=Visibility.PUBLIC,
-                            transcript_text=text,
-                            started_at=timestamp,
-                            ended_at=timestamp,
+                    cache_key = (
+                        _client_segment_cache_key(
+                            session_name,
+                            participant_id,
+                            Visibility.PUBLIC,
+                            client_segment_id,
                         )
-                        segment_id = saved_segment.segment_id if saved_segment else None
+                        if is_final and client_segment_id
+                        else None
+                    )
+                    cached_segment = _persisted_client_segments.get(cache_key) if cache_key else None
+                    if is_final:
+                        if cached_segment is not None:
+                            segment_id, text = cached_segment
+                            logger.info(
+                                "pipeline_ws_public_final_reused session_name=%s participant_id=%s client_segment_id=%s transcript_id=%s",
+                                session_name,
+                                participant_id,
+                                client_segment_id,
+                                segment_id,
+                            )
+                        else:
+                            timestamp = _timestamp_from_seconds(payload.get("start"))
+                            saved_segment = await save_ws_transcript_segment(
+                                db,
+                                session_name=session_name,
+                                participant_id=participant_id,
+                                visibility=Visibility.PUBLIC,
+                                transcript_text=text,
+                                started_at=timestamp,
+                                ended_at=timestamp,
+                                display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
+                            )
+                            segment_id = saved_segment.segment_id if saved_segment else None
+                            if cache_key and segment_id is not None:
+                                _remember_persisted_client_segment(cache_key, segment_id, text)
+                    if not is_final:
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "transcript",
+                                "participant_id": participant_id,
+                                "scope": visibility.value,
+                                "segment_id": None,
+                                "text": text,
+                                "is_final": False,
+                                "reason": reason,
+                                "persisted": False,
+                            },
+                        )
+                    if reason in FINAL_TRANSCRIPT_REASONS:
+                        if segment_id is None:
+                            await send_ws_json_safe(
+                                websocket,
+                                {
+                                    "type": "transcript_error",
+                                    "reason": "save_failed",
+                                },
+                            )
+                            continue
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "transcript_update",
+                                "transcript_segment_id": segment_id,
+                                "participant_id": participant_id,
+                                "scope": visibility.value,
+                                "text": text,
+                                "is_final": True,
+                                "reason": reason,
+                                "persisted": True,
+                            },
+                        )
+                    if reason in FINAL_TRANSCRIPT_REASONS:
+                        if cached_segment is None:
+                            await broadcast_public_transcript_line(
+                                session_name,
+                                participant_id=participant_id,
+                                text=text,
+                                transcript_segment_id=segment_id,
+                            )
+                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                        await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                    continue
+
+                cache_key = (
+                    _client_segment_cache_key(
+                        session_name,
+                        participant_id,
+                        visibility,
+                        client_segment_id,
+                    )
+                    if reason in FINAL_TRANSCRIPT_REASONS and client_segment_id
+                    else None
+                )
+                cached_segment = _persisted_client_segments.get(cache_key) if cache_key else None
+                if cached_segment is not None:
+                    cached_segment_id, cached_text = cached_segment
+                    logger.info(
+                        "pipeline_ws_private_final_reused session_name=%s participant_id=%s client_segment_id=%s transcript_id=%s",
+                        session_name,
+                        participant_id,
+                        client_segment_id,
+                        cached_segment_id,
+                    )
                     await send_ws_json_safe(
                         websocket,
                         {
-                            "type": "transcript",
+                            "type": "transcript_update",
+                            "transcript_segment_id": cached_segment_id,
                             "participant_id": participant_id,
-                            "segment_id": segment_id,
-                            "text": text,
-                            "is_final": is_final,
+                            "scope": visibility.value,
+                            "text": cached_text,
+                            "is_final": True,
                             "reason": reason,
-                            "persisted": segment_id is not None,
+                            "persisted": True,
                         },
                     )
-                    await broadcast_public_transcript_line(
-                        session_name,
-                        participant_id=participant_id,
-                        text=text,
-                        transcript_segment_id=segment_id,
-                    )
-                    if reason in FINAL_TRANSCRIPT_REASONS:
-                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
-                        await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                    await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
                 batch_texts: list[str] | None = None
@@ -593,14 +882,19 @@ async def handle_transcript_segments_websocket(
                         continue
 
                     if reason in FINAL_TRANSCRIPT_REASONS:
-                        _pending_transcript_batch_texts[batch_key].append(text)
-                        batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
-                        batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
+                        if retranscribed_final:
+                            batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                            batch_text = text
+                        else:
+                            _pending_transcript_batch_texts[batch_key].append(text)
+                            batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                            batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
                         logger.info(
-                            "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s batch_segments=%s batch_chars=%s",
+                            "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s retranscribed_final=%s batch_segments=%s batch_chars=%s",
                             session_name,
                             participant_id,
                             reason,
+                            retranscribed_final,
                             len(batch_texts),
                             len(batch_text),
                         )
@@ -622,6 +916,7 @@ async def handle_transcript_segments_websocket(
                     transcript_text=batch_text,
                     started_at=timestamp,
                     ended_at=timestamp,
+                    display_name=str(payload.get("displayName") or payload.get("display_name") or "").strip() or None,
                 )
 
                 if saved_segment is None:
@@ -642,6 +937,13 @@ async def handle_transcript_segments_websocket(
                     )
                     continue
 
+                if cache_key:
+                    _remember_persisted_client_segment(
+                        cache_key,
+                        saved_segment.segment_id,
+                        saved_segment.text,
+                    )
+
                 logger.info(
                     "pipeline_ws_batch_saved session_name=%s participant_id=%s transcript_id=%s chars=%s",
                     session_name,
@@ -654,6 +956,8 @@ async def handle_transcript_segments_websocket(
                     {
                         "type": "transcript_update",
                         "transcript_segment_id": saved_segment.segment_id,
+                        "participant_id": participant_id,
+                        "scope": visibility.value,
                         "text": saved_segment.text,
                         "is_final": True,
                         "reason": reason,
@@ -702,7 +1006,7 @@ async def handle_transcript_segments_websocket(
                 serialized_result = (
                     serialize_pipeline_result(pipeline_result)
                     if pipeline_result is not None
-                    else {"idea_blocks": [], "task_items": []}
+                    else {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                 )
                 logger.info(
                     "pipeline_ws_generation_done session_name=%s participant_id=%s idea_blocks=%s task_items=%s",
@@ -722,6 +1026,7 @@ async def handle_transcript_segments_websocket(
                     {
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
+                        "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
                     },
                 )
                 await broadcast_admin_idea_blocks_update(
@@ -750,10 +1055,19 @@ async def handle_transcript_segments_websocket(
                 participant_id,
             )
             return
+        except RuntimeError as exc:
+            if "WebSocket is not connected" in str(exc) or "Cannot call \"receive\"" in str(exc):
+                logger.info(
+                    "pipeline_ws_disconnected_runtime session_name=%s participant_id=%s error=%s",
+                    session_name,
+                    participant_id,
+                    exc,
+                )
+                return
+            raise
         except Exception as exc:
             logger.exception("pipeline_ws_unhandled_error session_name=%s participant_id=%s error=%s", session_name, participant_id, exc)
-            if websocket.client_state == WebSocketState.CONNECTED:
-                await websocket.close(code=1011)
+            await close_ws_safe(websocket, code=1011)
 
 
 def _participant_id_to_int(participant_id: str) -> int:

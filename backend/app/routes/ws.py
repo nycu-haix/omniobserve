@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, WebSocket
 from ..task_config.registry import DEFAULT_TASK_NAME
 
+from ..config import ENABLE_BUILTIN_AUDIO_STREAM
 from ..services.realtime import (
     handle_admin_websocket,
     handle_audio_websocket,
@@ -85,6 +86,15 @@ async def audio_stream_websocket(
     participant_id: str = Query(...),
     task_name: str = Query(DEFAULT_TASK_NAME),
 ) -> None:
+    if not ENABLE_BUILTIN_AUDIO_STREAM:
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "asr_error",
+            "error": "Audio streaming is served by the ASR gateway. Set VITE_AUDIO_WS_BASE_URL to the gateway route.",
+            "reason": "audio_gateway_required",
+        })
+        await websocket.close(code=1013, reason="audio_gateway_required")
+        return
     await handle_audio_stream_websocket(
         websocket,
         session_name=session_name,

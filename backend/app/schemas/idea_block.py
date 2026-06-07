@@ -89,6 +89,10 @@ class IdeaBlockResponse(BaseModel):
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
     is_deleted: bool
+    is_duplicate: bool = False
+    duplicate_of_id: int | None = None
+    duplicate_reason: str | None = None
+    duplicate_similarity: float | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -104,6 +108,10 @@ class IdeaBlockListResponse(BaseModel):
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
     is_deleted: bool
+    is_duplicate: bool = False
+    duplicate_of_id: int | None = None
+    duplicate_reason: str | None = None
+    duplicate_similarity: float | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -134,3 +142,4 @@ class IdeaBlockGenerationRequest(BaseModel):
 class IdeaBlockGenerationResponse(BaseModel):
     idea_blocks: list[IdeaBlockListResponse]
     task_items: list[TaskItemResponse | PosterIdeaBlockTaskItemResponse]
+    duplicate_idea_blocks: list[IdeaBlockListResponse] = Field(default_factory=list)

@@ -1,6 +1,6 @@
 # Audio Test: Public / Private Audio Agent
 
-測試會議語音擷取、VAD 切段與 ASR 轉錄流程
+測試會議語音擷取、WhisperLiveKit VAD/SimulStreaming 與 Breeze ASR 25 即時轉錄流程
 
 ## Docker Compose
 
@@ -14,7 +14,7 @@ docker compose up --build
 - private agent test: http://localhost:3000/private-agent-test/private_index_gateway.html
 - backend websocket: ws://localhost:8000/ws/audio
 
-第一次啟動會下載 Silero VAD / FunASR 模型，會需要比較久；模型 cache 會保存在 Docker volume `model-cache`。
+第一次啟動會載入 WhisperLiveKit 與掛載的 Breeze ASR 25 模型，會需要比較久；模型 cache 會保存在 Docker volume `model-cache`。
 
 terminal 1(backend)
 
