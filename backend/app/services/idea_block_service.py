@@ -57,7 +57,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
 
     idea_block_data = payload.model_dump()
     idea_block_data["embedding_vector"] = await _create_embedding_or_none(payload.summary)
-    task_item_ids = await build_task_item_ids_with_llm(payload.summary, session_name=payload.session_name)
+    task_item_ids, task_items_are_current = await _build_task_item_ids_for_create(payload)
     logger.info(
         "idea_block_create_task_item_ids session_name=%s user_id=%s task_item_ids=%s",
         payload.session_name,
@@ -68,6 +68,8 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         db,
         session_name=payload.session_name,
         user_id=payload.user_id,
+        title=payload.title,
+        summary=payload.summary,
         embedding_vector=idea_block_data["embedding_vector"],
         task_item_ids=task_item_ids,
     )
@@ -98,7 +100,10 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         task_item_ids=task_item_ids,
     )
     await db.commit()
-    _schedule_similarity_detection(idea_block.id)
+    if task_items_are_current:
+        _schedule_similarity_detection(idea_block.id)
+    else:
+        _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -283,6 +288,20 @@ async def _create_embedding_or_none(text: str) -> list[float] | None:
             exc.detail,
         )
         return None
+
+
+async def _build_task_item_ids_for_create(payload: IdeaBlockCreate) -> tuple[list[int], bool]:
+    try:
+        return await build_task_item_ids_with_llm(payload.summary, session_name=payload.session_name), True
+    except ApiError as exc:
+        logger.warning(
+            "idea_block_task_item_generation_deferred session_name=%s user_id=%s code=%s details=%s",
+            payload.session_name,
+            payload.user_id,
+            exc.error_code,
+            exc.details,
+        )
+        return [], False
 
 
 async def delete_scoped_idea_block(

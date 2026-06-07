@@ -182,6 +182,8 @@ async def generate_and_save_idea_blocks(
             db,
             session_name=session_name,
             user_id=user_id,
+            title=title,
+            summary=summary,
             embedding_vector=embedding_vector,
             task_item_ids=task_item_ids,
         )
