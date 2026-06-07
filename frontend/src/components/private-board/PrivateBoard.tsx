@@ -750,6 +750,7 @@ export function PrivateBoard({
 	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
 	const previousVisiblePhaseRef = useRef<SessionPhase>(visiblePhase);
 	const phaseTransitionCueBatchRef = useRef<PhaseTransitionCueBatch | null>(null);
+	const cuesRef = useRef<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -786,19 +787,29 @@ export function PrivateBoard({
 			return;
 		}
 
-		setCues(prev => [...prev.filter(cue => cue.kind !== "phase-transition-summary"), summaryCue]);
+		setCues(prev => {
+			const nextCues = [...prev.filter(cue => cue.kind !== "phase-transition-summary"), summaryCue];
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
 	}, [clearPhaseTransitionCueBatchTimer]);
 
-	const startPhaseTransitionCueBatch = useCallback(() => {
-		clearPhaseTransitionCueBatchTimer();
-		phaseTransitionCueBatchRef.current = {
-			cues: [],
-			timeoutId: window.setTimeout(() => flushPhaseTransitionCueBatch(), PHASE_TRANSITION_CUE_BATCH_MS)
-		};
-	}, [clearPhaseTransitionCueBatchTimer, flushPhaseTransitionCueBatch]);
+	const startPhaseTransitionCueBatch = useCallback(
+		(initialCues: SimilarityPairCueData[] = []) => {
+			clearPhaseTransitionCueBatchTimer();
+			phaseTransitionCueBatchRef.current = {
+				cues: initialCues,
+				timeoutId: window.setTimeout(() => flushPhaseTransitionCueBatch(), PHASE_TRANSITION_CUE_BATCH_MS)
+			};
+		},
+		[clearPhaseTransitionCueBatchTimer, flushPhaseTransitionCueBatch]
+	);
 
 	const clearCuesSoon = useCallback(() => {
-		window.setTimeout(() => setCues([]), 0);
+		window.setTimeout(() => {
+			cuesRef.current = [];
+			setCues([]);
+		}, 0);
 	}, []);
 
 	const syncPhaseTransitionCueBatch = useCallback(
@@ -808,8 +819,9 @@ export function PrivateBoard({
 			const isLeavingGroupPhase = isGroupPhase(previousPhase) && !isGroupPhase(nextPhase);
 
 			if (isEnteringGroupPhase && cueCondition === "experimental") {
+				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
 				clearCuesSoon();
-				startPhaseTransitionCueBatch();
+				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
 			}
 
 			if (isLeavingGroupPhase || cueCondition !== "experimental") {
@@ -1006,6 +1018,10 @@ export function PrivateBoard({
 	}, [publicChatMessages]);
 
 	useEffect(() => {
+		cuesRef.current = cues;
+	}, [cues]);
+
+	useEffect(() => {
 		return () => {
 			clearPhaseTransitionCueBatchTimer();
 			phaseTransitionCueBatchRef.current = null;
@@ -1056,7 +1072,10 @@ export function PrivateBoard({
 			const timer = window.setTimeout(() => {
 				const nextCondition = lastMessage.cue_condition ?? lastMessage.condition;
 				if (nextCondition) setCueCondition(nextCondition);
-				if (nextCondition === "control") setCues([]);
+				if (nextCondition === "control") {
+					cuesRef.current = [];
+					setCues([]);
+				}
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}
@@ -1130,7 +1149,9 @@ export function PrivateBoard({
 						phaseTransitionCueBatchRef.current.cues.push(lastMessage.payload);
 					}
 				} else {
-					setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id) ? prev : [...prev, lastMessage.payload]));
+					const nextCues = cuesRef.current.some(cue => cue.id === lastMessage.payload.id) ? cuesRef.current : [...cuesRef.current, lastMessage.payload];
+					cuesRef.current = nextCues;
+					setCues(nextCues);
 				}
 				setIdeaBlockRefreshKey(current => current + 1);
 				setIdeaBlocks(prev =>
@@ -1651,7 +1672,19 @@ export function PrivateBoard({
 			blockId: cue.blockId,
 			cueId: cue.id
 		});
-		setCues(prev => prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId || item.isSameReason !== false));
+		setCues(prev => {
+			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId || item.isSameReason !== false);
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
+	};
+
+	const dismissSimilarityCue = (cueId: string) => {
+		setCues(prev => {
+			const nextCues = prev.filter(cue => cue.id !== cueId);
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
 	};
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
@@ -1876,9 +1909,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && (
-				<SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} onShareReason={shareSimilarityReason} />
-			)}
+			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} />}
 		</>
 	);
 }
