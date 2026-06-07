@@ -5,7 +5,7 @@ import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSes
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
-import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, TranscriptLine as TranscriptLineType } from "../../types";
+import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, SimilarityPairCueData, SimilarityReasonSharedData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
@@ -36,6 +36,7 @@ type BoardMessage =
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityCueData }
 	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
+	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
@@ -181,6 +182,12 @@ const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
 const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
+const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
+
+interface PhaseTransitionCueBatch {
+	cues: SimilarityPairCueData[];
+	timeoutId: number | null;
+}
 
 function isNearScrollBottom(element: HTMLElement): boolean {
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
@@ -218,6 +225,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "new_transcript_line" ||
 		message.type === "similarity_cue" ||
 		message.type === "public_context_matches" ||
+		message.type === "similarity_reason_shared" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
@@ -409,7 +417,7 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 	};
 }
 
-function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityCueData | null {
+function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | null {
 	if (!block.hasCue || block.isDeleted) {
 		return null;
 	}
@@ -734,6 +742,7 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 								publicContextScore: nextBlock.publicContextScore ?? block.publicContextScore,
 								publicContextReason: nextBlock.publicContextReason ?? block.publicContextReason,
 								publicContextExpiresAtMs: Math.max(block.publicContextExpiresAtMs ?? 0, nextBlock.publicContextExpiresAtMs ?? 0) || undefined,
+								sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
 								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
 							}
 						: block
@@ -741,6 +750,15 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 			}, baseBlocks)
 		)
 	);
+}
+
+function mergeSharedReasons(left: IdeaBlock["sharedReasons"], right: IdeaBlock["sharedReasons"]): IdeaBlock["sharedReasons"] {
+	const merged = [...(left ?? []), ...(right ?? [])];
+	if (merged.length === 0) {
+		return undefined;
+	}
+
+	return Array.from(new Map(merged.map(reason => [reason.id, reason])).values());
 }
 
 function deduplicateIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -773,6 +791,26 @@ function normalizeIdeaBlockText(value: string): string {
 		.normalize("NFKC")
 		.toLocaleLowerCase()
 		.replace(/[\s\p{P}]/gu, "");
+}
+
+function createPhaseTransitionSummaryCue(cues: SimilarityPairCueData[]): SimilarityCueData | null {
+	if (cues.length === 0) {
+		return null;
+	}
+
+	const uniqueCues = Array.from(new Map(cues.map(cue => [cue.id, cue])).values());
+	const differentReasonCount = uniqueCues.filter(cue => cue.isSameReason === false).length;
+	const sameReasonCount = uniqueCues.length - differentReasonCount;
+	return {
+		kind: "phase-transition-summary",
+		id: `phase-transition-summary-${Date.now()}`,
+		sameReasonCount,
+		differentReasonCount
+	};
+}
+
+function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueData {
+	return cue.kind !== "phase-transition-summary";
 }
 
 function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
@@ -1015,6 +1053,9 @@ export function PrivateBoard({
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
+	const previousVisiblePhaseRef = useRef<SessionPhase>(visiblePhase);
+	const phaseTransitionCueBatchRef = useRef<PhaseTransitionCueBatch | null>(null);
+	const cuesRef = useRef<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1058,14 +1099,16 @@ export function PrivateBoard({
 			}
 
 			setCues(prev => {
-				const alreadyQueued = prev.some(item => item.id === cue.id || item.blockId === cue.blockId);
+				const alreadyQueued = prev.some(item => item.id === cue.id || (isSimilarityPairCue(item) && item.blockId === cue.blockId));
+				const nextCues = alreadyQueued ? prev : [...prev, cue];
 				console.info("[private-board] similarity cue fallback detected", {
 					blockId: cue.blockId,
 					isSameReason: cue.isSameReason,
 					alreadyQueued,
 					currentBlockExpanded: !!currentBlock?.expanded
 				});
-				return alreadyQueued ? prev : [...prev, cue];
+				cuesRef.current = nextCues;
+				return nextCues;
 			});
 		},
 		[cueCondition]
@@ -1082,6 +1125,77 @@ export function PrivateBoard({
 		});
 		previousIdeaBlockTopsRef.current = nextTops;
 	}, []);
+
+	const clearPhaseTransitionCueBatchTimer = useCallback(() => {
+		const batch = phaseTransitionCueBatchRef.current;
+		if (batch?.timeoutId != null) {
+			window.clearTimeout(batch.timeoutId);
+			batch.timeoutId = null;
+		}
+	}, []);
+
+	const flushPhaseTransitionCueBatch = useCallback(() => {
+		const batch = phaseTransitionCueBatchRef.current;
+		if (!batch) {
+			return;
+		}
+
+		clearPhaseTransitionCueBatchTimer();
+		phaseTransitionCueBatchRef.current = null;
+		const summaryCue = createPhaseTransitionSummaryCue(batch.cues);
+		if (!summaryCue) {
+			return;
+		}
+
+		setCues(prev => {
+			const nextCues = [...prev.filter(cue => cue.kind !== "phase-transition-summary"), summaryCue];
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
+	}, [clearPhaseTransitionCueBatchTimer]);
+
+	const startPhaseTransitionCueBatch = useCallback(
+		(initialCues: SimilarityPairCueData[] = []) => {
+			clearPhaseTransitionCueBatchTimer();
+			phaseTransitionCueBatchRef.current = {
+				cues: initialCues,
+				timeoutId: window.setTimeout(() => flushPhaseTransitionCueBatch(), PHASE_TRANSITION_CUE_BATCH_MS)
+			};
+		},
+		[clearPhaseTransitionCueBatchTimer, flushPhaseTransitionCueBatch]
+	);
+
+	const clearCuesSoon = useCallback(() => {
+		window.setTimeout(() => {
+			cuesRef.current = [];
+			setCues([]);
+		}, 0);
+	}, []);
+
+	const syncPhaseTransitionCueBatch = useCallback(
+		(nextPhase: SessionPhase) => {
+			const previousPhase = previousVisiblePhaseRef.current;
+			const isEnteringGroupPhase = !isGroupPhase(previousPhase) && isGroupPhase(nextPhase);
+			const isLeavingGroupPhase = isGroupPhase(previousPhase) && !isGroupPhase(nextPhase);
+
+			if (isEnteringGroupPhase && cueCondition === "experimental") {
+				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
+				clearCuesSoon();
+				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
+			}
+
+			if (isLeavingGroupPhase || cueCondition !== "experimental") {
+				clearPhaseTransitionCueBatchTimer();
+				phaseTransitionCueBatchRef.current = null;
+				if (cueCondition !== "experimental") {
+					clearCuesSoon();
+				}
+			}
+
+			previousVisiblePhaseRef.current = nextPhase;
+		},
+		[clearCuesSoon, clearPhaseTransitionCueBatchTimer, cueCondition, startPhaseTransitionCueBatch]
+	);
 
 	const selectBoardTab = useCallback((tab: BoardTab) => {
 		if (tab === "ideablock") {
@@ -1257,13 +1371,16 @@ export function PrivateBoard({
 					const previousBlock = previousBlocksById.get(block.id);
 					return !!previousBlock && !!block.hasCue && !previousBlock.hasCue;
 				});
+				const initiallyLoadedPrivatePhaseCuedBlocks = isGroupPhase(visiblePhase) ? [] : ideaBlocksFromDb.filter(block => block.hasCue && !previousBlocksById.has(block.id));
+				const cueBlocksToQueue = [...newlyCuedBlocks, ...initiallyLoadedPrivatePhaseCuedBlocks];
 				console.info("[private-board] similarity cue refresh check", {
 					sessionId,
 					participantId,
 					newlyCuedBlockIds: newlyCuedBlocks.map(block => block.id),
+					initiallyLoadedPrivatePhaseCuedBlockIds: initiallyLoadedPrivatePhaseCuedBlocks.map(block => block.id),
 					cuedBlockIds: ideaBlocksFromDb.filter(block => block.hasCue).map(block => block.id)
 				});
-				newlyCuedBlocks.forEach(queueSimilarityCueFromBlock);
+				cueBlocksToQueue.forEach(queueSimilarityCueFromBlock);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, ideaBlocksFromDb));
 				ideaBlocksFromDb.forEach(block => unreadIdsFromRefresh.delete(block.id));
 			} catch (error) {
@@ -1277,7 +1394,7 @@ export function PrivateBoard({
 		void loadIdeaBlocks();
 
 		return () => controller.abort();
-	}, [ideaBlockRefreshKey, participantId, queueSimilarityCueFromBlock, sessionId]);
+	}, [ideaBlockRefreshKey, participantId, queueSimilarityCueFromBlock, sessionId, visiblePhase]);
 
 	useEffect(() => {
 		ideaBlocksRef.current = ideaBlocks;
@@ -1313,13 +1430,31 @@ export function PrivateBoard({
 	}, [publicChatMessages]);
 
 	useEffect(() => {
+		cuesRef.current = cues;
+	}, [cues]);
+
+	useEffect(() => {
+		return () => {
+			clearPhaseTransitionCueBatchTimer();
+			phaseTransitionCueBatchRef.current = null;
+		};
+	}, [clearPhaseTransitionCueBatchTimer]);
+
+	useEffect(() => {
+		syncPhaseTransitionCueBatch(visiblePhase);
+	}, [syncPhaseTransitionCueBatch, visiblePhase]);
+
+	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
 			return;
 		}
 
 		if (lastMessage.type === "phase_changed") {
+			const nextPhase = normalizeSessionPhase(lastMessage.phase);
+			if (nextPhase) {
+				syncPhaseTransitionCueBatch(nextPhase);
+			}
 			const timer = window.setTimeout(() => {
-				const nextPhase = normalizeSessionPhase(lastMessage.phase);
 				if (nextPhase) setCurrentPhase(nextPhase);
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
@@ -1349,11 +1484,14 @@ export function PrivateBoard({
 			const timer = window.setTimeout(() => {
 				const nextCondition = lastMessage.cue_condition ?? lastMessage.condition;
 				if (nextCondition) setCueCondition(nextCondition);
-				if (nextCondition === "control") setCues([]);
+				if (nextCondition === "control") {
+					cuesRef.current = [];
+					setCues([]);
+				}
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}
-	}, [lastMessage]);
+	}, [lastMessage, syncPhaseTransitionCueBatch]);
 
 	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
@@ -1436,10 +1574,20 @@ export function PrivateBoard({
 					ideaBlockId: lastMessage.payload.blockId,
 					isSameReason: lastMessage.payload.isSameReason
 				});
-				setCues(prev => (prev.some(cue => cue.id === lastMessage.payload.id || cue.blockId === lastMessage.payload.blockId) ? prev : [...prev, lastMessage.payload]));
 				const cueTargetBlock = ideaBlocksRef.current.find(block => block.id === lastMessage.payload.blockId);
 				if (!cueTargetBlock?.expanded) {
 					unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.blockId);
+				}
+				if (phaseTransitionCueBatchRef.current) {
+					if (!phaseTransitionCueBatchRef.current.cues.some(cue => cue.id === lastMessage.payload.id)) {
+						phaseTransitionCueBatchRef.current.cues.push(lastMessage.payload);
+					}
+				} else {
+					const nextCues = cuesRef.current.some(cue => cue.id === lastMessage.payload.id || (isSimilarityPairCue(cue) && cue.blockId === lastMessage.payload.blockId))
+						? cuesRef.current
+						: [...cuesRef.current, lastMessage.payload];
+					cuesRef.current = nextCues;
+					setCues(nextCues);
 				}
 				setIdeaBlockRefreshKey(current => current + 1);
 				setIdeaBlocks(prev =>
@@ -1473,6 +1621,35 @@ export function PrivateBoard({
 					} else if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
 						setUnreadIdeaBlockCount(current => current + visibleMatchedIds.length);
 					}
+				}
+			}
+
+			if (lastMessage.type === "similarity_reason_shared") {
+				if (cueCondition !== "experimental") {
+					return;
+				}
+				const sharedReason = lastMessage.payload;
+				console.info("[private-board] similarity_reason_shared received", {
+					sessionId,
+					participantId,
+					blockId: sharedReason.blockId
+				});
+				setIdeaBlocks(prev =>
+					prev.map(block =>
+						block.id === sharedReason.blockId
+							? {
+									...block,
+									expanded: true,
+									hasCue: true,
+									similarityIsSameReason: false,
+									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
+								}
+							: block
+					)
+				);
+				setHighlightedBlockId(sharedReason.blockId);
+				if (visibleActiveTab !== "ideablock") {
+					setUnreadIdeaBlockCount(current => current + 1);
 				}
 			}
 
@@ -2216,6 +2393,33 @@ export function PrivateBoard({
 		}, 5000);
 	};
 
+	const shareSimilarityReason = (cue: SimilarityCueData) => {
+		if (cue.kind === "phase-transition-summary") {
+			return;
+		}
+		if (cue.isSameReason !== false) {
+			return;
+		}
+		onSendBoardMessage({
+			type: "share_similarity_reason",
+			blockId: cue.blockId,
+			cueId: cue.id
+		});
+		setCues(prev => {
+			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId || item.isSameReason !== false);
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
+	};
+
+	const dismissSimilarityCue = (cueId: string) => {
+		setCues(prev => {
+			const nextCues = prev.filter(cue => cue.id !== cueId);
+			cuesRef.current = nextCues;
+			return nextCues;
+		});
+	};
+
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
 	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
@@ -2451,7 +2655,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={cueId => setCues(prev => prev.filter(cue => cue.id !== cueId))} />}
+			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} />}
 		</>
 	);
 }
