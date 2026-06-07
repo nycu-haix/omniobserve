@@ -14,7 +14,7 @@ from .idea_block_deduplication import find_duplicate_idea_block
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
-from .task_item_generation import replace_task_items_for_idea_block
+from .task_item_generation import build_task_item_ids_with_llm, replace_task_items_for_idea_block, save_task_items_for_idea_block_ids
 
 
 async def create_idea_block_from_content(
@@ -29,7 +29,7 @@ async def create_idea_block_from_content(
     if not normalized_content:
         raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
 
-    generated_blocks = await build_idea_blocks_with_llm(normalized_content)
+    generated_blocks = await build_idea_blocks_with_llm(normalized_content, session_name=session_name)
     if not generated_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
 
@@ -57,6 +57,13 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
 
     idea_block_data = payload.model_dump()
     idea_block_data["embedding_vector"] = await _create_embedding_or_none(payload.summary)
+    task_item_ids, task_items_are_current = await _build_task_item_ids_for_create(payload)
+    logger.info(
+        "idea_block_create_task_item_ids session_name=%s user_id=%s task_item_ids=%s",
+        payload.session_name,
+        payload.user_id,
+        task_item_ids,
+    )
     duplicate_match = await find_duplicate_idea_block(
         db,
         session_name=payload.session_name,
@@ -64,6 +71,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         title=payload.title,
         summary=payload.summary,
         embedding_vector=idea_block_data["embedding_vector"],
+        task_item_ids=task_item_ids,
     )
     if duplicate_match is not None:
         logger.info(
@@ -77,12 +85,25 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
             duplicate_match.reason,
             duplicate_match.similarity,
         )
-        return await get_idea_block(duplicate_match.idea_block_id, db)
+        duplicate_block = await get_idea_block(duplicate_match.idea_block_id, db)
+        duplicate_block._duplicate_of_id = duplicate_match.idea_block_id
+        duplicate_block._duplicate_reason = duplicate_match.reason
+        duplicate_block._duplicate_similarity = duplicate_match.similarity
+        return duplicate_block
 
     idea_block = IdeaBlock(**idea_block_data, similarity_id=None)
     db.add(idea_block)
+    await db.flush()
+    await save_task_items_for_idea_block_ids(
+        db,
+        idea_block_id=idea_block.id,
+        task_item_ids=task_item_ids,
+    )
     await db.commit()
-    _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
+    if task_items_are_current:
+        _schedule_similarity_detection(idea_block.id)
+    else:
+        _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -262,11 +283,25 @@ async def _create_embedding_or_none(text: str) -> list[float] | None:
         if exc.status_code < 500:
             raise
         logger.warning(
-            "idea_block_embedding_skipped status=%s detail=%s",
+            "idea_block_embedding_skipped reason=embedding_provider_error status=%s detail=%s",
             exc.status_code,
             exc.detail,
         )
         return None
+
+
+async def _build_task_item_ids_for_create(payload: IdeaBlockCreate) -> tuple[list[int], bool]:
+    try:
+        return await build_task_item_ids_with_llm(payload.summary, session_name=payload.session_name), True
+    except ApiError as exc:
+        logger.warning(
+            "idea_block_task_item_generation_deferred session_name=%s user_id=%s code=%s details=%s",
+            payload.session_name,
+            payload.user_id,
+            exc.error_code,
+            exc.details,
+        )
+        return [], False
 
 
 async def delete_scoped_idea_block(
@@ -364,3 +399,20 @@ def _schedule_task_item_refresh_and_similarity_detection(idea_block_id: int, sum
 
     logger.info("similarity_detection_background_scheduled idea_block_ids=%s", [idea_block_id])
     asyncio.create_task(run_refresh_and_detection())
+
+
+def _schedule_similarity_detection(idea_block_id: int) -> None:
+    async def run_detection() -> None:
+        try:
+            async with SessionLocal() as detection_db:
+                await trigger_similarity_detection(idea_block_id, detection_db)
+        except Exception as exc:
+            logger.exception(
+                "similarity_detection_background_failed idea_block_id=%s error_type=%s error=%s",
+                idea_block_id,
+                exc.__class__.__name__,
+                exc,
+            )
+
+    logger.info("similarity_detection_background_scheduled idea_block_ids=%s", [idea_block_id])
+    asyncio.create_task(run_detection())

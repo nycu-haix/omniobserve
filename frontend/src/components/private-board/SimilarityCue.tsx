@@ -1,5 +1,5 @@
 import { Eye, Lightbulb, Send, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -8,6 +8,7 @@ interface SimilarityCueProps {
 	onJump: (blockId: string) => void;
 	onDismiss: (cueId: string) => void;
 	onShareReason: (cue: SimilarityCueData) => void;
+	topContent?: ReactNode;
 }
 
 const CUE_AUTO_DISMISS_MS = 5000;
@@ -21,7 +22,7 @@ function getCueAutoDismissMs(cue: SimilarityCueData): number {
 	return cue.isSameReason === false ? DIFFERENT_REASON_CUE_AUTO_DISMISS_MS : CUE_AUTO_DISMISS_MS;
 }
 
-export function SimilarityCue({ cues, onJump, onDismiss, onShareReason }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topContent }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -43,6 +44,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason }: Simila
 
 	return (
 		<div className="fixed bottom-20 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+			{topContent}
 			{cues.map(cue => {
 				if (cue.kind === "phase-transition-summary") {
 					return (

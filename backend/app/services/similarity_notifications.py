@@ -86,7 +86,7 @@ async def send_similarity_cue(
         },
     )
     logger.info(
-        "similarity_cue_notify session_name=%s participant_id=%s own_block_id=%s other_block_id=%s similarity_id=%s is_same_reason=%s update_sent=%s cue_sent=%s",
+        "similarity_cue_notify session_name=%s participant_id=%s own_block_id=%s other_block_id=%s similarity_id=%s is_same_reason=%s update_sent=%s cue_sent=%s board_participants=%s",
         session_name,
         participant_id,
         own_block.id,
@@ -95,4 +95,5 @@ async def send_similarity_cue(
         is_same_reason,
         update_sent,
         cue_sent,
+        board_manager.get_participants(session_name),
     )

@@ -12,6 +12,7 @@ export interface IdeaBlock {
 	similarityIsSameReason?: boolean | null;
 	sharedReasons?: SharedSimilarityReason[];
 	expanded?: boolean;
+	isUnread?: boolean;
 	isDeleted?: boolean;
 	isDraft?: boolean;
 	createdAtMs?: number;
@@ -35,6 +36,7 @@ export interface TranscriptLine {
 	userId?: string;
 	displayName?: string;
 	isOwn?: boolean;
+	isDraft?: boolean;
 	linkedBlockId?: string;
 }
 
