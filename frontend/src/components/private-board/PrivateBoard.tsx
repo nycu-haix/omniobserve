@@ -34,7 +34,7 @@ type BoardMessage =
 	| { type: "new_idea_block"; payload: IdeaBlock }
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
-	| { type: "similarity_cue"; payload: SimilarityCueData }
+	| { type: "similarity_cue"; payload: SimilarityPairCueData }
 	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
 	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
