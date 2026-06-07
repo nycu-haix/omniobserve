@@ -116,6 +116,7 @@ interface IdeaBlockNotice {
 interface AudioIdeaBlocksUpdateMessage {
 	type: "idea_blocks_update";
 	idea_blocks?: IdeaBlockResponse[];
+	duplicate_idea_blocks?: IdeaBlockResponse[];
 }
 
 interface AudioTranscriptBoundaryMessage {
@@ -777,7 +778,7 @@ function normalizeIdeaBlockText(value: string): string {
 function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
 	const similarity = typeof response.duplicate_similarity === "number" ? Math.round(response.duplicate_similarity * 100) : null;
 	const similarityText = similarity == null ? "" : `相似度 ${similarity}%`;
-	const blockTitle = block.summary.trim() || "既有想法";
+	const blockTitle = (block.aiSummary || block.summary).trim() || "既有想法";
 	const message = similarityText ? `已找到相似的既有想法：「${blockTitle}」(${similarityText})` : `已找到相似的既有想法：「${blockTitle}」`;
 
 	return {
@@ -837,6 +838,10 @@ function clearExpiredPublicContextMatches(blocks: IdeaBlock[], nowMs: number): I
 		};
 	});
 	return didChange ? nextBlocks : blocks;
+}
+
+function isDuplicateIdeaBlockResponse(response: IdeaBlockResponse): boolean {
+	return response.is_duplicate === true || response.duplicate_of_id != null;
 }
 
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
@@ -1087,6 +1092,18 @@ export function PrivateBoard({
 		}
 		setActiveTab(tab);
 	}, []);
+
+	const jumpToBlock = useCallback(
+		(blockId: string) => {
+			if (!canShowIdeaBlocks) {
+				return;
+			}
+			onRequestOpen?.();
+			selectBoardTab("ideablock");
+			setHighlightedBlockId(blockId);
+		},
+		[canShowIdeaBlocks, onRequestOpen, selectBoardTab]
+	);
 
 	const focusActiveComposer = useCallback(() => {
 		if (isIdeaBlocksTabActive) {
@@ -1677,6 +1694,8 @@ export function PrivateBoard({
 				return;
 			}
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
+			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
+			let shouldRefreshIdeaBlocks = false;
 
 			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
 				const previousBlocksById = new Map(ideaBlocksRef.current.map(block => [block.id, block]));
@@ -1709,13 +1728,32 @@ export function PrivateBoard({
 				window.setTimeout(() => {
 					setTranscriptLines(lines => linkTranscriptLinesToBlocks(lines, mergedBlocksSnapshot.length > 0 ? mergedBlocksSnapshot : updatedBlocks));
 				}, 0);
+				shouldRefreshIdeaBlocks = true;
 			}
 
-			setIdeaBlockRefreshKey(current => current + 1);
+			if (duplicateIdeaBlockResponses.length > 0) {
+				const duplicateBlocks = duplicateIdeaBlockResponses.map(item => ideaBlockResponseToBlock(item));
+				setIdeaBlocks(prev => {
+					const mergedBlocks = mergeIdeaBlocks(prev, duplicateBlocks);
+					ideaBlocksRef.current = mergedBlocks;
+					return mergedBlocks;
+				});
+				const firstDuplicateResponse = duplicateIdeaBlockResponses[0];
+				const firstDuplicateBlock = duplicateBlocks[0];
+				if (firstDuplicateResponse && firstDuplicateBlock) {
+					setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(firstDuplicateResponse, firstDuplicateBlock));
+					jumpToBlock(firstDuplicateBlock.id);
+				}
+				shouldRefreshIdeaBlocks = true;
+			}
+
+			if (shouldRefreshIdeaBlocks) {
+				setIdeaBlockRefreshKey(current => current + 1);
+			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, queueSimilarityCueFromBlock]);
+	}, [jumpToBlock, lastAudioMessage, queueSimilarityCueFromBlock]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -1753,15 +1791,6 @@ export function PrivateBoard({
 		const timer = window.setTimeout(() => setIdeaBlockNotice(null), 4000);
 		return () => window.clearTimeout(timer);
 	}, [ideaBlockNotice]);
-
-	const jumpToBlock = (blockId: string) => {
-		if (!canShowIdeaBlocks) {
-			return;
-		}
-		onRequestOpen?.();
-		selectBoardTab("ideablock");
-		setHighlightedBlockId(blockId);
-	};
 
 	const jumpToTranscript = (block: IdeaBlock) => {
 		const transcriptId = block.transcriptLineId ?? block.sourceTranscriptIds?.[0];
@@ -2024,7 +2053,25 @@ export function PrivateBoard({
 			throw new Error(await getResponseErrorMessage(response, "Failed to save idea block"));
 		}
 
-		const savedBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
+		const savedIdeaBlockResponse = (await response.json()) as IdeaBlockResponse;
+		const savedBlock = ideaBlockResponseToBlock(savedIdeaBlockResponse);
+		const isDuplicateBlock = isDuplicateIdeaBlockResponse(savedIdeaBlockResponse);
+		if (isDraft && isDuplicateBlock) {
+			setIdeaBlocks(prev => {
+				const nextBlocks = mergeIdeaBlocks(
+					prev.filter(block => block.id !== id),
+					[{ ...savedBlock, isUnread: true }],
+					{ markNewUnread: true }
+				);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
+			setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+			jumpToBlock(savedBlock.id);
+			setIdeaBlockRefreshKey(current => current + 1);
+			return;
+		}
+
 		setIdeaBlocks(prev => {
 			const nextBlocks = prev.map(block =>
 				block.id === id
@@ -2123,7 +2170,7 @@ export function PrivateBoard({
 
 			const savedIdeaBlockResponse = (await response.json()) as IdeaBlockResponse;
 			const savedBlock = ideaBlockResponseToBlock(savedIdeaBlockResponse);
-			const isDuplicateBlock = savedIdeaBlockResponse.is_duplicate || savedIdeaBlockResponse.duplicate_of_id != null;
+			const isDuplicateBlock = isDuplicateIdeaBlockResponse(savedIdeaBlockResponse);
 			const isNewActiveBlock = !savedBlock.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === savedBlock.id);
 			setIdeaBlocks(prev => {
 				const withoutGeneratingBlock = prev.filter(block => block.id !== generatingBlock.id);

@@ -574,6 +574,7 @@ async def handle_audio_stream_websocket(
                         {
                             "type": "idea_blocks_update",
                             "idea_blocks": idea_blocks_payload,
+                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"] if pipeline_result is not None else [],
                         },
                     )
                     await broadcast_admin_idea_blocks_update(
@@ -806,7 +807,7 @@ async def handle_transcript_segments_websocket(
                                 text=text,
                                 transcript_segment_id=segment_id,
                             )
-                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
+                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
                         await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
@@ -843,7 +844,7 @@ async def handle_transcript_segments_websocket(
                             "persisted": True,
                         },
                     )
-                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": []})
+                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
                     await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
@@ -998,7 +999,7 @@ async def handle_transcript_segments_websocket(
                 serialized_result = (
                     serialize_pipeline_result(pipeline_result)
                     if pipeline_result is not None
-                    else {"idea_blocks": [], "task_items": []}
+                    else {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                 )
                 logger.info(
                     "pipeline_ws_generation_done session_name=%s participant_id=%s idea_blocks=%s task_items=%s",
@@ -1018,6 +1019,7 @@ async def handle_transcript_segments_websocket(
                     {
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
+                        "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
                     },
                 )
                 await broadcast_admin_idea_blocks_update(
