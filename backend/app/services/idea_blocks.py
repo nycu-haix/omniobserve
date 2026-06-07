@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..clients import openai_client
-from ..config import IDEA_BLOCK_SYSTEM_PROMPT, OPENAI_MODEL, logger
+from ..config import IDEA_BLOCK_SYSTEM_PROMPT, IDEA_LLM_ENABLE_THINKING, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
 from ..task_config import get_llm_topic_description_for_session
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
+from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
 
 def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
@@ -83,6 +84,7 @@ async def build_idea_blocks_with_llm(transcript_text: str, *, session_name: str 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            extra_body={"enable_thinking": IDEA_LLM_ENABLE_THINKING},
         )
         raw_content = completion.choices[0].message.content or "{}"
         logger.info(
@@ -175,6 +177,7 @@ async def generate_and_save_idea_blocks(
         summary = block_data["summary"]
         title = _title_from_content(block_data["content"])
         embedding_vector = await create_text_embedding(summary)
+        task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name)
         duplicate_match = await find_duplicate_idea_block(
             db,
             session_name=session_name,
@@ -182,6 +185,7 @@ async def generate_and_save_idea_blocks(
             title=title,
             summary=summary,
             embedding_vector=embedding_vector,
+            task_item_ids=task_item_ids,
         )
         if duplicate_match is not None:
             logger.info(
@@ -208,6 +212,11 @@ async def generate_and_save_idea_blocks(
         )
         db.add(idea_block)
         await db.flush()
+        await save_task_items_for_idea_block_ids(
+            db,
+            idea_block_id=idea_block.id,
+            task_item_ids=task_item_ids,
+        )
         idea_blocks.append(idea_block)
 
     if not idea_blocks:

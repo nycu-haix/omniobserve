@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
@@ -16,7 +16,7 @@ from .idea_blocks import build_idea_blocks_with_llm
 from .idea_block_deduplication import find_duplicate_idea_block
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .similarity_detection import trigger_similarity_detection
-from .task_item_generation import generate_and_save_task_items_for_idea_block
+from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
 IdeaBlockUpdateCallback = Callable[[list[IdeaBlock]], Awaitable[None]]
 
@@ -25,6 +25,7 @@ IdeaBlockUpdateCallback = Callable[[list[IdeaBlock]], Awaitable[None]]
 class PipelineResult:
     idea_blocks: list[IdeaBlock]
     task_items: list[TaskItem]
+    duplicate_idea_blocks: list[IdeaBlock] = field(default_factory=list)
 
 
 _pending_transcripts: dict[tuple[str, int], list[StreamTranscript]] = defaultdict(list)
@@ -148,6 +149,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         )
         idea_blocks: list[IdeaBlock] = []
         task_items: list[TaskItem] = []
+        duplicate_idea_blocks: list[IdeaBlock] = []
 
         for block_index, block_data in enumerate(generated_blocks, start=1):
             summary = str(block_data["summary"]).strip()
@@ -176,6 +178,21 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 len(embedding_vector),
             )
             title = _title_from_content(content)
+            logger.info(
+                "pipeline_task_item_ids_start session_name=%s user_id=%s block_index=%s summary_chars=%s",
+                session_name,
+                user_id,
+                block_index,
+                len(summary),
+            )
+            task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name)
+            logger.info(
+                "pipeline_task_item_ids_done session_name=%s user_id=%s block_index=%s task_item_ids=%s",
+                session_name,
+                user_id,
+                block_index,
+                task_item_ids,
+            )
             duplicate_match = await find_duplicate_idea_block(
                 db,
                 session_name=session_name,
@@ -183,6 +200,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 title=title,
                 summary=summary,
                 embedding_vector=embedding_vector,
+                task_item_ids=task_item_ids,
             )
             if duplicate_match is not None:
                 logger.info(
@@ -197,6 +215,12 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     duplicate_match.reason,
                     duplicate_match.similarity,
                 )
+                duplicate_block = await get_idea_block_for_payload(duplicate_match.idea_block_id, db)
+                if duplicate_block is not None:
+                    duplicate_block._duplicate_of_id = duplicate_match.idea_block_id
+                    duplicate_block._duplicate_reason = duplicate_match.reason
+                    duplicate_block._duplicate_similarity = duplicate_match.similarity
+                    duplicate_idea_blocks.append(duplicate_block)
                 continue
 
             idea_block = IdeaBlock(
@@ -229,11 +253,10 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             )
             task_item_count_before = len(task_items)
             task_items.extend(
-                await generate_and_save_task_items_for_idea_block(
+                await save_task_items_for_idea_block_ids(
                     db,
                     idea_block_id=idea_block.id,
-                    session_name=session_name,
-                    text=summary,
+                    task_item_ids=task_item_ids,
                 )
             )
             logger.info(
@@ -272,7 +295,11 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             idea_block_ids=[idea_block.id for idea_block in idea_blocks],
             on_similarity_update=on_similarity_update,
         )
-        return PipelineResult(idea_blocks=idea_blocks, task_items=task_items)
+        return PipelineResult(
+            idea_blocks=idea_blocks,
+            task_items=task_items,
+            duplicate_idea_blocks=duplicate_idea_blocks,
+        )
     except Exception as exc:
         logger.exception(
             "pipeline_generation_failed session_name=%s user_id=%s error=%s",
@@ -345,20 +372,8 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
 
 def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str, Any]]]:
     return {
-        "idea_blocks": [
-            {
-                "id": block.id,
-                "title": block.title,
-                "summary": block.summary,
-                "transcript_id": block.transcript_id,
-                "transcript": block.transcript,
-                "similarity_id": block.similarity_id,
-                "similarity_is_same_reason": block.similarity_is_same_reason,
-                "is_deleted": block.is_deleted,
-            }
-            for block in result.idea_blocks
-        ],
         "idea_blocks": serialize_idea_blocks(result.idea_blocks),
+        "duplicate_idea_blocks": serialize_idea_blocks(result.duplicate_idea_blocks),
         "task_items": [
             {
                 "id": task_item.id,
@@ -382,6 +397,11 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
             "similarity_is_same_reason": block.similarity_is_same_reason,
+            "is_deleted": block.is_deleted,
+            "is_duplicate": block.is_duplicate,
+            "duplicate_of_id": block.duplicate_of_id,
+            "duplicate_reason": block.duplicate_reason,
+            "duplicate_similarity": block.duplicate_similarity,
         }
         for block in idea_blocks
     ]
