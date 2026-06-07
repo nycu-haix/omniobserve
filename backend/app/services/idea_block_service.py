@@ -339,7 +339,7 @@ async def _refresh_task_items_and_detect_similarity(
             db,
             idea_block_id=idea_block_id,
             text=summary,
-            task_name=idea_block.task_name,
+            session_name=idea_block.session_name,
         )
         await db.commit()
         logger.info(
