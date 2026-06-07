@@ -1282,16 +1282,26 @@ export function AdminPage() {
 							<h2 className="text-sm font-semibold">Phase Controls</h2>
 						</header>
 						<div className="grid gap-3">
-							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+							<div className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
 								<div className="min-w-0">
-									<div className="font-medium">{getSessionPhaseLabel(currentPhase, taskPhases)}</div>
+									<div className="break-words font-medium leading-5">{getSessionPhaseLabel(currentPhase, taskPhases)}</div>
 									<div className="text-xs text-muted-foreground">Current phase</div>
 								</div>
-								<Badge variant={isGroupPhase(currentPhase) ? "secondary" : "outline"}>{currentPhase}</Badge>
+								<Badge variant={isGroupPhase(currentPhase) ? "secondary" : "outline"} className="max-w-32 shrink-0 truncate" title={currentPhase}>
+									{currentPhase}
+								</Badge>
 							</div>
-							<div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+							<div className="flex min-w-0 flex-wrap gap-2">
 								{taskPhases.map(phase => (
-									<Button key={phase.id} type="button" variant={currentPhase === phase.id ? "default" : "outline"} onClick={() => switchPhase(phase.id)}>
+									<Button
+										key={phase.id}
+										type="button"
+										variant={currentPhase === phase.id ? "default" : "outline"}
+										className="h-auto min-h-9 min-w-0 flex-1 basis-32 whitespace-normal px-3 py-2 text-center leading-5"
+										title={phase.label}
+										aria-pressed={currentPhase === phase.id}
+										onClick={() => switchPhase(phase.id)}
+									>
 										{phase.label}
 									</Button>
 								))}
