@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import time
 from collections import defaultdict
@@ -7,11 +8,12 @@ from typing import Any
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
+from sqlalchemy import or_, select
 from starlette.websockets import WebSocketState
 
 from ..config import STREAM_CHUNK_SAMPLES, logger
 from ..db import SessionLocal
-from ..models import Visibility
+from ..models import IdeaBlock, Similarity, Visibility
 from ..schemas import ChatMessageCreate
 from ..task_config import (
     get_default_phase_for_session,
@@ -409,6 +411,171 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
     }
 
 
+async def _handle_similarity_reason_share(
+    session_id: str, participant_id: str, payload: dict[str, Any]
+) -> None:
+    if not is_similarity_cue_enabled(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {
+                "type": "similarity_reason_share_error",
+                "reason": "similarity cues are disabled",
+            },
+        )
+        logger.info(
+            "similarity_reason_share_suppressed session_id=%s participant_id=%s cue_condition=%s",
+            session_id,
+            participant_id,
+            session_cue_conditions[session_id],
+        )
+        return
+
+    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
+    participant_user_id = _normalize_int(participant_id, -1)
+    if block_id < 0 or participant_user_id < 0:
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {
+                "type": "similarity_reason_share_error",
+                "reason": "invalid idea block",
+            },
+        )
+        return
+
+    async with SessionLocal() as db:
+        own_block = await db.get(IdeaBlock, block_id)
+        if (
+            own_block is None
+            or own_block.is_deleted
+            or own_block.session_name != session_id
+            or own_block.user_id != participant_user_id
+        ):
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "similarity_reason_share_error",
+                    "reason": "similar idea block not found",
+                },
+            )
+            return
+
+        result = await db.execute(
+            select(Similarity).where(
+                or_(
+                    Similarity.idea_block_id_1 == own_block.id,
+                    Similarity.idea_block_id_2 == own_block.id,
+                ),
+                Similarity.is_same_reason.is_(False),
+            )
+        )
+        similarities = result.scalars().all()
+        targets: list[tuple[str, dict[str, Any], int, int]] = []
+        received_at_ms = _now_ms()
+        for similarity in similarities:
+            other_block_id = (
+                similarity.idea_block_id_2
+                if similarity.idea_block_id_1 == own_block.id
+                else similarity.idea_block_id_1
+            )
+            other_block = await db.get(IdeaBlock, other_block_id)
+            if (
+                other_block is None
+                or other_block.is_deleted
+                or other_block.session_name != session_id
+                or other_block.user_id == own_block.user_id
+            ):
+                continue
+
+            target_participant_id = str(other_block.user_id)
+            targets.append(
+                (
+                    target_participant_id,
+                    {
+                        "type": "similarity_reason_shared",
+                        "payload": {
+                            "id": _anonymous_shared_reason_id(
+                                session_id,
+                                similarity.id,
+                                other_block.id,
+                            ),
+                            "blockId": str(other_block.id),
+                            "title": own_block.title,
+                            "summary": own_block.summary,
+                            "receivedAtMs": received_at_ms,
+                        },
+                    },
+                    similarity.id,
+                    other_block.id,
+                )
+            )
+
+        if not targets:
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "similarity_reason_share_error",
+                    "reason": "different-reason recipient idea blocks not found",
+                },
+            )
+            return
+
+        own_block_id = own_block.id
+
+    delivery_results = [
+        (
+            target_participant_id,
+            similarity_id,
+            target_block_id,
+            await board_manager.send_to(session_id, target_participant_id, message),
+        )
+        for target_participant_id, message, similarity_id, target_block_id in targets
+    ]
+    delivered_count = sum(
+        1
+        for _, _, _, sent in delivery_results
+        if sent
+    )
+    await board_manager.send_to(
+        session_id,
+        participant_id,
+        {
+            "type": "similarity_reason_share_sent",
+            "payload": {
+                "blockId": str(own_block_id),
+                "recipientCount": len(delivery_results),
+                "deliveredCount": delivered_count,
+            },
+        },
+    )
+    logger.info(
+        "similarity_reason_shared session_id=%s from_participant_id=%s from_block_id=%s recipients=%s delivered_count=%s",
+        session_id,
+        participant_id,
+        own_block_id,
+        [
+            {
+                "target_participant_id": target_participant_id,
+                "target_block_id": target_block_id,
+                "similarity_id": similarity_id,
+                "delivered": sent,
+            }
+            for target_participant_id, similarity_id, target_block_id, sent in delivery_results
+        ],
+        delivered_count,
+    )
+
+
+def _anonymous_shared_reason_id(session_id: str, similarity_id: int, target_block_id: int) -> str:
+    digest = hashlib.sha256(
+        f"{session_id}:{similarity_id}:{target_block_id}".encode("utf-8")
+    ).hexdigest()
+    return f"shared-reason-{digest[:16]}"
+
+
 def _get_default_ranking_items(session_id: str) -> list[str]:
     return get_ranking_items_for_session(session_name=session_id)
 
@@ -603,6 +770,10 @@ async def handle_board_websocket(
                 await board_manager.send_to(
                     session_id, participant_id, {"type": "pong"}
                 )
+                continue
+
+            if message_type == "share_similarity_reason":
+                await _handle_similarity_reason_share(session_id, participant_id, payload)
                 continue
 
             if message_type == "ranking_move":

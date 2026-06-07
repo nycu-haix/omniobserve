@@ -249,10 +249,8 @@ async def create_or_update_similarity_pair(
         similarity.is_same_reason = is_same_reason
         action = "updated_existing_pair"
 
-    if idea_a.similarity_id is None:
-        idea_a.similarity_id = idea_b.id
-    if idea_b.similarity_id is None:
-        idea_b.similarity_id = idea_a.id
+    idea_a.similarity_id = idea_b.id
+    idea_b.similarity_id = idea_a.id
 
     await db.commit()
     await db.refresh(similarity)
