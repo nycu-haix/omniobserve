@@ -195,7 +195,25 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(idea_block, "No same-item candidates", db)
         return
 
-    cosine_candidates = await _find_cosine_candidates(idea_block, same_item_ids, db)
+    scored_cosine_candidates = await _score_cosine_candidates(idea_block, same_item_ids, db)
+    logger.info(
+        "similarity_detection_cosine_scored idea_block_id=%s candidates=%s threshold=%s",
+        idea_block.id,
+        [
+            {
+                "id": candidate.id,
+                "similarity": round(score, 4),
+                "passed": score > COSINE_SIMILARITY_THRESHOLD,
+            }
+            for candidate, score in scored_cosine_candidates
+        ],
+        COSINE_SIMILARITY_THRESHOLD,
+    )
+    cosine_candidates = [
+        (candidate, score)
+        for candidate, score in scored_cosine_candidates
+        if score > COSINE_SIMILARITY_THRESHOLD
+    ]
     logger.info(
         "similarity_detection_cosine_candidates idea_block_id=%s candidates=%s threshold=%s",
         idea_block.id,
@@ -341,7 +359,7 @@ async def _find_same_component_blocks(
     return list(result.scalars().all())
 
 
-async def _find_cosine_candidates(
+async def _score_cosine_candidates(
     idea_block: IdeaBlock,
     same_item_ids: list[int],
     db: AsyncSession,
@@ -353,7 +371,6 @@ async def _find_cosine_candidates(
         .where(
             IdeaBlock.id.in_(same_item_ids),
             IdeaBlock.embedding_vector.is_not(None),
-            distance < COSINE_DISTANCE_THRESHOLD,
         )
         .order_by(IdeaBlock.id.desc())
     )
