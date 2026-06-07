@@ -200,6 +200,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			}}
 		>
 			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
+			{shouldShowPublicContext && (
+				<span className="pointer-events-none absolute left-1 top-1 z-10 flex h-4 w-4 items-center justify-center text-primary" role="img" aria-label="公開討論相關" title="公開討論相關">
+					<GooglePushPinIcon className="h-3.5 w-3.5" />
+				</span>
+			)}
 			{isGenerating ? (
 				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			) : isDeleted ? (
@@ -265,11 +270,6 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
-							{shouldShowPublicContext && (
-								<Badge className="shrink-0 whitespace-nowrap border-primary/30 text-primary" variant="outline">
-									公開討論相關
-								</Badge>
-							)}
 							{shouldShowCue && similarityReasonTag && (
 								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
 									{similarityReasonTag.label}
@@ -392,5 +392,13 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				</div>
 			)}
 		</div>
+	);
+}
+
+function GooglePushPinIcon({ className }: { className?: string }) {
+	return (
+		<svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor">
+			<path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2Z" />
+		</svg>
 	);
 }
