@@ -466,7 +466,7 @@ async def _create_embedding_or_none(
 
 
 def _title_from_content(content: str) -> str:
-    value = content.strip()[:10]
+    value = content.strip()[:20]
     return value or "Idea"
 
 

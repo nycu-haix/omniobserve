@@ -31,7 +31,7 @@ class IdeaBlock(Base):
         nullable=False,
         server_default=func.now(),
     )
-    title: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(20), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     transcript_id: Mapped[int | None] = mapped_column(
         BigInteger,

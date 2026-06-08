@@ -2182,7 +2182,7 @@ export function PrivateBoard({
 
 		const isDraft = currentBlock ? !!currentBlock.isDraft : id.startsWith("draft-");
 		const derivedTitle = isDraft
-			? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea"
+			? normalizedContent.slice(0, 20) || values.summary.trim() || "Idea"
 			: values.updateTitle
 				? values.summary.trim() || currentBlock?.summary || "Idea"
 				: currentBlock?.summary || values.summary.trim() || "Idea";
@@ -2310,7 +2310,7 @@ export function PrivateBoard({
 		});
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
-				const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
+				const derivedTitle = normalizedContent.slice(0, 20) || "Idea";
 				const newBlock: IdeaBlock = {
 					...createDraftIdeaBlock(),
 					id: `manual-${Date.now()}`,

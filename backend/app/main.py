@@ -161,6 +161,18 @@ async def startup() -> None:
                             ALTER TABLE idea_blocks ADD COLUMN task_name varchar(64) NOT NULL DEFAULT 'lost-at-sea';
                         END IF;
 
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'idea_blocks'
+                              AND column_name = 'title'
+                              AND character_maximum_length IS NOT NULL
+                              AND character_maximum_length < 20
+                        ) THEN
+                            ALTER TABLE idea_blocks ALTER COLUMN title TYPE varchar(20);
+                        END IF;
+
                         SELECT data_type
                         INTO similarity_id_type
                         FROM information_schema.columns

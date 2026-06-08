@@ -38,7 +38,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const aiSummaryChanged = draftAiSummary.trim() !== savedAiSummary.trim();
 	const canSaveAiSummary = draftAiSummary.trim().length > 0 && aiSummaryChanged && !isSaving && !isDeleted;
 	const titleChanged = draftTitle.trim() !== savedTitle.trim();
-	const titleTooLong = draftTitle.trim().length > 10;
+	const titleTooLong = draftTitle.trim().length > 20;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
@@ -127,7 +127,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const saveDraft = async () => {
 		const nextAiSummary = draftAiSummary.trim();
-		const nextSummary = nextAiSummary.slice(0, 10) || "Idea";
+		const nextSummary = nextAiSummary.slice(0, 20) || "Idea";
 		if (!nextAiSummary || isSaving || isDeleted) {
 			return;
 		}
@@ -151,7 +151,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const saveTitle = async () => {
 		const nextTitle = draftTitle.trim();
-		if (!nextTitle || nextTitle.length > 10 || isSaving || isDeleted) {
+		if (!nextTitle || nextTitle.length > 20 || isSaving || isDeleted) {
 			return;
 		}
 
@@ -337,7 +337,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				row
 			)}
 
-			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>}
+			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
 
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
