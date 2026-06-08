@@ -27,6 +27,7 @@ export interface Phase1BuilderOption {
 	label_en?: string;
 	description_zh?: string;
 	template_zh?: string;
+	allowed_action_ids?: string[];
 }
 
 export interface Phase1BuilderConfig {
