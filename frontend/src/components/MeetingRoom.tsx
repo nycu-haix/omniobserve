@@ -169,6 +169,57 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 	);
 }
 
+function withLocalSpeakingParticipant(snapshot: JitsiAudioSnapshot, displayName: string, isLocalSpeaking: boolean): JitsiAudioSnapshot {
+	if (!isLocalSpeaking) {
+		return snapshot;
+	}
+
+	let localParticipantId = "local-speaking";
+	let hasLocalParticipant = false;
+	const participants = snapshot.participants.map(participant => {
+		const isLocalParticipant = participant.isLocal || participant.displayName === displayName;
+		if (!isLocalParticipant) {
+			return {
+				...participant,
+				isDominant: false
+			};
+		}
+
+		hasLocalParticipant = true;
+		localParticipantId = participant.id;
+		return {
+			...participant,
+			displayName,
+			isMuted: false,
+			isLocal: true,
+			isDominant: true
+		};
+	});
+
+	if (!hasLocalParticipant) {
+		participants.push({
+			id: localParticipantId,
+			displayName,
+			isMuted: false,
+			isLocal: true,
+			isDominant: true
+		});
+	}
+
+	participants.sort((first, second) => {
+		if (first.isDominant !== second.isDominant) return first.isDominant ? -1 : 1;
+		if (first.isMuted !== second.isMuted) return first.isMuted ? 1 : -1;
+		if (first.isLocal !== second.isLocal) return first.isLocal ? -1 : 1;
+		return first.displayName.localeCompare(second.displayName);
+	});
+
+	return {
+		participants,
+		dominantSpeakerId: localParticipantId,
+		connected: true
+	};
+}
+
 function taskItemImageSrc(itemId: string): string {
 	return `/task-item-images/${itemId}.jpg`;
 }
@@ -1041,7 +1092,7 @@ export default function MeetingRoom() {
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
-	const { startAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
+	const { startAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
@@ -1058,6 +1109,10 @@ export default function MeetingRoom() {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
 	} as CSSProperties;
+	const displayedJitsiAudioSnapshot = useMemo(
+		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
+		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
+	);
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1686,7 +1741,7 @@ export default function MeetingRoom() {
 						>
 							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
 						</Button>
-						<JitsiAudioIndicator snapshot={jitsiAudioSnapshot} />
+						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
 						<Button
