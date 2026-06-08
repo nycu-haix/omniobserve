@@ -85,7 +85,7 @@ async def warm_up_embedding_model() -> None:
             OLLAMA_BASE_URL,
             OLLAMA_EMBED_MODEL,
         )
-        embedding = await create_text_embedding("warmup")
+        embedding = await create_text_embedding("warmup", retry_attempts=1)
         logger.info(
             "embedding_warmup_done provider=ollama url=%s model=%s dimensions=%s",
             OLLAMA_BASE_URL,
