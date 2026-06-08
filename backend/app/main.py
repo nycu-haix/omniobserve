@@ -16,6 +16,7 @@ OPENAPI_TAGS = [
     {"name": "Similarities", "description": "Manage similarity pairs between idea blocks."},
     {"name": "Private Phase Task Items", "description": "Create and prioritize user-authored private phase task items."},
     {"name": "Task Items", "description": "Map idea blocks to external task item ids."},
+    {"name": "Poster Task Items", "description": "CRUD operations for enhance-the-poster private task items."},
     {"name": "Idea Block To Transcript", "description": "Map idea blocks to one or more transcripts."},
     {"name": "Chat Messages", "description": "Public text chat messages for a session."},
     {"name": "Ranking Moves", "description": "Read ranking move history for a session."},
@@ -140,6 +141,16 @@ async def startup() -> None:
                             ALTER TABLE idea_blocks ADD COLUMN is_deleted boolean NOT NULL DEFAULT false;
                         END IF;
 
+                        IF NOT EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'idea_blocks'
+                              AND column_name = 'task_name'
+                        ) THEN
+                            ALTER TABLE idea_blocks ADD COLUMN task_name varchar(64) NOT NULL DEFAULT 'lost-at-sea';
+                        END IF;
+
                         SELECT data_type
                         INTO similarity_id_type
                         FROM information_schema.columns
@@ -201,6 +212,8 @@ async def startup() -> None:
         await conn.execute(sql_text("DROP INDEX IF EXISTS idx_transcript_session_id"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_session_name ON transcript(session_name)"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_visibility ON transcript(visibility)"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_idea_blocks_task_name ON idea_blocks(task_name)"))
+        await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_idea_blocks_session_task ON idea_blocks(session_name, task_name)"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_1 ON similarities(idea_block_id_1)"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_similarities_idea_block_id_2 ON similarities(idea_block_id_2)"))
         await conn.execute(

@@ -33,6 +33,7 @@ interface BoardStateMessage extends RealtimeMessage {
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
 	private_rankings?: Record<string, RankingSnapshot>;
+	ranking_items?: TaskConfigItem[] | null;
 }
 
 interface RankingSnapshot {
@@ -45,6 +46,7 @@ interface AdminRankingStateMessage extends RealtimeMessage {
 	revision: number;
 	public_ranking: RankingSnapshot;
 	private_rankings: Record<string, RankingSnapshot>;
+	ranking_items?: TaskConfigItem[] | null;
 }
 
 interface TranscriptRecord {
@@ -262,6 +264,10 @@ function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 		Array.isArray(value.items) &&
 		value.items.every(item => typeof item === "string")
 	);
+}
+
+function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
+	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {
@@ -779,15 +785,24 @@ export function AdminPage() {
 
 		if (isBoardStateMessage(message)) {
 			setBoardState(message);
+			if (isTaskConfigItemList(message.ranking_items)) {
+				setTaskItems(message.ranking_items);
+			}
 		}
 
 		const nestedAdminRankingState = readNestedAdminRankingState(message);
 		if (nestedAdminRankingState) {
 			setAdminRankingState(nestedAdminRankingState);
+			if (isTaskConfigItemList(nestedAdminRankingState.ranking_items)) {
+				setTaskItems(nestedAdminRankingState.ranking_items);
+			}
 		}
 
 		if (isAdminRankingStateMessage(message)) {
 			setAdminRankingState(message);
+			if (isTaskConfigItemList(message.ranking_items)) {
+				setTaskItems(message.ranking_items);
+			}
 		}
 
 		if (message.type === "ranking_state") {

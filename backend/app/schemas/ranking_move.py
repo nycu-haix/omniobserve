@@ -8,6 +8,8 @@ class RankingMoveResponse(BaseModel):
     session_name: str
     participant_id: str
     scope: str
+    phase: str
+    move_type: str
     item_id: str
     from_index: int | None = None
     to_index: int

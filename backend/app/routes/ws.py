@@ -83,6 +83,7 @@ async def audio_stream_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
+    task_name: str | None = Query(None),
 ) -> None:
     if not ENABLE_BUILTIN_AUDIO_STREAM:
         await websocket.accept()
@@ -97,6 +98,7 @@ async def audio_stream_websocket(
         websocket,
         session_name=session_name,
         participant_id=participant_id,
+        task_name=task_name,
     )
 
 
@@ -105,9 +107,11 @@ async def transcript_segments_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
+    task_name: str | None = Query(None),
 ) -> None:
     await handle_transcript_segments_websocket(
         websocket,
         session_name=session_name,
         participant_id=participant_id,
+        task_name=task_name,
     )

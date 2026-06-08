@@ -62,6 +62,10 @@ interface RankingSnapshot {
 	items: string[];
 }
 
+function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
+	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
+}
+
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
 const MIN_PRIVATE_BOARD_WIDTH = 520;
@@ -384,6 +388,7 @@ function isBoardStateMessage(message: object | null): message is {
 	ranking?: { items: string[] };
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
+	ranking_items?: TaskConfigItem[] | null;
 	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
@@ -681,7 +686,7 @@ function TaskWorkspace({
 		return (
 			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
 				<div className="grid min-h-0 flex-1 gap-3 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
-					{referenceImageSrc && <img className="max-h-[60vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
+					{referenceImageSrc && <img className="max-h-[80vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
 					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
 				</div>
 			</section>
@@ -1353,6 +1358,28 @@ export default function MeetingRoom() {
 
 			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
 			const privateRanking = lastMessage.private_ranking;
+			if (isTaskConfigItemList(lastMessage.ranking_items)) {
+				const nextTaskItems = lastMessage.ranking_items;
+				const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
+				const nextDefaultItemIds = nextTaskItems.map(item => item.id);
+				const rankingItemsTimer = window.setTimeout(() => {
+					setTaskItems(nextTaskItems);
+					if (publicRanking) {
+						setPublicRankingRevision(publicRanking.revision);
+						setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+					if (privateRanking) {
+						setPrivateRankingRevision(privateRanking.revision);
+						setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+				}, 0);
+				return () => {
+					if (phaseTimer !== null) {
+						window.clearTimeout(phaseTimer);
+					}
+					window.clearTimeout(rankingItemsTimer);
+				};
+			}
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
 			if (publicRanking) {
 				rankings.push(["public", publicRanking]);

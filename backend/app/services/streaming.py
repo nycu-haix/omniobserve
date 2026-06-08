@@ -12,6 +12,8 @@ from ..config import STREAM_MIN_FINAL_SECONDS, STREAM_STEP_SECONDS, STREAM_WINDO
 from ..db import SessionLocal
 from ..models import Visibility
 from ..schemas import StreamContext, StreamTranscript
+from ..task_config import resolve_task_id
+from ..task_config.registry import normalize_task_name
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .participant_status import mark_audio_disconnected, update_audio_status
@@ -22,6 +24,12 @@ from .transcripts import save_ws_transcript_segment
 LIVE_TRANSCRIPT_REASON = "sliding_window"
 _SILENCE_ENERGY_THRESHOLD = 300.0  # int16 RMS (0-32768 scale)
 _SILENCE_DURATION_SECONDS = 2.0
+
+
+def _resolve_stream_task_name(session_name: str, task_name: str | None) -> str:
+    if task_name is not None:
+        return normalize_task_name(task_name)
+    return resolve_task_id(session_name=session_name)
 
 
 def _bounded_stream_seconds(value: float, *, default: float, minimum: float) -> float:
@@ -178,7 +186,9 @@ async def handle_audio_stream_websocket(
     *,
     session_name: str,
     participant_id: str,
+    task_name: str | None = None,
 ) -> None:
+    task_name = _resolve_stream_task_name(session_name, task_name)
     await websocket.accept()
 
     stream_context: StreamContext | None = None
@@ -510,6 +520,7 @@ async def handle_audio_stream_websocket(
                                 transcript=None,
                                 is_final=True,
                                 visibility=stream_context.scope,
+                                task_name=task_name,
                                 on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
                                     websocket,
                                     session_name=session_name,
@@ -655,7 +666,9 @@ async def handle_transcript_segments_websocket(
     *,
     session_name: str,
     participant_id: str,
+    task_name: str | None = None,
 ) -> None:
+    task_name = _resolve_stream_task_name(session_name, task_name)
     await websocket.accept()
     logger.info(
         "pipeline_ws_connected session_name=%s participant_id=%s",
@@ -973,6 +986,7 @@ async def handle_transcript_segments_websocket(
                         transcript=saved_segment,
                         is_final=True,
                         visibility=visibility,
+                        task_name=task_name,
                         on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
                             websocket,
                             session_name=session_name,

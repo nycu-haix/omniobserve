@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, false, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -10,16 +10,22 @@ from .visibility import Visibility
 
 if TYPE_CHECKING:
     from .idea_block_to_transcript import IdeaBlockToTranscript
+    from .poster_idea_block_task_item import PosterIdeaBlockTaskItem
     from .task_item import TaskItem
     from .transcript import Transcript
 
 
 class IdeaBlock(Base):
     __tablename__ = "idea_blocks"
+    __table_args__ = (
+        Index("idx_idea_blocks_task_name", "task_name"),
+        Index("idx_idea_blocks_session_task", "session_name", "task_name"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     session_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    task_name: Mapped[str] = mapped_column(String(64), nullable=False, server_default="lost-at-sea", default="lost-at-sea")
     time_stamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -38,6 +44,10 @@ class IdeaBlock(Base):
 
     main_transcript: Mapped["Transcript | None"] = relationship(back_populates="idea_blocks")
     task_items: Mapped[list["TaskItem"]] = relationship(
+        back_populates="idea_block",
+        cascade="all, delete-orphan",
+    )
+    poster_task_items: Mapped[list["PosterIdeaBlockTaskItem"]] = relationship(
         back_populates="idea_block",
         cascade="all, delete-orphan",
     )

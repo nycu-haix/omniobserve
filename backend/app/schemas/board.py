@@ -32,6 +32,7 @@ class IdeaBlockGenerateRequest(BaseModel):
 class GeneratedIdeaBlockResponse(BaseModel):
     id: int
     session_name: str
+    task_name: str = "lost-at-sea"
     participant_id: str
     visibility: Literal["public", "private"]
     content: str
@@ -131,6 +132,7 @@ class Phase1BuilderOptionResponse(BaseModel):
     label_en: str | None = None
     description_zh: str | None = None
     template_zh: str | None = None
+    allowed_action_ids: list[str] | None = None
 
 
 class Phase1BuilderResponse(BaseModel):

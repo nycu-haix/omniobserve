@@ -66,6 +66,9 @@ def _resolve_component_action(
     action = actions.get(action_id.strip())
     if action is None:
         raise HTTPException(status_code=422, detail="Unknown action item")
+    allowed_action_ids = component.get("allowed_action_ids")
+    if allowed_action_ids is not None and action_id.strip() not in {str(item) for item in allowed_action_ids}:
+        raise HTTPException(status_code=422, detail="Action item is not available for this poster component")
     return resolved_task_id, component, action
 
 

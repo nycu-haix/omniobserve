@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -26,8 +26,16 @@ from ..services.transcript_pipeline import (
     generate_idea_blocks_with_task_items_from_transcript_ids,
     serialize_pipeline_result,
 )
+from ..task_config import resolve_task_id
+from ..task_config.registry import normalize_task_name
 
 router = APIRouter(tags=["Idea Blocks"])
+
+
+def _resolve_request_task_name(session_name: str, task_name: str | None) -> str:
+    if task_name is not None:
+        return normalize_task_name(task_name)
+    return resolve_task_id(session_name=session_name)
 
 
 @router.get(
@@ -65,8 +73,10 @@ async def post_idea_block_generation(
     session_name: str,
     user_id: int,
     payload: IdeaBlockGenerationRequest,
+    task_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockGenerationResponse:
+    task_name = _resolve_request_task_name(session_name, task_name)
     if payload.transcript_ids is not None:
         result = await generate_idea_blocks_with_task_items_from_transcript_ids(
             db,
@@ -74,6 +84,7 @@ async def post_idea_block_generation(
             user_id=user_id,
             visibility=payload.visibility,
             transcript_ids=payload.transcript_ids,
+            task_name=task_name,
         )
     elif payload.transcript_text and payload.transcript_text.strip():
         result = await generate_idea_blocks_with_task_items_from_text(
@@ -82,6 +93,7 @@ async def post_idea_block_generation(
             user_id=user_id,
             visibility=payload.visibility,
             transcript_text=payload.transcript_text,
+            task_name=task_name,
         )
     else:
         raise ApiError(
@@ -103,12 +115,15 @@ async def post_idea_block(
     session_name: str,
     user_id: int,
     payload: IdeaBlockCreateRequest,
+    task_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockResponse:
+    task_name = _resolve_request_task_name(session_name, task_name)
     if payload.content and payload.content.strip():
         return await create_idea_block_from_content(
             session_name=session_name,
             user_id=user_id,
+            task_name=task_name,
             content=payload.content,
             transcript_id=payload.transcript_id,
             db=db,
@@ -120,6 +135,7 @@ async def post_idea_block(
     scoped_payload = IdeaBlockCreate(
         session_name=session_name,
         user_id=user_id,
+        task_name=task_name,
         title=payload.title,
         summary=payload.summary,
         transcript_id=payload.transcript_id,
