@@ -16,62 +16,113 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+
+    if "private_phase_task_items" not in tables:
+        op.create_table(
+            "private_phase_task_items",
+            sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+            sa.Column("session_name", sa.String(length=255), nullable=False),
+            sa.Column("user_id", sa.BigInteger(), nullable=False),
+            sa.Column("task_id", sa.String(length=80), nullable=False),
+            sa.Column("component_id", sa.String(length=80), nullable=False),
+            sa.Column("component_label", sa.String(length=120), nullable=False),
+            sa.Column("action_id", sa.String(length=80), nullable=False),
+            sa.Column("action_label", sa.String(length=120), nullable=False),
+            sa.Column("detail", sa.Text(), nullable=False),
+            sa.Column("statement", sa.Text(), nullable=False),
+            sa.Column("priority", sa.Integer(), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index("ix_private_phase_task_items_session_name", "private_phase_task_items", ["session_name"])
+        op.create_index("ix_private_phase_task_items_user_id", "private_phase_task_items", ["user_id"])
+        op.create_index("ix_private_phase_task_items_task_id", "private_phase_task_items", ["task_id"])
+        op.create_index("ix_private_phase_task_items_priority", "private_phase_task_items", ["priority"])
+    else:
+        op.execute("CREATE INDEX IF NOT EXISTS ix_private_phase_task_items_session_name ON private_phase_task_items (session_name)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_private_phase_task_items_user_id ON private_phase_task_items (user_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_private_phase_task_items_task_id ON private_phase_task_items (task_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_private_phase_task_items_priority ON private_phase_task_items (priority)")
+
     op.execute("DROP TABLE IF EXISTS poster_task_items")
 
-    op.create_table(
-        "phase_task_item_snapshots",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("session_name", sa.String(length=255), nullable=False),
-        sa.Column("task_id", sa.String(length=80), nullable=False),
-        sa.Column("from_phase", sa.String(length=80), nullable=False),
-        sa.Column("to_phase", sa.String(length=80), nullable=False),
-        sa.Column("shuffle_seed", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("session_name", "task_id", "to_phase", name="uq_phase_task_item_snapshots_session_task_phase"),
-    )
-    op.create_index("ix_phase_task_item_snapshots_session_name", "phase_task_item_snapshots", ["session_name"])
-    op.create_index("ix_phase_task_item_snapshots_task_id", "phase_task_item_snapshots", ["task_id"])
-    op.create_index("ix_phase_task_item_snapshots_to_phase", "phase_task_item_snapshots", ["to_phase"])
-    op.create_index(
-        "idx_phase_task_item_snapshots_session_task",
-        "phase_task_item_snapshots",
-        ["session_name", "task_id"],
-    )
+    if "phase_task_item_snapshots" not in tables:
+        op.create_table(
+            "phase_task_item_snapshots",
+            sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+            sa.Column("session_name", sa.String(length=255), nullable=False),
+            sa.Column("task_id", sa.String(length=80), nullable=False),
+            sa.Column("from_phase", sa.String(length=80), nullable=False),
+            sa.Column("to_phase", sa.String(length=80), nullable=False),
+            sa.Column("shuffle_seed", sa.String(length=255), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("session_name", "task_id", "to_phase", name="uq_phase_task_item_snapshots_session_task_phase"),
+        )
+        op.create_index("ix_phase_task_item_snapshots_session_name", "phase_task_item_snapshots", ["session_name"])
+        op.create_index("ix_phase_task_item_snapshots_task_id", "phase_task_item_snapshots", ["task_id"])
+        op.create_index("ix_phase_task_item_snapshots_to_phase", "phase_task_item_snapshots", ["to_phase"])
+        op.create_index(
+            "idx_phase_task_item_snapshots_session_task",
+            "phase_task_item_snapshots",
+            ["session_name", "task_id"],
+        )
+    else:
+        op.execute("CREATE INDEX IF NOT EXISTS ix_phase_task_item_snapshots_session_name ON phase_task_item_snapshots (session_name)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_phase_task_item_snapshots_task_id ON phase_task_item_snapshots (task_id)")
+        op.execute("CREATE INDEX IF NOT EXISTS ix_phase_task_item_snapshots_to_phase ON phase_task_item_snapshots (to_phase)")
+        op.execute("CREATE INDEX IF NOT EXISTS idx_phase_task_item_snapshots_session_task ON phase_task_item_snapshots (session_name, task_id)")
 
-    op.create_table(
-        "phase_task_item_snapshot_items",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("snapshot_id", sa.BigInteger(), nullable=False),
-        sa.Column("representative_private_phase_task_item_id", sa.BigInteger(), nullable=True),
-        sa.Column("component_id", sa.String(length=80), nullable=False),
-        sa.Column("component_label", sa.String(length=120), nullable=False),
-        sa.Column("action_id", sa.String(length=80), nullable=False),
-        sa.Column("action_label", sa.String(length=120), nullable=False),
-        sa.Column("statement", sa.Text(), nullable=False),
-        sa.Column("source_user_ids", sa.JSON(), nullable=False),
-        sa.Column("source_priorities", sa.JSON(), nullable=False),
-        sa.Column("position", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(["snapshot_id"], ["phase_task_item_snapshots.id"]),
-        sa.ForeignKeyConstraint(["representative_private_phase_task_item_id"], ["private_phase_task_items.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("snapshot_id", "component_id", "action_id", name="uq_phase_task_item_snapshot_items_dedupe_key"),
-    )
-    op.create_index("ix_phase_task_item_snapshot_items_snapshot_id", "phase_task_item_snapshot_items", ["snapshot_id"])
-    op.create_index(
-        "ix_phase_snapshot_items_representative_item_id",
-        "phase_task_item_snapshot_items",
-        ["representative_private_phase_task_item_id"],
-    )
-    op.create_index("ix_phase_task_item_snapshot_items_position", "phase_task_item_snapshot_items", ["position"])
-    op.create_index("idx_phase_task_item_snapshot_items_component", "phase_task_item_snapshot_items", ["component_id"])
-    op.create_index(
-        "idx_phase_task_item_snapshot_items_snapshot_position",
-        "phase_task_item_snapshot_items",
-        ["snapshot_id", "position"],
-    )
+    if "phase_task_item_snapshot_items" not in tables:
+        op.create_table(
+            "phase_task_item_snapshot_items",
+            sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+            sa.Column("snapshot_id", sa.BigInteger(), nullable=False),
+            sa.Column("representative_private_phase_task_item_id", sa.BigInteger(), nullable=True),
+            sa.Column("component_id", sa.String(length=80), nullable=False),
+            sa.Column("component_label", sa.String(length=120), nullable=False),
+            sa.Column("action_id", sa.String(length=80), nullable=False),
+            sa.Column("action_label", sa.String(length=120), nullable=False),
+            sa.Column("statement", sa.Text(), nullable=False),
+            sa.Column("source_user_ids", sa.JSON(), nullable=False),
+            sa.Column("source_priorities", sa.JSON(), nullable=False),
+            sa.Column("position", sa.Integer(), nullable=False),
+            sa.ForeignKeyConstraint(["snapshot_id"], ["phase_task_item_snapshots.id"]),
+            sa.ForeignKeyConstraint(["representative_private_phase_task_item_id"], ["private_phase_task_items.id"]),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("snapshot_id", "component_id", "action_id", name="uq_phase_task_item_snapshot_items_dedupe_key"),
+        )
+        op.create_index("ix_phase_task_item_snapshot_items_snapshot_id", "phase_task_item_snapshot_items", ["snapshot_id"])
+        op.create_index(
+            "ix_phase_snapshot_items_representative_item_id",
+            "phase_task_item_snapshot_items",
+            ["representative_private_phase_task_item_id"],
+        )
+        op.create_index("ix_phase_task_item_snapshot_items_position", "phase_task_item_snapshot_items", ["position"])
+        op.create_index("idx_phase_task_item_snapshot_items_component", "phase_task_item_snapshot_items", ["component_id"])
+        op.create_index(
+            "idx_phase_task_item_snapshot_items_snapshot_position",
+            "phase_task_item_snapshot_items",
+            ["snapshot_id", "position"],
+        )
+    else:
+        op.execute("CREATE INDEX IF NOT EXISTS ix_phase_task_item_snapshot_items_snapshot_id ON phase_task_item_snapshot_items (snapshot_id)")
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS ix_phase_snapshot_items_representative_item_id "
+            "ON phase_task_item_snapshot_items (representative_private_phase_task_item_id)"
+        )
+        op.execute("CREATE INDEX IF NOT EXISTS ix_phase_task_item_snapshot_items_position ON phase_task_item_snapshot_items (position)")
+        op.execute("CREATE INDEX IF NOT EXISTS idx_phase_task_item_snapshot_items_component ON phase_task_item_snapshot_items (component_id)")
+        op.execute(
+            "CREATE INDEX IF NOT EXISTS idx_phase_task_item_snapshot_items_snapshot_position "
+            "ON phase_task_item_snapshot_items (snapshot_id, position)"
+        )
 
-    op.drop_table("poster_idea_block_task_items")
+    op.execute("DROP TABLE IF EXISTS poster_idea_block_task_items")
     op.create_table(
         "poster_idea_block_task_items",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
