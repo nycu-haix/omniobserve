@@ -48,6 +48,19 @@ function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, act
 	return template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
 }
 
+function getAllowedActionsForComponent(component: Phase1BuilderOption | undefined, actions: Phase1BuilderOption[]): Phase1BuilderOption[] {
+	if (!component) {
+		return [];
+	}
+
+	if (!component.allowed_action_ids) {
+		return actions;
+	}
+
+	const allowedActionIds = new Set(component.allowed_action_ids);
+	return actions.filter(action => allowedActionIds.has(action.id));
+}
+
 function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
 	return [...items].sort((left, right) => left.priority - right.priority || left.id - right.id);
 }
@@ -158,7 +171,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const [error, setError] = useState<string | null>(null);
 	const participantUserId = getParticipantUserId(participantId);
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
-	const selectedAction = builder.actions.find(item => item.id === form.actionId);
+	const availableActions = getAllowedActionsForComponent(selectedComponent, builder.actions);
+	const selectedAction = availableActions.find(item => item.id === form.actionId);
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
 	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
 
@@ -171,11 +185,11 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
 			setForm(current => {
-				const hasComponent = builder.components.some(item => item.id === current.componentId);
-				const hasAction = builder.actions.some(item => item.id === current.actionId);
+				const component = builder.components.find(item => item.id === current.componentId);
+				const hasAction = getAllowedActionsForComponent(component, builder.actions).some(item => item.id === current.actionId);
 				return {
-					componentId: hasComponent ? current.componentId : "",
-					actionId: hasAction ? current.actionId : ""
+					componentId: component ? current.componentId : "",
+					actionId: component && hasAction ? current.actionId : ""
 				};
 			});
 		}, 0);
@@ -244,11 +258,21 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	};
 
 	const selectKeyword = (kind: KeywordKind, id: string) => {
-		setForm(current => ({
-			...current,
-			componentId: kind === "component" ? id : current.componentId,
-			actionId: kind === "action" ? id : current.actionId
-		}));
+		setForm(current => {
+			if (kind === "component") {
+				const component = builder.components.find(item => item.id === id);
+				const canKeepAction = getAllowedActionsForComponent(component, builder.actions).some(action => action.id === current.actionId);
+				return {
+					componentId: id,
+					actionId: canKeepAction ? current.actionId : ""
+				};
+			}
+
+			return {
+				...current,
+				actionId: id
+			};
+		});
 		setError(null);
 	};
 
@@ -389,11 +413,16 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">改善動作</div>
-						<div className="flex flex-wrap gap-2">
-							{builder.actions.map(action => (
-								<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
-							))}
-						</div>
+						{selectedComponent ? (
+							<div className="flex flex-wrap gap-2">
+								{availableActions.map(action => (
+									<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
+								))}
+								{availableActions.length === 0 && <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">此元件目前沒有可用動作</div>}
+							</div>
+						) : (
+							<div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">先選擇海報元件</div>
+						)}
 					</div>
 				</div>
 				{error && <p className="text-xs text-destructive">{error}</p>}
