@@ -10,12 +10,28 @@ interface JitsiRoomProps {
 	micMode: MicMode;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
 	onStatusChange?: (status: JitsiConnectionStatus) => void;
+	onAudioParticipantsChange?: (snapshot: JitsiAudioSnapshot) => void;
 }
 
 export type JitsiConnectionStatus = "loading" | "connected" | "closed" | "unavailable";
 
+export interface JitsiAudioParticipant {
+	id: string;
+	displayName: string;
+	isMuted: boolean;
+	isLocal: boolean;
+	isDominant: boolean;
+}
+
+export interface JitsiAudioSnapshot {
+	participants: JitsiAudioParticipant[];
+	dominantSpeakerId: string | null;
+	connected: boolean;
+}
+
 const JITSI_AUDIO_SYNC_RECHECK_DELAY_MS = 250;
 const JITSI_AUDIO_JOIN_RECHECK_DELAY_MS = 1000;
+const JITSI_DOMINANT_SPEAKER_IDLE_MS = 2000;
 
 type JitsiEventListener = (...args: unknown[]) => void;
 type JitsiMeetExternalApiConstructor = new (
@@ -47,6 +63,62 @@ interface JitsiAudioMuteStatusEvent {
 	muted?: boolean;
 	isMuted?: boolean;
 }
+
+interface JitsiParticipantAudioState {
+	id: string;
+	displayName: string;
+	isMuted?: boolean;
+	isLocal: boolean;
+}
+
+interface JitsiVideoConferenceJoinedEvent {
+	id?: string;
+	displayName?: string;
+}
+
+interface JitsiParticipantJoinedEvent {
+	id?: string;
+	displayName?: string;
+}
+
+interface JitsiParticipantLeftEvent {
+	id?: string;
+}
+
+interface JitsiDisplayNameChangeEvent {
+	id?: string;
+	displayName?: string;
+	displayname?: string;
+}
+
+interface JitsiParticipantMutedEvent {
+	participantId?: string;
+	id?: string;
+	isMuted?: boolean;
+	muted?: boolean;
+	mediaType?: string;
+}
+
+interface JitsiDominantSpeakerChangedEvent {
+	id?: string;
+	participantId?: string;
+}
+
+interface JitsiRoomInfoParticipant {
+	id?: string;
+	displayName?: string;
+}
+
+interface JitsiRoomsInfoResponse {
+	rooms?: {
+		isMainRoom?: boolean;
+		participants?: JitsiRoomInfoParticipant[];
+	}[];
+}
+
+type JitsiExternalApiWithRoomsInfo = IJitsiMeetExternalApi & {
+	getRoomsInfo?: () => Promise<JitsiRoomsInfoResponse>;
+};
 
 interface JitsiEndpoint {
 	baseUrl: string;
@@ -147,18 +219,139 @@ function wait(milliseconds: number): Promise<void> {
 	return new Promise(resolve => window.setTimeout(resolve, milliseconds));
 }
 
-export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange }: JitsiRoomProps) {
+function getFallbackParticipantName(id: string) {
+	return id ? `Participant ${id}` : "Participant";
+}
+
+export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange, onAudioParticipantsChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const desiredAudioMutedRef = useRef(micMode !== "public");
 	const audioSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const jitsiListenersRef = useRef<{ api: IJitsiMeetExternalApi; listeners: [string, JitsiEventListener][] } | null>(null);
+	const audioParticipantsRef = useRef<Map<string, JitsiParticipantAudioState>>(new Map());
+	const dominantSpeakerIdRef = useRef<string | null>(null);
+	const localParticipantIdRef = useRef<string | null>(null);
+	const audioConnectedRef = useRef(false);
+	const dominantSpeakerTimeoutRef = useRef<number | null>(null);
+	const onAudioParticipantsChangeRef = useRef(onAudioParticipantsChange);
 	const [readyMeetingKey, setReadyMeetingKey] = useState<string | null>(null);
 	const [initError, setInitError] = useState<string | null>(null);
 	const endpoint = useMemo(() => parseJitsiEndpoint(meetingDomain), [meetingDomain]);
 	const normalizedRoomName = roomName?.trim();
 	const meetingKey = endpoint && normalizedRoomName ? `${endpoint.baseUrl}/${normalizedRoomName}` : null;
 	const isReady = readyMeetingKey === meetingKey;
+
+	const emitAudioSnapshot = useCallback(() => {
+		const dominantSpeakerId = dominantSpeakerIdRef.current;
+		const participants = Array.from(audioParticipantsRef.current.values())
+			.map(participant => ({
+				id: participant.id,
+				displayName: participant.displayName || getFallbackParticipantName(participant.id),
+				isMuted: participant.isMuted ?? true,
+				isLocal: participant.isLocal,
+				isDominant: participant.id === dominantSpeakerId
+			}))
+			.sort((first, second) => {
+				if (first.isDominant !== second.isDominant) return first.isDominant ? -1 : 1;
+				if (first.isMuted !== second.isMuted) return first.isMuted ? 1 : -1;
+				if (first.isLocal !== second.isLocal) return first.isLocal ? -1 : 1;
+				return first.displayName.localeCompare(second.displayName);
+			});
+
+		onAudioParticipantsChangeRef.current?.({
+			participants,
+			dominantSpeakerId,
+			connected: audioConnectedRef.current
+		});
+	}, []);
+
+	const clearDominantSpeakerTimeout = useCallback(() => {
+		if (dominantSpeakerTimeoutRef.current !== null) {
+			window.clearTimeout(dominantSpeakerTimeoutRef.current);
+			dominantSpeakerTimeoutRef.current = null;
+		}
+	}, []);
+
+	const resetAudioSnapshot = useCallback(() => {
+		clearDominantSpeakerTimeout();
+		audioParticipantsRef.current.clear();
+		dominantSpeakerIdRef.current = null;
+		localParticipantIdRef.current = null;
+		audioConnectedRef.current = false;
+		emitAudioSnapshot();
+	}, [clearDominantSpeakerTimeout, emitAudioSnapshot]);
+
+	const upsertAudioParticipant = useCallback(
+		(id: string | undefined, patch: Partial<Omit<JitsiParticipantAudioState, "id">>, shouldEmit = true) => {
+			const participantId = id?.trim();
+			if (!participantId) {
+				return;
+			}
+
+			const existing = audioParticipantsRef.current.get(participantId);
+			audioParticipantsRef.current.set(participantId, {
+				id: participantId,
+				displayName: patch.displayName ?? existing?.displayName ?? getFallbackParticipantName(participantId),
+				isMuted: patch.isMuted ?? existing?.isMuted,
+				isLocal: patch.isLocal ?? existing?.isLocal ?? false
+			});
+
+			if (shouldEmit) {
+				emitAudioSnapshot();
+			}
+		},
+		[emitAudioSnapshot]
+	);
+
+	const refreshAudioParticipantsFromRooms = useCallback(
+		async (api: IJitsiMeetExternalApi) => {
+			try {
+				const roomsApi = api as JitsiExternalApiWithRoomsInfo;
+				if (typeof roomsApi.getRoomsInfo === "function") {
+					const roomsInfo = await roomsApi.getRoomsInfo();
+					if (apiRef.current !== api) {
+						return;
+					}
+
+					const room = roomsInfo.rooms?.find(candidate => candidate.isMainRoom) ?? roomsInfo.rooms?.[0];
+					room?.participants?.forEach(participant => {
+						upsertAudioParticipant(
+							participant.id,
+							{
+								displayName: participant.displayName,
+								isLocal: participant.id === localParticipantIdRef.current
+							},
+							false
+						);
+					});
+					emitAudioSnapshot();
+					return;
+				}
+
+				api.getParticipantsInfo().forEach(participantInfo => {
+					const participant = participantInfo as JitsiRoomInfoParticipant;
+					upsertAudioParticipant(
+						participant.id,
+						{
+							displayName: participant.displayName,
+							isLocal: participant.id === localParticipantIdRef.current
+						},
+						false
+					);
+				});
+				emitAudioSnapshot();
+			} catch (error) {
+				console.warn("[jitsi] failed to refresh participant audio state", error);
+			}
+		},
+		[emitAudioSnapshot, upsertAudioParticipant]
+	);
+
+	useEffect(() => {
+		onAudioParticipantsChangeRef.current = onAudioParticipantsChange;
+		emitAudioSnapshot();
+	}, [emitAudioSnapshot, onAudioParticipantsChange]);
 
 	const syncJitsiAudioMuted = useCallback((reason: string) => {
 		audioSyncQueueRef.current = audioSyncQueueRef.current
@@ -223,6 +416,8 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 	useEffect(() => detachJitsiListeners, [detachJitsiListeners]);
 
+	useEffect(() => resetAudioSnapshot, [resetAudioSnapshot]);
+
 	useEffect(() => {
 		const parentNode = containerRef.current;
 		if (!endpoint || !normalizedRoomName || !parentNode) {
@@ -280,25 +475,106 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 				detachJitsiListeners();
 				apiRef.current = api;
 
-				const handleVideoConferenceJoined = () => {
+				const handleVideoConferenceJoined = (event: JitsiVideoConferenceJoinedEvent) => {
+					audioConnectedRef.current = true;
+					localParticipantIdRef.current = event.id ?? localParticipantIdRef.current;
+					upsertAudioParticipant(event.id, {
+						displayName: event.displayName || displayName,
+						isLocal: true
+					});
+					void api?.isAudioMuted().then(muted => {
+						if (apiRef.current === api) {
+							upsertAudioParticipant(event.id, { isMuted: muted });
+						}
+					});
+					void refreshAudioParticipantsFromRooms(api as IJitsiMeetExternalApi);
 					syncJitsiAudioMuted("videoConferenceJoined");
 					window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
 				};
 				const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
 					const reportedMuted = typeof event.muted === "boolean" ? event.muted : event.isMuted;
+					if (typeof reportedMuted === "boolean") {
+						upsertAudioParticipant(localParticipantIdRef.current ?? undefined, { isMuted: reportedMuted });
+					}
 					if (reportedMuted === false && desiredAudioMutedRef.current) {
 						syncJitsiAudioMuted("audioMuteStatusChanged");
 					}
 				};
+				const handleParticipantJoined = (event: JitsiParticipantJoinedEvent) => {
+					upsertAudioParticipant(event.id, {
+						displayName: event.displayName,
+						isMuted: true,
+						isLocal: false
+					});
+				};
+				const handleParticipantLeft = (event: JitsiParticipantLeftEvent) => {
+					const participantId = event.id?.trim();
+					if (!participantId) {
+						return;
+					}
+					audioParticipantsRef.current.delete(participantId);
+					if (dominantSpeakerIdRef.current === participantId) {
+						clearDominantSpeakerTimeout();
+						dominantSpeakerIdRef.current = null;
+					}
+					emitAudioSnapshot();
+				};
+				const handleDisplayNameChange = (event: JitsiDisplayNameChangeEvent) => {
+					upsertAudioParticipant(event.id, {
+						displayName: event.displayName ?? event.displayname
+					});
+				};
+				const handleParticipantMuted = (event: JitsiParticipantMutedEvent) => {
+					if (event.mediaType && event.mediaType !== "audio") {
+						return;
+					}
+
+					const reportedMuted = typeof event.isMuted === "boolean" ? event.isMuted : event.muted;
+					if (typeof reportedMuted !== "boolean") {
+						return;
+					}
+
+					upsertAudioParticipant(event.participantId ?? event.id, { isMuted: reportedMuted });
+				};
+				const handleDominantSpeakerChanged = (event: JitsiDominantSpeakerChangedEvent) => {
+					clearDominantSpeakerTimeout();
+
+					const participantId = (event.id ?? event.participantId ?? "").trim();
+					dominantSpeakerIdRef.current = participantId || null;
+
+					if (participantId) {
+						upsertAudioParticipant(
+							participantId,
+							{
+								displayName: api?.getDisplayName(participantId)
+							},
+							false
+						);
+						dominantSpeakerTimeoutRef.current = window.setTimeout(() => {
+							if (dominantSpeakerIdRef.current === participantId) {
+								dominantSpeakerIdRef.current = null;
+								emitAudioSnapshot();
+							}
+						}, JITSI_DOMINANT_SPEAKER_IDLE_MS);
+					}
+
+					emitAudioSnapshot();
+				};
 				const handleReadyToClose = () => {
 					detachJitsiListeners();
 					apiRef.current = null;
+					resetAudioSnapshot();
 					setReadyMeetingKey(null);
 					onStatusChange?.("closed");
 				};
 				const listeners: [string, JitsiEventListener][] = [
-					["videoConferenceJoined", handleVideoConferenceJoined],
+					["videoConferenceJoined", handleVideoConferenceJoined as JitsiEventListener],
 					["audioMuteStatusChanged", handleAudioMuteStatusChanged as JitsiEventListener],
+					["participantJoined", handleParticipantJoined as JitsiEventListener],
+					["participantLeft", handleParticipantLeft as JitsiEventListener],
+					["displayNameChange", handleDisplayNameChange as JitsiEventListener],
+					["participantMuted", handleParticipantMuted as JitsiEventListener],
+					["dominantSpeakerChanged", handleDominantSpeakerChanged as JitsiEventListener],
 					["readyToClose", handleReadyToClose]
 				];
 
@@ -322,13 +598,28 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 			disposed = true;
 			detachJitsiListeners();
 			apiRef.current = null;
+			resetAudioSnapshot();
 			if (api) {
 				(api as { dispose?: () => void }).dispose?.();
 			}
 			parentNode.replaceChildren();
 			setReadyMeetingKey(null);
 		};
-	}, [detachJitsiListeners, displayName, endpoint, meetingKey, normalizedRoomName, onApiReady, onStatusChange, syncJitsiAudioMuted]);
+	}, [
+		clearDominantSpeakerTimeout,
+		detachJitsiListeners,
+		displayName,
+		emitAudioSnapshot,
+		endpoint,
+		meetingKey,
+		normalizedRoomName,
+		onApiReady,
+		onStatusChange,
+		refreshAudioParticipantsFromRooms,
+		resetAudioSnapshot,
+		syncJitsiAudioMuted,
+		upsertAudioParticipant
+	]);
 
 	if (!endpoint) {
 		return renderJitsiError("Jitsi Unavailable", "Set VITE_JITSI_BASE_URL to show Jitsi");

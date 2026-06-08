@@ -12,7 +12,7 @@ import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, 
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
-import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
+import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
@@ -55,6 +55,12 @@ const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
 	connected: "已連線",
 	closed: "已離線",
 	unavailable: "未啟用"
+};
+
+const EMPTY_JITSI_AUDIO_SNAPSHOT: JitsiAudioSnapshot = {
+	participants: [],
+	dominantSpeakerId: null,
+	connected: false
 };
 
 interface RankingSnapshot {
@@ -117,6 +123,50 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 		imageFg: item.image_fg || "#334155",
 		imageMark: item.image_mark || "ITEM"
 	};
+}
+
+function getParticipantInitial(participant: JitsiAudioParticipant) {
+	const label = participant.displayName.trim() || participant.id;
+	return label.slice(0, 1).toUpperCase();
+}
+
+function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
+	const participants = snapshot.participants;
+	const activeSpeaker = participants.find(participant => participant.isDominant && !participant.isMuted) ?? participants.find(participant => participant.isDominant);
+	const openMicCount = participants.filter(participant => !participant.isMuted).length;
+	const visibleParticipants = participants.slice(0, 3);
+	const hiddenParticipantCount = Math.max(0, participants.length - visibleParticipants.length);
+	const statusLabel = snapshot.connected ? (activeSpeaker ? `${activeSpeaker.displayName} 發言中` : "無人發言") : "Jitsi 未連線";
+
+	return (
+		<div
+			className={cn(
+				"flex h-8 max-w-52 items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur sm:max-w-64",
+				activeSpeaker ? "border-destructive/30 text-foreground" : "text-muted-foreground"
+			)}
+			title={`${statusLabel}，開麥 ${openMicCount}`}
+		>
+			<span className={cn("h-2 w-2 shrink-0 rounded-full", activeSpeaker ? "animate-pulse bg-destructive" : snapshot.connected ? "bg-muted-foreground/50" : "bg-border")} aria-hidden="true" />
+			<span className="min-w-0 truncate font-medium">{statusLabel}</span>
+			<span className="shrink-0 text-muted-foreground">開麥 {openMicCount}</span>
+			<div className="hidden shrink-0 -space-x-1 sm:flex" aria-hidden="true">
+				{visibleParticipants.map(participant => (
+					<span
+						key={participant.id}
+						className={cn(
+							"grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground",
+							participant.isDominant && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
+							participant.isMuted && "opacity-40"
+						)}
+						title={`${participant.displayName}${participant.isMuted ? " 靜音" : " 開麥"}`}
+					>
+						{getParticipantInitial(participant)}
+					</span>
+				))}
+				{hiddenParticipantCount > 0 && <span className="grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">+{hiddenParticipantCount}</span>}
+			</div>
+		</div>
+	);
 }
 
 function taskItemImageSrc(itemId: string): string {
@@ -966,6 +1016,7 @@ export default function MeetingRoom() {
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
+	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
@@ -995,6 +1046,9 @@ export default function MeetingRoom() {
 	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
 		setJitsiStatus(status);
+	}, []);
+	const handleJitsiAudioParticipantsChange = useCallback((snapshot: JitsiAudioSnapshot) => {
+		setJitsiAudioSnapshot(snapshot);
 	}, []);
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
@@ -1531,7 +1585,14 @@ export default function MeetingRoom() {
 
 				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
 					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
-						<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
+						<JitsiRoom
+							meetingDomain={jitsiBaseUrl}
+							roomName={roomName}
+							displayName={displayName}
+							micMode={micMode}
+							onStatusChange={handleJitsiStatusChange}
+							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
+						/>
 					</div>
 					{!isJitsiCollapsed && (
 						<>
@@ -1612,12 +1673,12 @@ export default function MeetingRoom() {
 							<title>{audioError}</title>
 						</AlertCircle>
 					)}
-					<div className="absolute bottom-0 left-0">
+					<div className="absolute bottom-0 left-0 flex max-w-[calc(50%-6rem)] items-center gap-2 sm:max-w-[calc(50%-7rem)]">
 						<Button
 							type="button"
 							variant="outline"
 							size="icon"
-							className={cn("h-8 w-8", !isJitsiCollapsed && "hidden")}
+							className={cn("h-8 w-8 shrink-0", !isJitsiCollapsed && "hidden")}
 							aria-label={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
 							title={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
 							aria-expanded={!isJitsiCollapsed}
@@ -1625,6 +1686,7 @@ export default function MeetingRoom() {
 						>
 							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
 						</Button>
+						<JitsiAudioIndicator snapshot={jitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
 						<Button
