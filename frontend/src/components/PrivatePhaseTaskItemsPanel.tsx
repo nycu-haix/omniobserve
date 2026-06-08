@@ -48,6 +48,19 @@ function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, act
 	return template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
 }
 
+function getAllowedActionsForComponent(component: Phase1BuilderOption | undefined, actions: Phase1BuilderOption[]): Phase1BuilderOption[] {
+	if (!component) {
+		return [];
+	}
+
+	if (!component.allowed_action_ids) {
+		return actions;
+	}
+
+	const allowedActionIds = new Set(component.allowed_action_ids);
+	return actions.filter(action => allowedActionIds.has(action.id));
+}
+
 function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
 	return [...items].sort((left, right) => left.priority - right.priority || left.id - right.id);
 }
@@ -120,9 +133,6 @@ function PrivatePhaseTaskItemRow({
 }) {
 	return (
 		<div className={cn("flex min-h-10 select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors", isMoving && "opacity-60")}>
-			<div className="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted px-1 text-center text-[10px] font-semibold uppercase leading-3 text-muted-foreground">
-				項目
-			</div>
 			<span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.priority || index + 1}</span>
 			<div className="grid min-w-0 flex-1 gap-0.5">
 				<div className="break-words text-sm font-medium leading-6">{item.statement}</div>
@@ -140,7 +150,7 @@ function PrivatePhaseTaskItemRow({
 				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="編輯" aria-label="編輯" onClick={() => onEdit(item)}>
 					<Pencil className="h-4 w-4" />
 				</Button>
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
 					<Trash2 className="h-4 w-4" />
 				</Button>
 			</div>
@@ -158,7 +168,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const [error, setError] = useState<string | null>(null);
 	const participantUserId = getParticipantUserId(participantId);
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
-	const selectedAction = builder.actions.find(item => item.id === form.actionId);
+	const availableActions = getAllowedActionsForComponent(selectedComponent, builder.actions);
+	const selectedAction = availableActions.find(item => item.id === form.actionId);
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
 	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
 
@@ -171,11 +182,11 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	useEffect(() => {
 		const timer = window.setTimeout(() => {
 			setForm(current => {
-				const hasComponent = builder.components.some(item => item.id === current.componentId);
-				const hasAction = builder.actions.some(item => item.id === current.actionId);
+				const component = builder.components.find(item => item.id === current.componentId);
+				const hasAction = getAllowedActionsForComponent(component, builder.actions).some(item => item.id === current.actionId);
 				return {
-					componentId: hasComponent ? current.componentId : "",
-					actionId: hasAction ? current.actionId : ""
+					componentId: component ? current.componentId : "",
+					actionId: component && hasAction ? current.actionId : ""
 				};
 			});
 		}, 0);
@@ -244,11 +255,21 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	};
 
 	const selectKeyword = (kind: KeywordKind, id: string) => {
-		setForm(current => ({
-			...current,
-			componentId: kind === "component" ? id : current.componentId,
-			actionId: kind === "action" ? id : current.actionId
-		}));
+		setForm(current => {
+			if (kind === "component") {
+				const component = builder.components.find(item => item.id === id);
+				const canKeepAction = getAllowedActionsForComponent(component, builder.actions).some(action => action.id === current.actionId);
+				return {
+					componentId: id,
+					actionId: canKeepAction ? current.actionId : ""
+				};
+			}
+
+			return {
+				...current,
+				actionId: id
+			};
+		});
 		setError(null);
 	};
 
@@ -389,11 +410,16 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">改善動作</div>
-						<div className="flex flex-wrap gap-2">
-							{builder.actions.map(action => (
-								<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
-							))}
-						</div>
+						{selectedComponent ? (
+							<div className="flex flex-wrap gap-2">
+								{availableActions.map(action => (
+									<KeywordChip key={action.id} kind="action" option={action} isSelected={action.id === form.actionId} onSelect={() => selectKeyword("action", action.id)} />
+								))}
+								{availableActions.length === 0 && <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">此元件目前沒有可用動作</div>}
+							</div>
+						) : (
+							<div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">先選擇海報元件</div>
+						)}
 					</div>
 				</div>
 				{error && <p className="text-xs text-destructive">{error}</p>}
