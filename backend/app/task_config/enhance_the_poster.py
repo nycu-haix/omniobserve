@@ -270,7 +270,7 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "qr_code_group",
         "label_zh": "QR 碼+說明",
         "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "adjust_spacing", "unify"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing"]
     },
     {
         "id": "title_group",

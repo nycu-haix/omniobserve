@@ -133,9 +133,6 @@ function PrivatePhaseTaskItemRow({
 }) {
 	return (
 		<div className={cn("flex min-h-10 select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors", isMoving && "opacity-60")}>
-			<div className="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted px-1 text-center text-[10px] font-semibold uppercase leading-3 text-muted-foreground">
-				項目
-			</div>
 			<span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.priority || index + 1}</span>
 			<div className="grid min-w-0 flex-1 gap-0.5">
 				<div className="break-words text-sm font-medium leading-6">{item.statement}</div>
@@ -153,7 +150,7 @@ function PrivatePhaseTaskItemRow({
 				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="編輯" aria-label="編輯" onClick={() => onEdit(item)}>
 					<Pencil className="h-4 w-4" />
 				</Button>
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
 					<Trash2 className="h-4 w-4" />
 				</Button>
 			</div>
