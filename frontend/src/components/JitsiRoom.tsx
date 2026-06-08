@@ -31,7 +31,6 @@ export interface JitsiAudioSnapshot {
 
 const JITSI_AUDIO_SYNC_RECHECK_DELAY_MS = 250;
 const JITSI_AUDIO_JOIN_RECHECK_DELAY_MS = 1000;
-const JITSI_DOMINANT_SPEAKER_IDLE_MS = 2000;
 
 type JitsiEventListener = (...args: unknown[]) => void;
 type JitsiMeetExternalApiConstructor = new (
@@ -238,7 +237,6 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 	const dominantSpeakerIdRef = useRef<string | null>(null);
 	const localParticipantIdRef = useRef<string | null>(null);
 	const audioConnectedRef = useRef(false);
-	const dominantSpeakerTimeoutRef = useRef<number | null>(null);
 	const onAudioParticipantsChangeRef = useRef(onAudioParticipantsChange);
 	const [readyMeetingKey, setReadyMeetingKey] = useState<string | null>(null);
 	const [initError, setInitError] = useState<string | null>(null);
@@ -290,21 +288,13 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		});
 	}, []);
 
-	const clearDominantSpeakerTimeout = useCallback(() => {
-		if (dominantSpeakerTimeoutRef.current !== null) {
-			window.clearTimeout(dominantSpeakerTimeoutRef.current);
-			dominantSpeakerTimeoutRef.current = null;
-		}
-	}, []);
-
 	const resetAudioSnapshot = useCallback(() => {
-		clearDominantSpeakerTimeout();
 		audioParticipantsRef.current.clear();
 		dominantSpeakerIdRef.current = null;
 		localParticipantIdRef.current = null;
 		audioConnectedRef.current = false;
 		emitAudioSnapshot();
-	}, [clearDominantSpeakerTimeout, emitAudioSnapshot]);
+	}, [emitAudioSnapshot]);
 
 	const resolveAudioParticipantId = useCallback((id: string | undefined) => {
 		const participantId = id?.trim();
@@ -529,7 +519,11 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 				const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
 					const reportedMuted = typeof event.muted === "boolean" ? event.muted : event.isMuted;
 					if (typeof reportedMuted === "boolean") {
-						upsertAudioParticipant(resolveAudioParticipantId(localParticipantIdRef.current ?? "local"), {
+						const participantId = resolveAudioParticipantId(localParticipantIdRef.current ?? "local");
+						if (reportedMuted && participantId && dominantSpeakerIdRef.current === participantId) {
+							dominantSpeakerIdRef.current = null;
+						}
+						upsertAudioParticipant(participantId, {
 							displayName,
 							isLocal: true,
 							isMuted: reportedMuted
@@ -553,7 +547,6 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					}
 					audioParticipantsRef.current.delete(participantId);
 					if (dominantSpeakerIdRef.current === participantId) {
-						clearDominantSpeakerTimeout();
 						dominantSpeakerIdRef.current = null;
 					}
 					emitAudioSnapshot();
@@ -579,6 +572,9 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					const eventParticipantId = event.participantId ?? event.id;
 					const participantId = resolveAudioParticipantId(eventParticipantId);
 					const isLocalParticipant = eventParticipantId === "local" || participantId === localParticipantIdRef.current;
+					if (reportedMuted && participantId && dominantSpeakerIdRef.current === participantId) {
+						dominantSpeakerIdRef.current = null;
+					}
 					upsertAudioParticipant(participantId, {
 						displayName: isLocalParticipant ? displayName : undefined,
 						isLocal: isLocalParticipant || undefined,
@@ -586,8 +582,6 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					});
 				};
 				const handleDominantSpeakerChanged = (event: JitsiDominantSpeakerChangedEvent) => {
-					clearDominantSpeakerTimeout();
-
 					const eventParticipantId = event.id ?? event.participantId;
 					const participantId = resolveAudioParticipantId(eventParticipantId);
 					const isLocalParticipant = eventParticipantId === "local" || participantId === localParticipantIdRef.current;
@@ -602,12 +596,6 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 							},
 							false
 						);
-						dominantSpeakerTimeoutRef.current = window.setTimeout(() => {
-							if (dominantSpeakerIdRef.current === participantId) {
-								dominantSpeakerIdRef.current = null;
-								emitAudioSnapshot();
-							}
-						}, JITSI_DOMINANT_SPEAKER_IDLE_MS);
 					}
 
 					emitAudioSnapshot();
@@ -658,7 +646,6 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 			setReadyMeetingKey(null);
 		};
 	}, [
-		clearDominantSpeakerTimeout,
 		detachJitsiListeners,
 		displayName,
 		emitAudioSnapshot,
