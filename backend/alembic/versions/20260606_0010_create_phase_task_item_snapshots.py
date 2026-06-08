@@ -71,7 +71,7 @@ def upgrade() -> None:
         ["snapshot_id", "position"],
     )
 
-    op.drop_table("poster_idea_block_task_items")
+    op.execute("DROP TABLE IF EXISTS poster_idea_block_task_items")
     op.create_table(
         "poster_idea_block_task_items",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
