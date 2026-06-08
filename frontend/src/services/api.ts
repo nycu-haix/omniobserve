@@ -16,6 +16,9 @@ export interface TaskConfigItem {
 	image_bg: string;
 	image_fg: string;
 	image_mark: string;
+	component_id?: string;
+	action_id?: string;
+	source_user_ids?: number[];
 }
 
 export interface Phase1BuilderOption {

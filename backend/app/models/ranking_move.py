@@ -13,6 +13,8 @@ class RankingMove(Base):
     session_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     participant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     scope: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    phase: Mapped[str] = mapped_column(String(80), nullable=False, default="unknown", server_default="unknown", index=True)
+    move_type: Mapped[str] = mapped_column(String(32), nullable=False, default="move", server_default="move", index=True)
     item_id: Mapped[str] = mapped_column(String(255), nullable=False)
     from_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     to_index: Mapped[int] = mapped_column(Integer, nullable=False)
