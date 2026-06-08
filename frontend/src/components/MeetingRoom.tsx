@@ -1742,7 +1742,7 @@ export default function MeetingRoom() {
 							<ChevronUp className="h-4 w-4" />
 						</Button>
 					)}
-					<div className="absolute bottom-0 left-0 flex w-[calc(50%-5rem)] min-w-0 max-w-80 items-center sm:w-[calc(50%-6rem)]">
+					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
