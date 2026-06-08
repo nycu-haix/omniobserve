@@ -229,8 +229,15 @@ function withLocalSpeakingParticipant(snapshot: JitsiAudioSnapshot, displayName:
 	};
 }
 
+const TASK_ITEM_IMAGE_CACHE_KEYS: Record<string, string> = {
+	floating_cushion: "20260608-realistic",
+	receive_only_radio: "20260608-rca"
+};
+
 function taskItemImageSrc(itemId: string): string {
-	return `/task-item-images/${itemId}.jpg`;
+	const cacheKey = TASK_ITEM_IMAGE_CACHE_KEYS[itemId];
+	const cacheQuery = cacheKey ? `?v=${cacheKey}` : "";
+	return `/task-item-images/${itemId}.jpg${cacheQuery}`;
 }
 
 function taskItemFallbackImageSrc(item: LostAtSeaItem): string {
