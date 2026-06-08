@@ -1621,9 +1621,9 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "public_context_matches") {
-				const matchedIds = (lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id);
-				if (matchedIds.length > 0) {
-					const visibleMatchedIds = matchedIds.filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
+				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
+				if (matchedIds.size > 0) {
+					const visibleMatchedIds = [...matchedIds].filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
 					captureIdeaBlockPositions();
 					setIdeaBlocks(prev => {
 						const nextBlocks = sortIdeaBlocks(applyPublicContextMatches(prev, lastMessage.payload));
