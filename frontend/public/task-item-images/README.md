@@ -28,9 +28,9 @@ Recommended shape: landscape, around 16:11 or 4:3. Larger files are fine, but ke
 - `emergency_rations.jpg`: Wikimedia Commons, [Crations-museumdisplay.jpg](https://commons.wikimedia.org/wiki/File:Crations-museumdisplay.jpg), CC BY 2.0.
 - `sea_chart.jpg`: Wikimedia Commons, [Admiralty Chart No 5216 South Pacific Ocean, Published 1942.jpg](https://commons.wikimedia.org/wiki/File:Admiralty_Chart_No_5216_South_Pacific_Ocean,_Published_1942.jpg), public domain.
 - `petrol.jpg`: Wikimedia Commons, [GasCan.jpg](https://commons.wikimedia.org/wiki/File:GasCan.jpg), CC BY 3.0.
-- `receive_only_radio.jpg`: Wikimedia Commons, [RCA Victor Co. -Transistor Radio Pockette 1-TP-2E.jpg](https://commons.wikimedia.org/wiki/File:RCA_Victor_Co._-Transistor_Radio_Pockette_1-TP-2E.jpg), CC BY-SA 4.0.
+- `receive_only_radio.jpg`: Wikimedia Commons, [RCA Victor Co. -Transistor Radio Pockette 1-TP-2E.jpg](https://commons.wikimedia.org/wiki/File:RCA_Victor_Co._-Transistor_Radio_Pockette_1-TP-2E.jpg), CC BY-SA 4.0. Resized and padded to fit the app's landscape preview.
 - `shark_repellent.jpg`: Wikimedia Commons, [SharkTec shark repellent spray (cropped).jpg](<https://commons.wikimedia.org/wiki/File:SharkTec_shark_repellent_spray_(cropped).jpg>), CC BY-SA 4.0.
 - `rum.jpg`: Wikimedia Commons, [Bottle of Puerto Rican rum Don Q (IMG 3730X).jpg](<https://commons.wikimedia.org/wiki/File:Bottle_of_Puerto_Rican_rum_Don_Q_(IMG_3730X).jpg>), CC BY-SA 2.0.
 - `chocolate_bars.jpg`: Wikimedia Commons, [Green and Black's dark chocolate bar 1.jpg](https://commons.wikimedia.org/wiki/File:Green_and_Black%27s_dark_chocolate_bar_1.jpg), CC0.
 - `fishing_rod.jpg`: Wikimedia Commons, [2005-58-18 Fishing Kit, Life Raft, M-552A, Interior.jpg](https://commons.wikimedia.org/wiki/File:2005-58-18_Fishing_Kit,_Life_Raft,_M-552A,_Interior.jpg), CC BY 2.0.
-- `floating_cushion.jpg`: generated locally as a simplified throwable flotation cushion after no close freely licensed photo was found.
+- `floating_cushion.jpg`: AI-generated locally as a realistic throwable flotation seat cushion after no close freely licensed photo was found.

@@ -18,6 +18,8 @@ interface ActiveAudioMeta {
 
 const TARGET_SAMPLE_RATE = 16000;
 const OUTPUT_CHUNK_SIZE = 512;
+const LOCAL_SPEAKING_RMS_THRESHOLD = 0.012;
+const LOCAL_SPEAKING_RELEASE_MS = 650;
 
 function makeClientId(): string {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -110,11 +112,13 @@ export function useAudioStream(
 	stopAudioStream: (keepAudioResources?: boolean) => Promise<void>;
 	isAudioStreaming: boolean;
 	isAudioConnected: boolean;
+	isLocalSpeaking: boolean;
 	lastAudioMessage: AudioStreamMessage | null;
 	audioError: string | null;
 } {
 	const [isAudioStreaming, setIsAudioStreaming] = useState(false);
 	const [isAudioConnected, setIsAudioConnected] = useState(false);
+	const [isLocalSpeaking, setIsLocalSpeaking] = useState(false);
 	const [lastAudioMessage, setLastAudioMessage] = useState<AudioStreamMessage | null>(null);
 	const [audioError, setAudioError] = useState<string | null>(null);
 
@@ -129,6 +133,49 @@ export function useAudioStream(
 	const sentChunksRef = useRef(0);
 	const stoppingRef = useRef(false);
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
+	const isLocalSpeakingRef = useRef(false);
+	const localSpeakingReleaseTimerRef = useRef<number | null>(null);
+
+	const setLocalSpeakingState = useCallback((nextSpeaking: boolean) => {
+		if (isLocalSpeakingRef.current === nextSpeaking) {
+			return;
+		}
+
+		isLocalSpeakingRef.current = nextSpeaking;
+		setIsLocalSpeaking(nextSpeaking);
+	}, []);
+
+	const clearLocalSpeakingReleaseTimer = useCallback(() => {
+		if (localSpeakingReleaseTimerRef.current !== null) {
+			window.clearTimeout(localSpeakingReleaseTimerRef.current);
+			localSpeakingReleaseTimerRef.current = null;
+		}
+	}, []);
+
+	const updateLocalSpeaking = useCallback(
+		(samples: Float32Array) => {
+			if (activeMetaRef.current?.mode !== "public") {
+				clearLocalSpeakingReleaseTimer();
+				setLocalSpeakingState(false);
+				return;
+			}
+
+			const rms = calculateRms(samples);
+			if (rms >= LOCAL_SPEAKING_RMS_THRESHOLD) {
+				clearLocalSpeakingReleaseTimer();
+				setLocalSpeakingState(true);
+				return;
+			}
+
+			if (isLocalSpeakingRef.current && localSpeakingReleaseTimerRef.current === null) {
+				localSpeakingReleaseTimerRef.current = window.setTimeout(() => {
+					localSpeakingReleaseTimerRef.current = null;
+					setLocalSpeakingState(false);
+				}, LOCAL_SPEAKING_RELEASE_MS);
+			}
+		},
+		[clearLocalSpeakingReleaseTimer, setLocalSpeakingState]
+	);
 
 	const cleanupAudioResources = useCallback(() => {
 		processorNodeRef.current?.disconnect();
@@ -157,7 +204,9 @@ export function useAudioStream(
 		audioContextRef.current = null;
 		pendingSamplesRef.current = new Float32Array(0);
 		sentChunksRef.current = 0;
-	}, []);
+		clearLocalSpeakingReleaseTimer();
+		setLocalSpeakingState(false);
+	}, [clearLocalSpeakingReleaseTimer, setLocalSpeakingState]);
 
 	const waitForAudioStopAck = useCallback((socket: WebSocket): Promise<void> => {
 		if (socket.readyState === WebSocket.CLOSED) {
@@ -272,54 +321,60 @@ export function useAudioStream(
 
 			setIsAudioConnected(false);
 			setIsAudioStreaming(false);
+			clearLocalSpeakingReleaseTimer();
+			setLocalSpeakingState(false);
 			await drainPromise;
 		},
-		[cleanupAudioResources, drainActiveAudioSocket]
+		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, drainActiveAudioSocket, setLocalSpeakingState]
 	);
 
-	const sendAudioSamples = useCallback((samples: Float32Array) => {
-		const pending = pendingSamplesRef.current;
-		const merged = new Float32Array(pending.length + samples.length);
+	const sendAudioSamples = useCallback(
+		(samples: Float32Array) => {
+			const pending = pendingSamplesRef.current;
+			const merged = new Float32Array(pending.length + samples.length);
 
-		merged.set(pending, 0);
-		merged.set(samples, pending.length);
+			merged.set(pending, 0);
+			merged.set(samples, pending.length);
 
-		const MAX_SAMPLES = TARGET_SAMPLE_RATE * 5;
-		if (merged.length > MAX_SAMPLES) {
-			pendingSamplesRef.current = merged.slice(merged.length - MAX_SAMPLES);
-		} else {
-			pendingSamplesRef.current = merged;
-		}
-
-		const socket = socketRef.current;
-
-		if (!socket || socket.readyState !== WebSocket.OPEN) {
-			return;
-		}
-
-		let offset = 0;
-		const currentPending = pendingSamplesRef.current;
-
-		while (offset + OUTPUT_CHUNK_SIZE <= currentPending.length) {
-			const chunk = currentPending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
-			offset += OUTPUT_CHUNK_SIZE;
-
-			socket.send(chunk.buffer);
-
-			sentChunksRef.current += 1;
-
-			if (sentChunksRef.current % 100 === 0) {
-				console.info("[audio-ws] sent PCM chunks", {
-					chunks: sentChunksRef.current,
-					rms: calculateRms(chunk),
-					samplesPerChunk: OUTPUT_CHUNK_SIZE,
-					sampleRate: TARGET_SAMPLE_RATE
-				});
+			const MAX_SAMPLES = TARGET_SAMPLE_RATE * 5;
+			if (merged.length > MAX_SAMPLES) {
+				pendingSamplesRef.current = merged.slice(merged.length - MAX_SAMPLES);
+			} else {
+				pendingSamplesRef.current = merged;
 			}
-		}
 
-		pendingSamplesRef.current = currentPending.slice(offset);
-	}, []);
+			const socket = socketRef.current;
+
+			if (!socket || socket.readyState !== WebSocket.OPEN) {
+				return;
+			}
+
+			let offset = 0;
+			const currentPending = pendingSamplesRef.current;
+
+			while (offset + OUTPUT_CHUNK_SIZE <= currentPending.length) {
+				const chunk = currentPending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
+				offset += OUTPUT_CHUNK_SIZE;
+
+				updateLocalSpeaking(chunk);
+				socket.send(chunk.buffer);
+
+				sentChunksRef.current += 1;
+
+				if (sentChunksRef.current % 100 === 0) {
+					console.info("[audio-ws] sent PCM chunks", {
+						chunks: sentChunksRef.current,
+						rms: calculateRms(chunk),
+						samplesPerChunk: OUTPUT_CHUNK_SIZE,
+						sampleRate: TARGET_SAMPLE_RATE
+					});
+				}
+			}
+
+			pendingSamplesRef.current = currentPending.slice(offset);
+		},
+		[updateLocalSpeaking]
+	);
 
 	const startAudioStream = useCallback(
 		async (mode: AudioStreamMode) => {
@@ -338,6 +393,8 @@ export function useAudioStream(
 
 			stoppingRef.current = false;
 			setAudioError(null);
+			clearLocalSpeakingReleaseTimer();
+			setLocalSpeakingState(false);
 
 			const resolvedDisplayName = displayName || participantId;
 			const clientId = makeClientId();
@@ -530,7 +587,7 @@ export function useAudioStream(
 				setIsAudioStreaming(false);
 			}
 		},
-		[cleanupAudioResources, displayName, drainActiveAudioSocket, participantId, sendAudioSamples, sessionId]
+		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, displayName, drainActiveAudioSocket, participantId, sendAudioSamples, sessionId, setLocalSpeakingState]
 	);
 
 	useEffect(() => {
@@ -544,6 +601,7 @@ export function useAudioStream(
 		stopAudioStream,
 		isAudioStreaming,
 		isAudioConnected,
+		isLocalSpeaking,
 		lastAudioMessage,
 		audioError
 	};

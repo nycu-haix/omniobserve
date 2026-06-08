@@ -12,7 +12,7 @@ import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, 
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
-import { JitsiRoom, type JitsiConnectionStatus } from "./JitsiRoom";
+import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
 import { PrivateBoard } from "./private-board/PrivateBoard";
 import { Button } from "./ui/Button";
@@ -55,6 +55,12 @@ const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
 	connected: "已連線",
 	closed: "已離線",
 	unavailable: "未啟用"
+};
+
+const EMPTY_JITSI_AUDIO_SNAPSHOT: JitsiAudioSnapshot = {
+	participants: [],
+	dominantSpeakerId: null,
+	connected: false
 };
 
 interface RankingSnapshot {
@@ -119,8 +125,119 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 	};
 }
 
+function getParticipantInitial(participant: JitsiAudioParticipant) {
+	const label = participant.displayName.trim() || participant.id;
+	return label.slice(0, 1).toUpperCase();
+}
+
+const MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS = 4;
+
+function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
+	const participants = snapshot.participants;
+	const activeSpeaker = participants.find(participant => participant.isDominant && !participant.isMuted) ?? participants.find(participant => participant.isDominant);
+	const openMicCount = participants.filter(participant => !participant.isMuted).length;
+	const visibleParticipantCount = participants.length <= MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS ? participants.length : MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS - 1;
+	const visibleParticipants = participants.slice(0, visibleParticipantCount);
+	const hiddenParticipantCount = Math.max(0, participants.length - visibleParticipants.length);
+	const statusLabel = snapshot.connected ? (activeSpeaker ? `${activeSpeaker.displayName} 發言中` : "無人發言") : "Jitsi 未連線";
+
+	return (
+		<div
+			className={cn(
+				"grid h-8 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur",
+				activeSpeaker ? "border-destructive/30 text-foreground" : "text-muted-foreground"
+			)}
+			title={`${statusLabel}，開麥 ${openMicCount}`}
+		>
+			<span className={cn("h-2 w-2 shrink-0 rounded-full", activeSpeaker ? "animate-pulse bg-destructive" : snapshot.connected ? "bg-muted-foreground/50" : "bg-border")} aria-hidden="true" />
+			<span className="flex min-w-0 items-center gap-1 font-medium">
+				{activeSpeaker ? <span className="min-w-0 truncate">{activeSpeaker.displayName}</span> : <span className="min-w-0 truncate">{snapshot.connected ? "無人發言" : "Jitsi 未連線"}</span>}
+			</span>
+			<div className="flex shrink-0 items-center justify-end gap-1.5">
+				<span className="whitespace-nowrap text-muted-foreground">開麥 {openMicCount}</span>
+				<div className="hidden shrink-0 -space-x-1 sm:flex" aria-hidden="true">
+					{visibleParticipants.map(participant => (
+						<span
+							key={participant.id}
+							className={cn(
+								"grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground",
+								participant.isDominant && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
+								participant.isMuted && "opacity-40"
+							)}
+							title={`${participant.displayName}${participant.isMuted ? " 靜音" : " 開麥"}`}
+						>
+							{getParticipantInitial(participant)}
+						</span>
+					))}
+					{hiddenParticipantCount > 0 && (
+						<span className="grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">+{hiddenParticipantCount}</span>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function withLocalSpeakingParticipant(snapshot: JitsiAudioSnapshot, displayName: string, isLocalSpeaking: boolean): JitsiAudioSnapshot {
+	if (!isLocalSpeaking) {
+		return snapshot;
+	}
+
+	let localParticipantId = "local-speaking";
+	let hasLocalParticipant = false;
+	const participants = snapshot.participants.map(participant => {
+		const isLocalParticipant = participant.isLocal || participant.displayName === displayName;
+		if (!isLocalParticipant) {
+			return {
+				...participant,
+				isDominant: false
+			};
+		}
+
+		hasLocalParticipant = true;
+		localParticipantId = participant.id;
+		return {
+			...participant,
+			displayName,
+			isMuted: false,
+			isLocal: true,
+			isDominant: true
+		};
+	});
+
+	if (!hasLocalParticipant) {
+		participants.push({
+			id: localParticipantId,
+			displayName,
+			isMuted: false,
+			isLocal: true,
+			isDominant: true
+		});
+	}
+
+	participants.sort((first, second) => {
+		if (first.isDominant !== second.isDominant) return first.isDominant ? -1 : 1;
+		if (first.isMuted !== second.isMuted) return first.isMuted ? 1 : -1;
+		if (first.isLocal !== second.isLocal) return first.isLocal ? -1 : 1;
+		return first.displayName.localeCompare(second.displayName);
+	});
+
+	return {
+		participants,
+		dominantSpeakerId: localParticipantId,
+		connected: true
+	};
+}
+
+const TASK_ITEM_IMAGE_CACHE_KEYS: Record<string, string> = {
+	floating_cushion: "20260608-realistic",
+	receive_only_radio: "20260608-rca"
+};
+
 function taskItemImageSrc(itemId: string): string {
-	return `/task-item-images/${itemId}.jpg`;
+	const cacheKey = TASK_ITEM_IMAGE_CACHE_KEYS[itemId];
+	const cacheQuery = cacheKey ? `?v=${cacheKey}` : "";
+	return `/task-item-images/${itemId}.jpg${cacheQuery}`;
 }
 
 function taskItemFallbackImageSrc(item: LostAtSeaItem): string {
@@ -966,6 +1083,7 @@ export default function MeetingRoom() {
 	const [timerEndTime, setTimerEndTime] = useState(0);
 	const [previewItem, setPreviewItem] = useState<LostAtSeaItem | null>(null);
 	const [jitsiStatus, setJitsiStatus] = useState<JitsiConnectionStatus>("loading");
+	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
@@ -990,11 +1108,14 @@ export default function MeetingRoom() {
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
-	const { startAudioStream, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
+	const { startAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
 		setJitsiStatus(status);
+	}, []);
+	const handleJitsiAudioParticipantsChange = useCallback((snapshot: JitsiAudioSnapshot) => {
+		setJitsiAudioSnapshot(snapshot);
 	}, []);
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
@@ -1004,6 +1125,10 @@ export default function MeetingRoom() {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
 	} as CSSProperties;
+	const displayedJitsiAudioSnapshot = useMemo(
+		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
+		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
+	);
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1531,7 +1656,14 @@ export default function MeetingRoom() {
 
 				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
 					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
-						<JitsiRoom meetingDomain={jitsiBaseUrl} roomName={roomName} displayName={displayName} micMode={micMode} onStatusChange={handleJitsiStatusChange} />
+						<JitsiRoom
+							meetingDomain={jitsiBaseUrl}
+							roomName={roomName}
+							displayName={displayName}
+							micMode={micMode}
+							onStatusChange={handleJitsiStatusChange}
+							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
+						/>
 					</div>
 					{!isJitsiCollapsed && (
 						<>
@@ -1612,19 +1744,22 @@ export default function MeetingRoom() {
 							<title>{audioError}</title>
 						</AlertCircle>
 					)}
-					<div className="absolute bottom-0 left-0">
+					{isJitsiCollapsed && (
 						<Button
 							type="button"
 							variant="outline"
 							size="icon"
-							className={cn("h-8 w-8", !isJitsiCollapsed && "hidden")}
-							aria-label={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
-							title={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
-							aria-expanded={!isJitsiCollapsed}
+							className="absolute bottom-9 left-0 z-20 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+							aria-label="展開 Jitsi"
+							title="展開 Jitsi"
+							aria-expanded="false"
 							onClick={() => setIsJitsiCollapsed(current => !current)}
 						>
-							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+							<ChevronUp className="h-4 w-4" />
 						</Button>
+					)}
+					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
+						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
 						<Button
