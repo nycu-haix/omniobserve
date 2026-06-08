@@ -141,7 +141,7 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 	return (
 		<div
 			className={cn(
-				"flex h-8 max-w-52 items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur sm:max-w-64",
+				"flex h-8 w-full min-w-0 items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur",
 				activeSpeaker ? "border-destructive/30 text-foreground" : "text-muted-foreground"
 			)}
 			title={`${statusLabel}，開麥 ${openMicCount}`}
@@ -1728,19 +1728,21 @@ export default function MeetingRoom() {
 							<title>{audioError}</title>
 						</AlertCircle>
 					)}
-					<div className="absolute bottom-0 left-0 flex max-w-[calc(50%-6rem)] items-center gap-2 sm:max-w-[calc(50%-7rem)]">
+					{isJitsiCollapsed && (
 						<Button
 							type="button"
 							variant="outline"
 							size="icon"
-							className={cn("h-8 w-8 shrink-0", !isJitsiCollapsed && "hidden")}
-							aria-label={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
-							title={isJitsiCollapsed ? "展開 Jitsi" : "收合 Jitsi"}
-							aria-expanded={!isJitsiCollapsed}
+							className="absolute bottom-9 left-0 z-20 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+							aria-label="展開 Jitsi"
+							title="展開 Jitsi"
+							aria-expanded="false"
 							onClick={() => setIsJitsiCollapsed(current => !current)}
 						>
-							{isJitsiCollapsed ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+							<ChevronUp className="h-4 w-4" />
 						</Button>
+					)}
+					<div className="absolute bottom-0 left-0 flex w-[calc(50%-5rem)] min-w-0 max-w-80 items-center sm:w-[calc(50%-6rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
