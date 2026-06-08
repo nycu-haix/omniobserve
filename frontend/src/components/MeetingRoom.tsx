@@ -141,29 +141,33 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 	return (
 		<div
 			className={cn(
-				"flex h-8 w-full min-w-0 items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur",
+				"grid h-8 w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border bg-background/90 px-2 text-xs shadow-sm backdrop-blur",
 				activeSpeaker ? "border-destructive/30 text-foreground" : "text-muted-foreground"
 			)}
 			title={`${statusLabel}，開麥 ${openMicCount}`}
 		>
 			<span className={cn("h-2 w-2 shrink-0 rounded-full", activeSpeaker ? "animate-pulse bg-destructive" : snapshot.connected ? "bg-muted-foreground/50" : "bg-border")} aria-hidden="true" />
 			<span className="min-w-0 truncate font-medium">{statusLabel}</span>
-			<span className="shrink-0 text-muted-foreground">開麥 {openMicCount}</span>
-			<div className="hidden shrink-0 -space-x-1 sm:flex" aria-hidden="true">
-				{visibleParticipants.map(participant => (
-					<span
-						key={participant.id}
-						className={cn(
-							"grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground",
-							participant.isDominant && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
-							participant.isMuted && "opacity-40"
-						)}
-						title={`${participant.displayName}${participant.isMuted ? " 靜音" : " 開麥"}`}
-					>
-						{getParticipantInitial(participant)}
-					</span>
-				))}
-				{hiddenParticipantCount > 0 && <span className="grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">+{hiddenParticipantCount}</span>}
+			<div className="flex shrink-0 items-center justify-end gap-1.5">
+				<span className="whitespace-nowrap text-muted-foreground">開麥 {openMicCount}</span>
+				<div className="hidden shrink-0 -space-x-1 sm:flex" aria-hidden="true">
+					{visibleParticipants.map(participant => (
+						<span
+							key={participant.id}
+							className={cn(
+								"grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground",
+								participant.isDominant && "ring-2 ring-destructive ring-offset-1 ring-offset-background",
+								participant.isMuted && "opacity-40"
+							)}
+							title={`${participant.displayName}${participant.isMuted ? " 靜音" : " 開麥"}`}
+						>
+							{getParticipantInitial(participant)}
+						</span>
+					))}
+					{hiddenParticipantCount > 0 && (
+						<span className="grid h-5 w-5 place-items-center rounded-full border bg-muted text-[10px] font-semibold text-muted-foreground">+{hiddenParticipantCount}</span>
+					)}
+				</div>
 			</div>
 		</div>
 	);
@@ -1742,7 +1746,7 @@ export default function MeetingRoom() {
 							<ChevronUp className="h-4 w-4" />
 						</Button>
 					)}
-					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
+					<div className="absolute bottom-0 left-0 flex w-[calc(50%-8.5rem)] min-w-0 max-w-64 items-center sm:w-[calc(50%-8rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
 					<div className="absolute bottom-0 right-0 hidden xl:block">
