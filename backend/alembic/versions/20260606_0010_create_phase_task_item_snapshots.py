@@ -59,7 +59,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_phase_task_item_snapshot_items_snapshot_id", "phase_task_item_snapshot_items", ["snapshot_id"])
     op.create_index(
-        "ix_phase_task_item_snapshot_items_representative_private_phase_task_item_id",
+        "ix_phase_snapshot_items_representative_item_id",
         "phase_task_item_snapshot_items",
         ["representative_private_phase_task_item_id"],
     )
@@ -116,7 +116,7 @@ def downgrade() -> None:
     op.drop_index("idx_phase_task_item_snapshot_items_component", table_name="phase_task_item_snapshot_items")
     op.drop_index("ix_phase_task_item_snapshot_items_position", table_name="phase_task_item_snapshot_items")
     op.drop_index(
-        "ix_phase_task_item_snapshot_items_representative_private_phase_task_item_id",
+        "ix_phase_snapshot_items_representative_item_id",
         table_name="phase_task_item_snapshot_items",
     )
     op.drop_index("ix_phase_task_item_snapshot_items_snapshot_id", table_name="phase_task_item_snapshot_items")
