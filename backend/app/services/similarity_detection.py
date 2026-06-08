@@ -9,15 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, PosterIdeaBlockTaskItem, Similarity, TaskItem
-from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session
+from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session, resolve_task_id
 from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
 
-def _build_similarity_system_prompt(session_name: str) -> str:
-    task_config = get_task_config_for_session(session_name=session_name)
-    task_context = get_similarity_task_context_for_session(session_name=session_name)
+def _build_similarity_system_prompt(session_name: str, task_name: str | None = None) -> str:
+    resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
+    task_context = get_similarity_task_context_for_session(session_name=session_name, task_id=resolved_task_name)
     return f"""
 # Role
 You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a {task_config["title"]} group ranking discussion.
@@ -151,7 +152,8 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(idea_block, "Missing embedding vector", db)
         return
 
-    if get_task_config_for_session(session_name=idea_block.session_name).get("task_id") == "enhance-the-poster":
+    task_name = resolve_task_id(session_name=idea_block.session_name, task_id=idea_block.task_name)
+    if get_task_config_for_session(session_name=idea_block.session_name, task_id=task_name).get("task_id") == "enhance-the-poster":
         component_ids = await _get_poster_component_ids(idea_block.id, db)
         logger.info(
             "similarity_detection_poster_components idea_block_id=%s component_ids=%s count=%s",
@@ -237,7 +239,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         return
 
     candidates = [candidate for candidate, _ in cosine_candidates]
-    llm_result = await _select_first_similar_with_llm(idea_block, candidates)
+    llm_result = await _select_first_similar_with_llm(idea_block, candidates, task_name=task_name)
     candidate_ids = {candidate.id for candidate in candidates}
     selected_id = llm_result.get("id")
     reason = str(llm_result.get("reason") or "").strip()
@@ -377,7 +379,7 @@ async def _score_cosine_candidates(
     return [(idea, float(score)) for idea, score in result.all()]
 
 
-async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock]) -> dict[str, Any]:
+async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock], *, task_name: str | None = None) -> dict[str, Any]:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required for similarity detection")
@@ -399,7 +401,7 @@ Summary: {idea_block.summary}
 
 # Output (JSON Only)
 """.strip()
-    system_prompt = _build_similarity_system_prompt(idea_block.session_name)
+    system_prompt = _build_similarity_system_prompt(idea_block.session_name, task_name=task_name)
     logger.info(
         "similarity_detection_llm_request idea_block_id=%s candidate_ids=%s prompt_chars=%s",
         idea_block.id,

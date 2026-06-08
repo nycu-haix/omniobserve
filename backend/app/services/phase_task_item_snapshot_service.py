@@ -68,6 +68,7 @@ async def initialize_phase_rankings(
         task_id=task_id,
         from_phase=from_phase,
         to_phase=PRIVATE_PHASE_2,
+        force_new=to_phase == PRIVATE_PHASE_2 and from_phase == PRIVATE_PHASE_1,
     )
     ranking_items = serialize_snapshot_ranking_items(snapshot.items)
     logger.info(
@@ -123,23 +124,25 @@ async def get_or_create_phase_snapshot(
     task_id: str,
     from_phase: str,
     to_phase: str,
+    force_new: bool = False,
 ) -> PhaseTaskItemSnapshot:
-    existing = await get_phase_snapshot(
-        db,
-        session_name=session_name,
-        task_id=task_id,
-        to_phase=to_phase,
-    )
-    if existing is not None:
-        logger.info(
-            "phase_snapshot_reuse session_name=%s task_id=%s snapshot_id=%s to_phase=%s item_count=%s",
-            session_name,
-            task_id,
-            existing.id,
-            to_phase,
-            len(existing.items),
+    if not force_new:
+        existing = await get_phase_snapshot(
+            db,
+            session_name=session_name,
+            task_id=task_id,
+            to_phase=to_phase,
         )
-        return existing
+        if existing is not None:
+            logger.info(
+                "phase_snapshot_reuse session_name=%s task_id=%s snapshot_id=%s to_phase=%s item_count=%s",
+                session_name,
+                task_id,
+                existing.id,
+                to_phase,
+                len(existing.items),
+            )
+            return existing
 
     snapshot = PhaseTaskItemSnapshot(
         session_name=session_name,

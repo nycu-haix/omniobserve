@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, Index, String, UniqueConstraint, func
+from sqlalchemy import BigInteger, DateTime, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -13,12 +13,6 @@ if TYPE_CHECKING:
 class PhaseTaskItemSnapshot(Base):
     __tablename__ = "phase_task_item_snapshots"
     __table_args__ = (
-        UniqueConstraint(
-            "session_name",
-            "task_id",
-            "to_phase",
-            name="uq_phase_task_item_snapshots_session_task_phase",
-        ),
         Index("idx_phase_task_item_snapshots_session_task", "session_name", "task_id"),
     )
 

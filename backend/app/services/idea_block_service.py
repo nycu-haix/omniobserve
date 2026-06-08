@@ -32,7 +32,7 @@ async def create_idea_block_from_content(
     if not normalized_content:
         raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
 
-    generated_blocks = await build_idea_blocks_with_llm(normalized_content, session_name=session_name)
+    generated_blocks = await build_idea_blocks_with_llm(normalized_content, session_name=session_name, task_name=task_name)
     if not generated_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
 
@@ -104,13 +104,14 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
         idea_block_id=idea_block.id,
         task_item_ids=task_item_ids,
         session_name=payload.session_name,
+        task_name=payload.task_name,
         text=payload.summary,
     )
     await db.commit()
     if task_items_are_current:
         _schedule_similarity_detection(idea_block.id)
     else:
-        _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary)
+        _schedule_task_item_refresh_and_similarity_detection(idea_block.id, payload.summary, task_name=payload.task_name)
     return await get_idea_block(idea_block.id, db)
 
 
@@ -215,7 +216,7 @@ async def update_idea_block(
 
     await db.commit()
     if summary_changed:
-        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"])
+        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"], task_name=idea_block.task_name)
     return await get_idea_block(idea_block_id, db)
 
 
@@ -267,7 +268,7 @@ async def update_scoped_idea_block(
     await db.commit()
 
     if summary_changed:
-        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"])
+        _schedule_task_item_refresh_and_similarity_detection(idea_block_id, update_data["summary"], task_name=idea_block.task_name)
 
     return await get_scoped_idea_block(
         idea_block_id,
@@ -299,7 +300,7 @@ async def _create_embedding_or_none(text: str) -> list[float] | None:
 
 async def _build_task_item_ids_for_create(payload: IdeaBlockCreate) -> tuple[list[int], bool]:
     try:
-        return await build_task_item_ids_with_llm(payload.summary, session_name=payload.session_name), True
+        return await build_task_item_ids_with_llm(payload.summary, session_name=payload.session_name, task_name=payload.task_name), True
     except ApiError as exc:
         logger.warning(
             "idea_block_task_item_generation_deferred session_name=%s user_id=%s code=%s details=%s",
@@ -360,6 +361,7 @@ async def trigger_similarity_check(
 async def _refresh_task_items_and_detect_similarity(
     idea_block_id: int,
     summary: str,
+    task_name: str | None,
     db: AsyncSession,
 ) -> None:
     try:
@@ -377,6 +379,7 @@ async def _refresh_task_items_and_detect_similarity(
             idea_block_id=idea_block_id,
             text=summary,
             session_name=idea_block.session_name,
+            task_name=task_name or idea_block.task_name,
         )
         await db.commit()
         logger.info(
@@ -396,11 +399,11 @@ async def _refresh_task_items_and_detect_similarity(
     await trigger_similarity_detection(idea_block_id, db)
 
 
-def _schedule_task_item_refresh_and_similarity_detection(idea_block_id: int, summary: str) -> None:
+def _schedule_task_item_refresh_and_similarity_detection(idea_block_id: int, summary: str, *, task_name: str | None = None) -> None:
     async def run_refresh_and_detection() -> None:
         try:
             async with SessionLocal() as detection_db:
-                await _refresh_task_items_and_detect_similarity(idea_block_id, summary, detection_db)
+                await _refresh_task_items_and_detect_similarity(idea_block_id, summary, task_name, detection_db)
         except Exception as exc:
             logger.exception(
                 "similarity_detection_background_failed idea_block_id=%s error_type=%s error=%s",

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Query, WebSocket
-from ..task_config.registry import DEFAULT_TASK_NAME
 
 from ..config import ENABLE_BUILTIN_AUDIO_STREAM
 from ..services.realtime import (
@@ -84,7 +83,7 @@ async def audio_stream_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
-    task_name: str = Query(DEFAULT_TASK_NAME),
+    task_name: str | None = Query(None),
 ) -> None:
     if not ENABLE_BUILTIN_AUDIO_STREAM:
         await websocket.accept()
@@ -108,7 +107,7 @@ async def transcript_segments_websocket(
     websocket: WebSocket,
     session_name: str,
     participant_id: str = Query(...),
-    task_name: str = Query(DEFAULT_TASK_NAME),
+    task_name: str | None = Query(None),
 ) -> None:
     await handle_transcript_segments_websocket(
         websocket,

@@ -261,10 +261,7 @@ function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 }
 
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
-	return (
-		Array.isArray(value) &&
-		value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string")
-	);
+	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {

@@ -10,12 +10,17 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, PosterIdeaBlockTaskItem, TaskItem
 from ..schemas import ApiError
-from ..task_config import get_ranking_items_for_session, get_task_config_for_session
+from ..task_config import get_ranking_items_for_session, get_task_config_for_session, resolve_task_id
 
 
-async def build_task_item_ids_with_llm(text: str, *, session_name: str | None = None) -> list[int]:
-    ranking_items = get_ranking_items_for_session(session_name=session_name)
-    task_config = get_task_config_for_session(session_name=session_name)
+def _resolve_task_name(session_name: str | None, task_name: str | None) -> str:
+    return resolve_task_id(session_name=session_name, task_id=task_name)
+
+
+async def build_task_item_ids_with_llm(text: str, *, session_name: str | None = None, task_name: str | None = None) -> list[int]:
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    ranking_items = get_ranking_items_for_session(session_name=session_name, task_id=resolved_task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
     task_item_configs_by_id = {item["id"]: item for item in task_config["items"]}
 
     mock_ids = _build_mock_task_item_ids(ranking_items)
@@ -108,9 +113,10 @@ async def generate_and_save_task_items_for_idea_block(
     *,
     idea_block_id: int,
     session_name: str | None = None,
+    task_name: str | None = None,
     text: str,
 ) -> list[TaskItem]:
-    task_item_ids = await build_task_item_ids_with_llm(text, session_name=session_name)
+    task_item_ids = await build_task_item_ids_with_llm(text, session_name=session_name, task_name=task_name)
     logger.info(
         "task_item_ids_generated idea_block_id=%s task_item_ids=%s",
         idea_block_id,
@@ -121,6 +127,7 @@ async def generate_and_save_task_items_for_idea_block(
         idea_block_id=idea_block_id,
         task_item_ids=task_item_ids,
         session_name=session_name,
+        task_name=task_name,
         text=text,
     )
 
@@ -131,10 +138,12 @@ async def save_task_items_for_idea_block_ids(
     idea_block_id: int,
     task_item_ids: list[int],
     session_name: str | None = None,
+    task_name: str | None = None,
     text: str | None = None,
 ) -> list[TaskItem]:
     idea_block = await db.get(IdeaBlock, idea_block_id)
     resolved_session_name = session_name or (idea_block.session_name if idea_block is not None else None)
+    resolved_task_name = task_name or (idea_block.task_name if idea_block is not None else None)
     mapping_text = text if text is not None else (idea_block.summary if idea_block is not None else "")
     task_items = [
         TaskItem(idea_block_id=idea_block_id, task_item_id=task_item_id)
@@ -149,6 +158,7 @@ async def save_task_items_for_idea_block_ids(
             db,
             idea_block_id=idea_block_id,
             session_name=resolved_session_name,
+            task_name=resolved_task_name,
             text=mapping_text,
         )
         return []
@@ -159,6 +169,7 @@ async def save_task_items_for_idea_block_ids(
         db,
         idea_block_id=idea_block_id,
         session_name=resolved_session_name,
+        task_name=resolved_task_name,
         text=mapping_text,
     )
     logger.info(
@@ -174,10 +185,13 @@ async def replace_task_items_for_idea_block(
     *,
     idea_block_id: int,
     session_name: str | None = None,
+    task_name: str | None = None,
     text: str,
 ) -> list[TaskItem]:
-    resolved_session_name = session_name or await _get_idea_block_session_name(db, idea_block_id)
-    task_item_ids = await build_task_item_ids_with_llm(text, session_name=resolved_session_name)
+    idea_block = await db.get(IdeaBlock, idea_block_id)
+    resolved_session_name = session_name or (idea_block.session_name if idea_block is not None else None)
+    resolved_task_name = task_name or (idea_block.task_name if idea_block is not None else None)
+    task_item_ids = await build_task_item_ids_with_llm(text, session_name=resolved_session_name, task_name=resolved_task_name)
     logger.info(
         "task_item_ids_rebuilt idea_block_id=%s task_item_ids=%s",
         idea_block_id,
@@ -195,6 +209,7 @@ async def replace_task_items_for_idea_block(
         db,
         idea_block_id=idea_block_id,
         session_name=resolved_session_name,
+        task_name=resolved_task_name,
         text=text,
     )
     logger.info(
@@ -210,13 +225,15 @@ async def replace_poster_component_mappings_for_idea_block(
     *,
     idea_block_id: int,
     session_name: str | None,
+    task_name: str | None = None,
     text: str,
 ) -> list[PosterIdeaBlockTaskItem]:
-    task_config = get_task_config_for_session(session_name=session_name)
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
     if task_config.get("task_id") != "enhance-the-poster":
         return []
 
-    mappings = await build_poster_component_action_mappings_with_llm(text, session_name=session_name)
+    mappings = await build_poster_component_action_mappings_with_llm(text, session_name=session_name, task_name=resolved_task_name)
     await db.execute(delete(PosterIdeaBlockTaskItem).where(PosterIdeaBlockTaskItem.idea_block_id == idea_block_id))
     rows = [
         PosterIdeaBlockTaskItem(
@@ -237,8 +254,14 @@ async def replace_poster_component_mappings_for_idea_block(
     return rows
 
 
-async def build_poster_component_action_mappings_with_llm(text: str, *, session_name: str | None = None) -> list[dict[str, str]]:
-    task_config = get_task_config_for_session(session_name=session_name)
+async def build_poster_component_action_mappings_with_llm(
+    text: str,
+    *,
+    session_name: str | None = None,
+    task_name: str | None = None,
+) -> list[dict[str, str]]:
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
     builder = task_config.get("phase1_builder") or {}
     components = [item for item in builder.get("components", []) if item.get("id")]
     actions = [item for item in builder.get("actions", []) if item.get("id")]

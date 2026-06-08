@@ -63,10 +63,7 @@ interface RankingSnapshot {
 }
 
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
-	return (
-		Array.isArray(value) &&
-		value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string")
-	);
+	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
@@ -1365,19 +1362,22 @@ export default function MeetingRoom() {
 				const nextTaskItems = lastMessage.ranking_items;
 				const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
 				const nextDefaultItemIds = nextTaskItems.map(item => item.id);
-				setTaskItems(nextTaskItems);
-				if (publicRanking) {
-					setPublicRankingRevision(publicRanking.revision);
-					setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
-				}
-				if (privateRanking) {
-					setPrivateRankingRevision(privateRanking.revision);
-					setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
-				}
+				const rankingItemsTimer = window.setTimeout(() => {
+					setTaskItems(nextTaskItems);
+					if (publicRanking) {
+						setPublicRankingRevision(publicRanking.revision);
+						setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+					if (privateRanking) {
+						setPrivateRankingRevision(privateRanking.revision);
+						setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+				}, 0);
 				return () => {
 					if (phaseTimer !== null) {
 						window.clearTimeout(phaseTimer);
 					}
+					window.clearTimeout(rankingItemsTimer);
 				};
 			}
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];

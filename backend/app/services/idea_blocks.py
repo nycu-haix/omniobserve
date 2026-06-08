@@ -11,7 +11,7 @@ from ..clients import openai_client
 from ..config import IDEA_BLOCK_SYSTEM_PROMPT, IDEA_LLM_ENABLE_THINKING, OPENAI_MODEL, logger
 from ..models import IdeaBlock, Transcript, Visibility
 from ..schemas import ApiError
-from ..task_config import get_llm_topic_description_for_session
+from ..task_config import get_llm_topic_description_for_session, resolve_task_id
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
 from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
@@ -46,7 +46,12 @@ def _normalize_blocks(items: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-async def build_idea_blocks_with_llm(transcript_text: str, *, session_name: str | None = None) -> list[dict[str, Any]]:
+async def build_idea_blocks_with_llm(
+    transcript_text: str,
+    *,
+    session_name: str | None = None,
+    task_name: str | None = None,
+) -> list[dict[str, Any]]:
     mock_blocks = _build_mock_idea_blocks(transcript_text)
     if mock_blocks:
         logger.info(
@@ -65,8 +70,9 @@ async def build_idea_blocks_with_llm(transcript_text: str, *, session_name: str 
             details={"hint": "Set OPENAI_API_KEY or enable LLM_MOCK=1 for local Swagger testing"},
         )
 
+    resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
     system_prompt = IDEA_BLOCK_SYSTEM_PROMPT.format(
-        topic_description=get_llm_topic_description_for_session(session_name=session_name),
+        topic_description=get_llm_topic_description_for_session(session_name=session_name, task_id=resolved_task_name),
         transcript_text=transcript_text,
     )
     user_prompt = "Return JSON with an idea_blocks array. Each item needs content, summary, and optional transcript."
@@ -167,8 +173,10 @@ async def generate_and_save_idea_blocks(
     visibility: Visibility,
     source_transcript_ids: list[str],
     transcript_text: str,
+    task_name: str | None = None,
 ) -> list[IdeaBlock]:
-    generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name)
+    resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
+    generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
 
     idea_blocks: list[IdeaBlock] = []
     user_id = _participant_id_to_int(participant_id)
@@ -177,7 +185,7 @@ async def generate_and_save_idea_blocks(
         summary = block_data["summary"]
         title = _title_from_content(block_data["content"])
         embedding_vector = await create_text_embedding(summary)
-        task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name)
+        task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name, task_name=resolved_task_name)
         duplicate_match = await find_duplicate_idea_block(
             db,
             session_name=session_name,
@@ -204,6 +212,7 @@ async def generate_and_save_idea_blocks(
         idea_block = IdeaBlock(
             user_id=user_id,
             session_name=session_name,
+            task_name=resolved_task_name,
             title=title,
             summary=summary,
             transcript_id=None,
@@ -217,6 +226,7 @@ async def generate_and_save_idea_blocks(
             idea_block_id=idea_block.id,
             task_item_ids=task_item_ids,
             session_name=session_name,
+            task_name=resolved_task_name,
             text=summary,
         )
         idea_blocks.append(idea_block)

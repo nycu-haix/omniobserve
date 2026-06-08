@@ -26,9 +26,16 @@ from ..services.transcript_pipeline import (
     generate_idea_blocks_with_task_items_from_transcript_ids,
     serialize_pipeline_result,
 )
-from ..task_config.registry import DEFAULT_TASK_NAME, normalize_task_name
+from ..task_config import resolve_task_id
+from ..task_config.registry import normalize_task_name
 
 router = APIRouter(tags=["Idea Blocks"])
+
+
+def _resolve_request_task_name(session_name: str, task_name: str | None) -> str:
+    if task_name is not None:
+        return normalize_task_name(task_name)
+    return resolve_task_id(session_name=session_name)
 
 
 @router.get(
@@ -66,10 +73,10 @@ async def post_idea_block_generation(
     session_name: str,
     user_id: int,
     payload: IdeaBlockGenerationRequest,
-    task_name: str = Query(DEFAULT_TASK_NAME),
+    task_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockGenerationResponse:
-    task_name = normalize_task_name(task_name)
+    task_name = _resolve_request_task_name(session_name, task_name)
     if payload.transcript_ids is not None:
         result = await generate_idea_blocks_with_task_items_from_transcript_ids(
             db,
@@ -108,10 +115,10 @@ async def post_idea_block(
     session_name: str,
     user_id: int,
     payload: IdeaBlockCreateRequest,
-    task_name: str = Query(DEFAULT_TASK_NAME),
+    task_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> IdeaBlockResponse:
-    task_name = normalize_task_name(task_name)
+    task_name = _resolve_request_task_name(session_name, task_name)
     if payload.content and payload.content.strip():
         return await create_idea_block_from_content(
             session_name=session_name,
