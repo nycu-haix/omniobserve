@@ -181,6 +181,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			className={cn(
 				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
+				shouldShowPublicContext && "border-neutral-900/70",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
@@ -201,8 +202,12 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		>
 			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{shouldShowPublicContext && (
-				<span className="pointer-events-none absolute left-1 top-1 z-10 flex h-4 w-4 items-center justify-center text-primary" role="img" aria-label="公開討論相關" title="公開討論相關">
-					<GooglePushPinIcon className="h-3.5 w-3.5" />
+				<span
+					className="pointer-events-none absolute left-3 top-0 z-10 -translate-y-1/2 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
+					aria-label="現在公開討論相關"
+					title="現在公開討論相關"
+				>
+					NOW
 				</span>
 			)}
 			{isGenerating ? (
@@ -392,13 +397,5 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 				</div>
 			)}
 		</div>
-	);
-}
-
-function GooglePushPinIcon({ className }: { className?: string }) {
-	return (
-		<svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="currentColor">
-			<path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2Z" />
-		</svg>
 	);
 }
