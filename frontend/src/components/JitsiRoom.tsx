@@ -223,6 +223,11 @@ function getFallbackParticipantName(id: string) {
 	return id ? `Participant ${id}` : "Participant";
 }
 
+function getParticipantMergeKey(participant: JitsiAudioParticipant) {
+	const displayName = participant.displayName.trim();
+	return displayName && !displayName.startsWith("Participant ") ? `name:${displayName.toLocaleLowerCase()}` : `id:${participant.id}`;
+}
+
 export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange, onAudioParticipantsChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
@@ -244,20 +249,39 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 	const emitAudioSnapshot = useCallback(() => {
 		const dominantSpeakerId = dominantSpeakerIdRef.current;
-		const participants = Array.from(audioParticipantsRef.current.values())
-			.map(participant => ({
+		const participantsByDisplayName = new Map<string, JitsiAudioParticipant>();
+
+		Array.from(audioParticipantsRef.current.values()).forEach(participant => {
+			const candidate = {
 				id: participant.id,
 				displayName: participant.displayName || getFallbackParticipantName(participant.id),
 				isMuted: participant.isMuted ?? true,
 				isLocal: participant.isLocal,
 				isDominant: participant.id === dominantSpeakerId
-			}))
-			.sort((first, second) => {
-				if (first.isDominant !== second.isDominant) return first.isDominant ? -1 : 1;
-				if (first.isMuted !== second.isMuted) return first.isMuted ? 1 : -1;
-				if (first.isLocal !== second.isLocal) return first.isLocal ? -1 : 1;
-				return first.displayName.localeCompare(second.displayName);
-			});
+			};
+			const mergeKey = getParticipantMergeKey(candidate);
+			const existing = participantsByDisplayName.get(mergeKey);
+
+			participantsByDisplayName.set(
+				mergeKey,
+				existing
+					? {
+							id: candidate.isDominant ? candidate.id : existing.id,
+							displayName: existing.displayName,
+							isMuted: existing.isMuted && candidate.isMuted,
+							isLocal: existing.isLocal || candidate.isLocal,
+							isDominant: existing.isDominant || candidate.isDominant
+						}
+					: candidate
+			);
+		});
+
+		const participants = Array.from(participantsByDisplayName.values()).sort((first, second) => {
+			if (first.isDominant !== second.isDominant) return first.isDominant ? -1 : 1;
+			if (first.isMuted !== second.isMuted) return first.isMuted ? 1 : -1;
+			if (first.isLocal !== second.isLocal) return first.isLocal ? -1 : 1;
+			return first.displayName.localeCompare(second.displayName);
+		});
 
 		onAudioParticipantsChangeRef.current?.({
 			participants,
