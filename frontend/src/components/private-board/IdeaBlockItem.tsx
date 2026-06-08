@@ -58,6 +58,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 							? "border-green-700/30 bg-green-100 text-green-900"
 							: "border-yellow-700/30 bg-yellow-100 text-yellow-900"
 				};
+	const similarityReasonTitleColor =
+		shouldShowCue && (hasSameSimilarityReason || hasDifferentSimilarityReason)
+			? hasMixedSimilarityReasons
+				? "bg-[#D7FF42]"
+				: hasSameSimilarityReason
+					? "bg-[rgb(205,255,186)]"
+					: "bg-[rgb(255,249,184)]"
+			: null;
 	const sharedReasons = block.sharedReasons ?? [];
 
 	useEffect(() => {
@@ -185,10 +193,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-[#D7FF42] px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-				shouldShowCue && "border-primary",
+				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				shouldShowCue && "border-primary bg-accent",
 				shouldShowPublicContext && "border-neutral-900/70",
-				isDeleted && "border-muted text-muted-foreground/60",
+				similarityReasonTitleColor,
+				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
 				isGenerating && "animate-pulse text-muted-foreground"
 			)}
@@ -280,6 +289,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						</>
 					) : (
 						<>
+							{shouldShowCue && similarityReasonTag && (
+								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
+									{similarityReasonTag.label}
+								</Badge>
+							)}
 							{!isDeleted && !block.isDraft && (
 								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 									<Pencil className="h-4 w-4" />
