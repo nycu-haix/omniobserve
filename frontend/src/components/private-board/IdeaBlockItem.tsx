@@ -53,7 +53,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			: {
 					label: hasMixedSimilarityReasons ? "same + different" : hasSameSimilarityReason ? "same reason" : "different reason",
 					className: hasMixedSimilarityReasons
-						? "border-neutral-900/30 bg-[#D7FF42] text-neutral-900"
+						? "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
 						: hasSameSimilarityReason
 							? "border-green-700/30 bg-green-100 text-green-900"
 							: "border-yellow-700/30 bg-yellow-100 text-yellow-900"
@@ -61,7 +61,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const similarityReasonTitleColor =
 		shouldShowCue && (hasSameSimilarityReason || hasDifferentSimilarityReason)
 			? hasMixedSimilarityReasons
-				? "bg-[#D7FF42]"
+				? "bg-[#ffeace]"
 				: hasSameSimilarityReason
 					? "bg-[rgb(205,255,186)]"
 					: "bg-[rgb(255,249,184)]"
