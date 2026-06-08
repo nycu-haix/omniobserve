@@ -214,12 +214,14 @@ interface PhaseTransitionCueBatch {
 	timeoutId: number | null;
 }
 
-function isNearScrollBottom(element: HTMLElement): boolean {
-	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
+interface WhisperTransient {
+	status: "idle" | "listening" | "generating";
+	text: string;
+	segmentKey?: string;
 }
 
-function clampIdeaBlocksSplitRatio(ratio: number): number {
-	return Math.min(Math.max(ratio, MIN_IDEA_BLOCKS_SPLIT_RATIO), 100 - MIN_IDEA_BLOCKS_SPLIT_RATIO);
+function isNearScrollBottom(element: HTMLElement): boolean {
+	return element.scrollHeight - element.scrollTop - element.clientHeight <= AUTO_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -512,6 +514,10 @@ function transcriptSourceFromAudioMessage(message: AudioDraftTargetMessage): Tra
 		return "private";
 	}
 	return undefined;
+}
+
+function isPrivateAudioLineForParticipant(line: TranscriptLineType, participantId: string): boolean {
+	return line.source === "private" && (line.userId == null || isOwnTranscriptUser(line.userId, participantId));
 }
 
 function stripWhisperArtifacts(text: string): string {
@@ -1153,6 +1159,7 @@ export function PrivateBoard({
 	lastMessage,
 	lastAudioMessage,
 	isConnected,
+	micMode,
 	onSendBoardMessage,
 	displayName,
 	currentPhase: controlledPhase,
@@ -1184,8 +1191,8 @@ export function PrivateBoard({
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
 	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
-	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
-	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
+	const [whisperTransient, setWhisperTransient] = useState<WhisperTransient>({ status: "idle", text: "" });
+	const ideaBlocksSplitRatio = 50;
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const previousIdeaBlockTopsRef = useRef<Record<string, number>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1197,6 +1204,7 @@ export function PrivateBoard({
 	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
 	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
+	const privateTranscriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -1895,6 +1903,13 @@ export function PrivateBoard({
 			if (!boundaryText) {
 				return;
 			}
+			if (isPrivateAudioLineForParticipant(transcriptLine, participantId)) {
+				setWhisperTransient({
+					status: "generating",
+					text: boundaryText,
+					segmentKey: draftKey
+				});
+			}
 
 			const finalDraftId = matchingDraft?.id ?? transcriptLine.id;
 			activeTranscriptDraftsRef.current.set(draftKey, {
@@ -1945,6 +1960,7 @@ export function PrivateBoard({
 				const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
 				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
 				const matchingFinalDraft = isTranscriptFinal && matchingDraft && !matchingDraft.isFinal ? matchingDraft : null;
+				const isOwnPrivateAudioMessage = isPrivateAudioLineForParticipant(transcriptLine, participantId);
 
 				if (isLiveTranscriptDraft) {
 					if (matchingDraft?.isFinal) {
@@ -1970,6 +1986,13 @@ export function PrivateBoard({
 						userId: draftUserId,
 						timestampMs: currentDraft.timestampMs ?? transcriptLine.timestampMs
 					});
+					if (isOwnPrivateAudioMessage) {
+						setWhisperTransient({
+							status: "listening",
+							text: draftText,
+							segmentKey: draftKey
+						});
+					}
 					displayLine = {
 						...transcriptLine,
 						id: currentDraft.id,
@@ -1993,6 +2016,13 @@ export function PrivateBoard({
 						timestampMs: matchingFinalDraft.timestampMs ?? transcriptLine.timestampMs,
 						isDraft: false
 					};
+					if (isOwnPrivateAudioMessage) {
+						setWhisperTransient({
+							status: "generating",
+							text: transcriptLine.text,
+							segmentKey: draftKey
+						});
+					}
 				} else if (isTranscriptFinal && matchingDraft?.isFinal) {
 					replaceDraftLineId = matchingDraft.id;
 					activeTranscriptDraftsRef.current.set(draftKey, {
@@ -2010,6 +2040,13 @@ export function PrivateBoard({
 						timestampMs: matchingDraft.timestampMs ?? transcriptLine.timestampMs,
 						isDraft: false
 					};
+					if (isOwnPrivateAudioMessage) {
+						setWhisperTransient({
+							status: "generating",
+							text: transcriptLine.text,
+							segmentKey: draftKey
+						});
+					}
 				} else if (isPersistedFinal) {
 					if (matchingDraft) {
 						replaceDraftLineId = matchingDraft.id;
@@ -2050,6 +2087,13 @@ export function PrivateBoard({
 						origin: "history",
 						isDraft: false
 					};
+					if (isOwnPrivateAudioMessage) {
+						setWhisperTransient({
+							status: "generating",
+							text: transcriptLine.text,
+							segmentKey: draftKey
+						});
+					}
 				}
 
 				const signature = audioTranscriptDisplaySignature(lastAudioMessage, displayLine);
@@ -2082,6 +2126,7 @@ export function PrivateBoard({
 				return;
 			}
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
+			setWhisperTransient({ status: "idle", text: "" });
 			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
 			let shouldRefreshIdeaBlocks = false;
 
@@ -2186,7 +2231,7 @@ export function PrivateBoard({
 			return;
 		}
 
-		selectBoardTab("ideablock");
+		selectBoardTab("transcript");
 		window.setTimeout(() => setHighlightedTranscriptId(transcriptId), 0);
 	};
 
@@ -2206,73 +2251,8 @@ export function PrivateBoard({
 	const handlePublicChatScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
 		shouldAutoScrollRef.current["public-chat"] = isNearScrollBottom(event.currentTarget);
 	}, []);
-
-	const handleIdeaBlocksSplitResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
-		event.preventDefault();
-		splitResizeCleanupRef.current?.();
-		const resizeHandle = event.currentTarget;
-		resizeHandle.setPointerCapture(event.pointerId);
-
-		const updateSplitRatio = (clientY: number) => {
-			const container = ideaBlocksSplitContainerRef.current;
-			if (!container) {
-				return;
-			}
-
-			const rect = container.getBoundingClientRect();
-			if (rect.height <= 0) {
-				return;
-			}
-
-			setIdeaBlocksSplitRatio(clampIdeaBlocksSplitRatio(((clientY - rect.top) / rect.height) * 100));
-		};
-
-		const handlePointerMove = (moveEvent: PointerEvent) => {
-			updateSplitRatio(moveEvent.clientY);
-		};
-
-		const cleanupResizeListeners = () => {
-			if (resizeHandle.hasPointerCapture(event.pointerId)) {
-				resizeHandle.releasePointerCapture(event.pointerId);
-			}
-			document.body.style.cursor = "";
-			document.body.style.userSelect = "";
-			window.removeEventListener("pointermove", handlePointerMove);
-			window.removeEventListener("pointerup", handlePointerUp);
-			window.removeEventListener("pointercancel", handlePointerUp);
-			splitResizeCleanupRef.current = null;
-		};
-
-		const handlePointerUp = () => {
-			setResizeCursor(null);
-			cleanupResizeListeners();
-		};
-
-		updateSplitRatio(event.clientY);
-		setResizeCursor("row-resize");
-		document.body.style.cursor = "row-resize";
-		document.body.style.userSelect = "none";
-		splitResizeCleanupRef.current = cleanupResizeListeners;
-		window.addEventListener("pointermove", handlePointerMove);
-		window.addEventListener("pointerup", handlePointerUp);
-		window.addEventListener("pointercancel", handlePointerUp);
-	};
-
-	const handleIdeaBlocksSplitResizeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
-			return;
-		}
-
-		event.preventDefault();
-		const direction = event.key === "ArrowUp" ? -1 : 1;
-		setIdeaBlocksSplitRatio(current => clampIdeaBlocksSplitRatio(current + direction * 4));
-	};
-
-	useEffect(() => {
-		return () => {
-			splitResizeCleanupRef.current?.();
-		};
-	}, []);
+	const handleIdeaBlocksSplitResizeStart = useCallback(() => {}, []);
+	const handleIdeaBlocksSplitResizeKeyDown = useCallback(() => {}, []);
 
 	useLayoutEffect(() => {
 		const previousTops = previousIdeaBlockTopsRef.current;
@@ -2333,6 +2313,7 @@ export function PrivateBoard({
 
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
+		const privateTranscriptViewport = privateTranscriptScrollViewportRef.current;
 		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
 		const publicChatViewport = publicChatScrollViewportRef.current;
 		const didEnterIdeaBlocks = lastVisibleActiveTabRef.current !== "ideablock" && isIdeaBlocksTabActive;
@@ -2346,6 +2327,9 @@ export function PrivateBoard({
 			if (transcriptViewport) {
 				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
 			}
+			if (privateTranscriptViewport) {
+				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
+			}
 			if (ideaBlocksViewport) {
 				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
 			}
@@ -2355,6 +2339,9 @@ export function PrivateBoard({
 		if (isIdeaBlocksTabActive) {
 			if (transcriptViewport && shouldAutoScrollRef.current.transcript) {
 				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			}
+			if (privateTranscriptViewport && shouldAutoScrollRef.current.transcript) {
+				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
 			}
 			if (ideaBlocksViewport && shouldAutoScrollRef.current.ideablock) {
 				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
@@ -2368,6 +2355,9 @@ export function PrivateBoard({
 
 		if (visibleActiveTab === "transcript" && transcriptViewport && shouldAutoScrollRef.current.transcript) {
 			transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
+			if (privateTranscriptViewport) {
+				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
+			}
 			return;
 		}
 
@@ -2675,8 +2665,10 @@ export function PrivateBoard({
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
-	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
-	const transcriptTabEmptyText = canShowIdeaBlocks ? "尚無公開逐字稿" : "尚無逐字稿";
+	const publicSubtitleLines = micMode === "private" ? publicTranscriptLines.filter(line => line.text.trim()).slice(-2) : [];
+	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
+	const whisperStatusLabel = whisperTransient.status === "listening" ? "正在聽悄悄話" : whisperTransient.status === "generating" ? "正在生成" : null;
+	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && whisperTransient.text.trim();
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 	const visibleSimilarityCues = canShowIdeaBlocks && isGroupPhase(visiblePhase) ? cues : [];
@@ -2687,7 +2679,6 @@ export function PrivateBoard({
 
 	return (
 		<>
-			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
 			{ideaBlockNotice && (
 				<div className="fixed right-4 top-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-card p-3 text-card-foreground shadow-lg" role="status" aria-live="polite">
 					<div className="flex items-start gap-3">
@@ -2771,18 +2762,102 @@ export function PrivateBoard({
 				</header>
 
 				{visibleActiveTab === "transcript" && (
-					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-						<TranscriptLines
-							lines={transcriptTabLines}
-							emptyText={transcriptTabEmptyText}
-							onJumpToBlock={undefined}
-							onTranscriptRef={setTranscriptRef}
-							highlightedTranscriptId={highlightedTranscriptId}
-						/>
-					</ScrollArea>
+					<div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:grid-cols-2">
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="border-b px-3 py-2 text-sm font-medium">公開逐字稿</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
+								<TranscriptLines
+									lines={publicTranscriptLines}
+									emptyText="尚無公開逐字稿"
+									onJumpToBlock={undefined}
+									onTranscriptRef={setTranscriptRef}
+									highlightedTranscriptId={highlightedTranscriptId}
+								/>
+							</ScrollArea>
+						</section>
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={privateTranscriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
+								<TranscriptLines
+									lines={privateTranscriptLines}
+									emptyText="尚無私人逐字稿"
+									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+									onTranscriptRef={setTranscriptRef}
+									highlightedTranscriptId={highlightedTranscriptId}
+								/>
+							</ScrollArea>
+						</section>
+					</div>
 				)}
 
 				{isIdeaBlocksTabActive && (
+					<div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+						{showPublicSubtitlePanel && (
+							<section className="shrink-0 overflow-hidden rounded-lg border bg-muted/35 px-3 py-2" aria-label="公開討論字幕">
+								<div className="mb-1 flex items-center justify-between gap-3">
+									<div className="text-xs font-semibold text-muted-foreground">公開討論字幕</div>
+									<Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => selectBoardTab("transcript")}>
+										查看逐字稿
+									</Button>
+								</div>
+								<div className="grid gap-1">
+									{publicSubtitleLines.map(line => (
+										<div key={line.id} className="min-w-0 text-sm leading-6">
+											{line.displayName && <span className="mr-1 font-semibold text-muted-foreground">{line.displayName}:</span>}
+											<span className="overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{line.text}</span>
+										</div>
+									))}
+								</div>
+							</section>
+						)}
+						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+							<div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+								<div className="text-sm font-medium">Idea Blocks</div>
+								{whisperStatusLabel && (
+									<span className="inline-flex shrink-0 items-center rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+										{whisperStatusLabel}
+									</span>
+								)}
+							</div>
+							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleIdeaBlocksScroll }}>
+								<div className="grid gap-2 pb-3">
+									{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無 Idea Blocks</div>}
+									{ideaBlocks.map(block => (
+										<div
+											key={block.id}
+											ref={node => {
+												blockRefs.current[block.id] = node;
+											}}
+										>
+											<IdeaBlockItem
+												block={block}
+												isHighlighted={highlightedBlockId === block.id}
+												onToggle={toggleBlock}
+												onSave={saveIdeaBlock}
+												onDelete={deleteIdeaBlock}
+												onJumpToTranscript={jumpToTranscript}
+												canJumpToTranscript={canJumpToTranscript(block)}
+												currentPhase={visiblePhase}
+											/>
+										</div>
+									))}
+									{showWhisperTransient && (
+										<div className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
+											<div className="mb-1 text-xs font-semibold text-muted-foreground">
+												{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}
+											</div>
+											{whisperTransient.status === "listening" && (
+												<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransient.text}</p>
+											)}
+										</div>
+									)}
+								</div>
+							</ScrollArea>
+						</section>
+					</div>
+				)}
+
+				{false && isIdeaBlocksTabActive && (
 					<div
 						ref={ideaBlocksSplitContainerRef}
 						className="grid min-h-0 flex-1 p-3"
