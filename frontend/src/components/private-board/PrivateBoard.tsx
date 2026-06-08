@@ -199,6 +199,7 @@ const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
+const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
 const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
@@ -1410,6 +1411,27 @@ export function PrivateBoard({
 		}, IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS);
 		return noticeId;
 	}, []);
+
+	useEffect(() => {
+		if (whisperTransient.status !== "generating" || !whisperTransient.text.trim()) {
+			return;
+		}
+
+		const segmentKey = whisperTransient.segmentKey;
+		const timer = window.setTimeout(() => {
+			setWhisperTransient(current => {
+				if (current.status !== "generating" || current.segmentKey !== segmentKey) {
+					return current;
+				}
+				return {
+					...current,
+					text: ""
+				};
+			});
+		}, WHISPER_FINAL_TEXT_HOLD_MS);
+
+		return () => window.clearTimeout(timer);
+	}, [whisperTransient.segmentKey, whisperTransient.status, whisperTransient.text]);
 
 	const focusActiveComposer = useCallback(() => {
 		if (isIdeaBlocksTabActive) {
@@ -2668,7 +2690,8 @@ export function PrivateBoard({
 	const publicSubtitleLines = micMode === "private" ? publicTranscriptLines.filter(line => line.text.trim()).slice(-2) : [];
 	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
 	const whisperStatusLabel = whisperTransient.status === "listening" ? "正在聽悄悄話" : whisperTransient.status === "generating" ? "正在生成" : null;
-	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && whisperTransient.text.trim();
+	const whisperTransientText = whisperTransient.text.trim();
+	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && whisperTransientText;
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 	const visibleSimilarityCues = canShowIdeaBlocks && isGroupPhase(visiblePhase) ? cues : [];
@@ -2846,9 +2869,7 @@ export function PrivateBoard({
 											<div className="mb-1 text-xs font-semibold text-muted-foreground">
 												{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}
 											</div>
-											{whisperTransient.status === "listening" && (
-												<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransient.text}</p>
-											)}
+											<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
 										</div>
 									)}
 								</div>
