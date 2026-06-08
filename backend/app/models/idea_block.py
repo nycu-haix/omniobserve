@@ -99,6 +99,14 @@ class IdeaBlock(Base):
         return getattr(self, "_similarity_is_same_reason", None)
 
     @property
+    def similarity_has_same_reason(self) -> bool:
+        return bool(getattr(self, "_similarity_has_same_reason", False))
+
+    @property
+    def similarity_has_different_reason(self) -> bool:
+        return bool(getattr(self, "_similarity_has_different_reason", False))
+
+    @property
     def is_duplicate(self) -> bool:
         return self.duplicate_of_id is not None
 
@@ -117,6 +125,14 @@ class IdeaBlock(Base):
     @similarity_is_same_reason.setter
     def similarity_is_same_reason(self, value: bool | None) -> None:
         self._similarity_is_same_reason = value
+
+    @similarity_has_same_reason.setter
+    def similarity_has_same_reason(self, value: bool) -> None:
+        self._similarity_has_same_reason = bool(value)
+
+    @similarity_has_different_reason.setter
+    def similarity_has_different_reason(self, value: bool) -> None:
+        self._similarity_has_different_reason = bool(value)
 
     @property
     def created_at(self) -> datetime:

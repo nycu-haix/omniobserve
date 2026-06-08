@@ -64,6 +64,8 @@ interface IdeaBlockResponse {
 	transcript: string | null;
 	similarity_id: number | null;
 	similarity_is_same_reason?: boolean | null;
+	similarity_has_same_reason?: boolean | null;
+	similarity_has_different_reason?: boolean | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
 	is_duplicate?: boolean;
@@ -401,6 +403,8 @@ async function fetchChatMessageHistory(url: string, signal: AbortSignal): Promis
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 	const transcriptLineId = item.transcript_id == null ? undefined : String(item.transcript_id);
 	const createdAtMs = parseIdeaBlockCreatedAt(item.time_stamp);
+	const hasSameReason = item.similarity_has_same_reason ?? item.similarity_is_same_reason === true;
+	const hasDifferentReason = item.similarity_has_different_reason ?? item.similarity_is_same_reason === false;
 
 	return {
 		id: String(item.id),
@@ -409,8 +413,10 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		transcript: item.transcript ?? undefined,
 		transcriptLineId,
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
-		hasCue: !!item.similarity_id,
+		hasCue: hasSameReason || hasDifferentReason || !!item.similarity_id,
 		similarityIsSameReason: item.similarity_is_same_reason ?? null,
+		similarityHasSameReason: hasSameReason,
+		similarityHasDifferentReason: hasDifferentReason,
 		isDeleted: item.is_deleted ?? false,
 		createdAtMs,
 		status: "ready"
@@ -431,7 +437,12 @@ function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | nul
 		id: `block-cue-${block.id}`,
 		blockId: block.id,
 		blockSummary,
-		isSameReason: block.similarityIsSameReason ?? undefined
+		isSameReason:
+			block.similarityHasDifferentReason && !block.similarityHasSameReason
+				? false
+				: block.similarityHasSameReason && !block.similarityHasDifferentReason
+					? true
+					: (block.similarityIsSameReason ?? undefined)
 	};
 }
 
@@ -736,8 +747,10 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 								expanded: block.expanded,
 								isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
 								cueText: nextBlock.cueText ?? block.cueText,
-								hasCue: block.hasCue || nextBlock.hasCue,
-								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+								hasCue: nextBlock.hasCue ?? block.hasCue,
+								similarityIsSameReason: nextBlock.similarityIsSameReason,
+								similarityHasSameReason: nextBlock.similarityHasSameReason ?? false,
+								similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? false,
 								publicContextRelevant: block.publicContextRelevant || nextBlock.publicContextRelevant,
 								publicContextScore: nextBlock.publicContextScore ?? block.publicContextScore,
 								publicContextReason: nextBlock.publicContextReason ?? block.publicContextReason,
@@ -1598,6 +1611,8 @@ export function PrivateBoard({
 									hasCue: true,
 									cueText: lastMessage.payload.blockSummary,
 									similarityIsSameReason: lastMessage.payload.isSameReason,
+									similarityHasSameReason: block.similarityHasSameReason || lastMessage.payload.isSameReason === true,
+									similarityHasDifferentReason: block.similarityHasDifferentReason || lastMessage.payload.isSameReason === false,
 									isUnread: !block.expanded
 								}
 							: block
@@ -1642,6 +1657,7 @@ export function PrivateBoard({
 									expanded: true,
 									hasCue: true,
 									similarityIsSameReason: false,
+									similarityHasDifferentReason: true,
 									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
 								}
 							: block
@@ -2257,8 +2273,10 @@ export function PrivateBoard({
 							...savedBlock,
 							expanded: block.expanded,
 							cueText: block.cueText,
-							hasCue: block.hasCue || savedBlock.hasCue,
-							similarityIsSameReason: savedBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+							hasCue: savedBlock.hasCue,
+							similarityIsSameReason: savedBlock.similarityIsSameReason,
+							similarityHasSameReason: savedBlock.similarityHasSameReason ?? false,
+							similarityHasDifferentReason: savedBlock.similarityHasDifferentReason ?? false,
 							isDraft: false,
 							createdAtMs: block.createdAtMs ?? savedBlock.createdAtMs
 						}

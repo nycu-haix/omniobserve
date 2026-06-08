@@ -88,6 +88,8 @@ class IdeaBlockResponse(BaseModel):
     embedding_vector: list[float] | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
     is_duplicate: bool = False
     duplicate_of_id: int | None = None
@@ -107,6 +109,8 @@ class IdeaBlockListResponse(BaseModel):
     transcript: str | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
     is_duplicate: bool = False
     duplicate_of_id: int | None = None
@@ -128,6 +132,8 @@ class IdeaBlockOverviewResponse(BaseModel):
     transcript: str | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)

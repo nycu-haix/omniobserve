@@ -44,14 +44,28 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
+	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
+	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+	const hasMixedSimilarityReasons = hasSameSimilarityReason && hasDifferentSimilarityReason;
 	const similarityReasonTag =
-		block.similarityIsSameReason == null
+		!hasSameSimilarityReason && !hasDifferentSimilarityReason
 			? null
 			: {
-					label: block.similarityIsSameReason ? "same reason" : "different reason",
-					className: block.similarityIsSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+					label: hasMixedSimilarityReasons ? "same + different" : hasSameSimilarityReason ? "same reason" : "different reason",
+					className: hasMixedSimilarityReasons
+						? "border-green-700/30 bg-[linear-gradient(90deg,rgb(220,252,231)_0_50%,rgb(254,249,195)_50%_100%)] text-neutral-900"
+						: hasSameSimilarityReason
+							? "border-green-700/30 bg-green-100 text-green-900"
+							: "border-yellow-700/30 bg-yellow-100 text-yellow-900"
 				};
-	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
+	const similarityReasonTitleColor =
+		shouldShowCue && (hasSameSimilarityReason || hasDifferentSimilarityReason)
+			? hasMixedSimilarityReasons
+				? "bg-[linear-gradient(90deg,rgb(205,255,186)_0_50%,rgb(255,249,184)_50%_100%)]"
+				: hasSameSimilarityReason
+					? "bg-[rgb(205,255,186)]"
+					: "bg-[rgb(255,249,184)]"
+			: null;
 	const sharedReasons = block.sharedReasons ?? [];
 
 	useEffect(() => {

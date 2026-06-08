@@ -409,6 +409,8 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
             "similarity_is_same_reason": block.similarity_is_same_reason,
+            "similarity_has_same_reason": block.similarity_has_same_reason,
+            "similarity_has_different_reason": block.similarity_has_different_reason,
             "is_deleted": block.is_deleted,
             "is_duplicate": block.is_duplicate,
             "duplicate_of_id": block.duplicate_of_id,

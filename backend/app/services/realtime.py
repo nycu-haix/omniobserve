@@ -356,6 +356,8 @@ def _serialize_admin_idea_blocks(idea_blocks: list[Any]) -> list[dict[str, Any]]
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
             "similarity_is_same_reason": block.similarity_is_same_reason,
+            "similarity_has_same_reason": block.similarity_has_same_reason,
+            "similarity_has_different_reason": block.similarity_has_different_reason,
         }
         for block in idea_blocks
     ]
