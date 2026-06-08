@@ -151,14 +151,7 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 		>
 			<span className={cn("h-2 w-2 shrink-0 rounded-full", activeSpeaker ? "animate-pulse bg-destructive" : snapshot.connected ? "bg-muted-foreground/50" : "bg-border")} aria-hidden="true" />
 			<span className="flex min-w-0 items-center gap-1 font-medium">
-				{activeSpeaker ? (
-					<>
-						<span className="min-w-0 truncate">{activeSpeaker.displayName}</span>
-						<span className="shrink-0 text-muted-foreground">發言中</span>
-					</>
-				) : (
-					<span className="min-w-0 truncate">{snapshot.connected ? "無人發言" : "Jitsi 未連線"}</span>
-				)}
+				{activeSpeaker ? <span className="min-w-0 truncate">{activeSpeaker.displayName}</span> : <span className="min-w-0 truncate">{snapshot.connected ? "無人發言" : "Jitsi 未連線"}</span>}
 			</span>
 			<div className="flex shrink-0 items-center justify-end gap-1.5">
 				<span className="whitespace-nowrap text-muted-foreground">開麥 {openMicCount}</span>
