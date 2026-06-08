@@ -30,7 +30,8 @@ from .participant_status import (
     update_audio_status,
 )
 from .phase_task_item_snapshot_service import initialize_phase_rankings
-from .ranking_move_service import create_ranking_move
+from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
+from .ranking_state_query_service import get_effective_ranking_state
 from .transcripts import save_ws_transcript_segment
 
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
@@ -675,6 +676,8 @@ async def handle_board_websocket(
                                 session_name=session_id,
                                 participant_id=participant_id,
                                 scope=scope,
+                                phase=_get_session_phase(session_id),
+                                move_type="move",
                                 item_id=item_id,
                                 from_index=from_index,
                                 to_index=final_to_index,
@@ -887,6 +890,48 @@ async def handle_admin_websocket(
                     )
                     async with SessionLocal() as db:
                         try:
+                            if new_phase == "group" and previous_phase != "group":
+                                for checkpoint_participant_id in [
+                                    participant_id
+                                    for participant_id in participant_ids
+                                    if not _is_admin_participant_id(participant_id)
+                                ]:
+                                    state = private_ranking_state[session_id].get(checkpoint_participant_id)
+                                    if state is None:
+                                        try:
+                                            effective_state = await get_effective_ranking_state(
+                                                db,
+                                                session_name=session_id,
+                                                scope="private",
+                                                participant_id=checkpoint_participant_id,
+                                                phase="private_phase_2",
+                                            )
+                                        except Exception as exc:
+                                            logger.warning(
+                                                "ranking_checkpoint_rebuild_failed session_id=%s participant_id=%s reason=%s",
+                                                session_id,
+                                                checkpoint_participant_id,
+                                                exc,
+                                            )
+                                            continue
+                                        checkpoint_items = list(effective_state.get("items") or [])
+                                        checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
+                                    else:
+                                        checkpoint_items = list(state.get("items") or [])
+                                        checkpoint_revision = _normalize_int(state.get("revision"), 0)
+                                    if not checkpoint_items:
+                                        continue
+                                    if _is_admin_participant_id(checkpoint_participant_id):
+                                        continue
+                                    await create_ranking_checkpoint(
+                                        session_name=session_id,
+                                        participant_id=checkpoint_participant_id,
+                                        scope="private",
+                                        phase="private_phase_2",
+                                        revision=checkpoint_revision,
+                                        items=checkpoint_items,
+                                        db=db,
+                                    )
                             ranking_initialization = await initialize_phase_rankings(
                                 db,
                                 session_name=session_id,

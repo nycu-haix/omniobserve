@@ -9,6 +9,7 @@ class EffectiveRankingStateResponse(BaseModel):
     participant_id: str | None = None
     task_id: str
     snapshot_id: int
+    phase: str | None = None
     source: str
     revision: int
     items: list[str]

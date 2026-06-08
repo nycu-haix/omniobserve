@@ -21,6 +21,7 @@ async def get_effective_ranking_state(
     scope: str,
     participant_id: str | None = None,
     task_id: str | None = None,
+    phase: str | None = None,
 ) -> dict:
     normalized_scope = scope.strip().lower()
     if normalized_scope not in {"private", "public"}:
@@ -33,6 +34,7 @@ async def get_effective_ranking_state(
         session_name=session_name,
         scope=normalized_scope,
         participant_id=participant_id if normalized_scope == "private" else None,
+        phase=phase,
     )
     resolved_task_id = task_id or resolve_task_id(session_name=session_name)
     snapshot = await get_phase_snapshot(
@@ -55,11 +57,37 @@ async def get_effective_ranking_state(
             "participant_id": latest_move.participant_id if normalized_scope == "private" else None,
             "task_id": resolved_task_id,
             "snapshot_id": snapshot.id,
-            "source": "move",
+            "phase": latest_move.phase,
+            "source": latest_move.move_type,
             "revision": latest_move.revision,
             "items": list(latest_move.items or []),
             "ranking_move_id": latest_move.id,
             "updated_at": latest_move.time_stamp,
+        }
+
+    fallback_checkpoint = None
+    if normalized_scope == "private" and phase == GROUP_PHASE:
+        fallback_checkpoint = await _get_latest_ranking_move(
+            db,
+            session_name=session_name,
+            scope=normalized_scope,
+            participant_id=participant_id,
+            phase=PRIVATE_PHASE_2,
+            move_type="checkpoint",
+        )
+    if fallback_checkpoint is not None:
+        return {
+            "session_name": session_name,
+            "scope": normalized_scope,
+            "participant_id": fallback_checkpoint.participant_id,
+            "task_id": resolved_task_id,
+            "snapshot_id": snapshot.id,
+            "phase": fallback_checkpoint.phase,
+            "source": "private_phase_2_checkpoint",
+            "revision": fallback_checkpoint.revision,
+            "items": list(fallback_checkpoint.items or []),
+            "ranking_move_id": fallback_checkpoint.id,
+            "updated_at": fallback_checkpoint.time_stamp,
         }
 
     if normalized_scope == "private":
@@ -76,6 +104,7 @@ async def get_effective_ranking_state(
         "participant_id": str(participant_id) if normalized_scope == "private" else None,
         "task_id": resolved_task_id,
         "snapshot_id": snapshot.id,
+        "phase": phase,
         "source": "snapshot_initial",
         "revision": 0,
         "items": items,
@@ -90,6 +119,8 @@ async def _get_latest_ranking_move(
     session_name: str,
     scope: str,
     participant_id: str | None,
+    phase: str | None = None,
+    move_type: str | None = None,
 ) -> RankingMove | None:
     stmt = (
         select(RankingMove)
@@ -102,6 +133,10 @@ async def _get_latest_ranking_move(
     )
     if participant_id is not None:
         stmt = stmt.where(RankingMove.participant_id == participant_id)
+    if phase is not None:
+        stmt = stmt.where(RankingMove.phase == phase)
+    if move_type is not None:
+        stmt = stmt.where(RankingMove.move_type == move_type)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
