@@ -130,11 +130,14 @@ function getParticipantInitial(participant: JitsiAudioParticipant) {
 	return label.slice(0, 1).toUpperCase();
 }
 
+const MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS = 4;
+
 function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 	const participants = snapshot.participants;
 	const activeSpeaker = participants.find(participant => participant.isDominant && !participant.isMuted) ?? participants.find(participant => participant.isDominant);
 	const openMicCount = participants.filter(participant => !participant.isMuted).length;
-	const visibleParticipants = participants.slice(0, 3);
+	const visibleParticipantCount = participants.length <= MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS ? participants.length : MAX_VISIBLE_AUDIO_PARTICIPANT_SLOTS - 1;
+	const visibleParticipants = participants.slice(0, visibleParticipantCount);
 	const hiddenParticipantCount = Math.max(0, participants.length - visibleParticipants.length);
 	const statusLabel = snapshot.connected ? (activeSpeaker ? `${activeSpeaker.displayName} 發言中` : "無人發言") : "Jitsi 未連線";
 
@@ -147,7 +150,16 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 			title={`${statusLabel}，開麥 ${openMicCount}`}
 		>
 			<span className={cn("h-2 w-2 shrink-0 rounded-full", activeSpeaker ? "animate-pulse bg-destructive" : snapshot.connected ? "bg-muted-foreground/50" : "bg-border")} aria-hidden="true" />
-			<span className="min-w-0 truncate font-medium">{statusLabel}</span>
+			<span className="flex min-w-0 items-center gap-1 font-medium">
+				{activeSpeaker ? (
+					<>
+						<span className="min-w-0 truncate">{activeSpeaker.displayName}</span>
+						<span className="shrink-0 text-muted-foreground">發言中</span>
+					</>
+				) : (
+					<span className="min-w-0 truncate">{snapshot.connected ? "無人發言" : "Jitsi 未連線"}</span>
+				)}
+			</span>
 			<div className="flex shrink-0 items-center justify-end gap-1.5">
 				<span className="whitespace-nowrap text-muted-foreground">開麥 {openMicCount}</span>
 				<div className="hidden shrink-0 -space-x-1 sm:flex" aria-hidden="true">
