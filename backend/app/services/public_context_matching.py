@@ -56,10 +56,14 @@ async def find_public_context_matches(
         return []
 
     try:
-        embedding_vector = await create_text_embedding(normalized_text)
+        embedding_vector = await create_text_embedding(
+            normalized_text,
+            log_failures=False,
+            retry_attempts=1,
+        )
     except Exception as exc:
-        logger.warning(
-            "public_context_match_embedding_failed session_name=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
+        logger.info(
+            "public_context_match_embedding_fallback session_name=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
             session_name,
             task_item_ids,
             len(candidate_ids),
