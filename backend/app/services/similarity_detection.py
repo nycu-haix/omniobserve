@@ -8,16 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
-from ..models import IdeaBlock, Similarity, TaskItem
-from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session
+from ..models import IdeaBlock, PosterIdeaBlockTaskItem, Similarity, TaskItem
+from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session, resolve_task_id
 from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
 
-def _build_similarity_system_prompt(session_name: str) -> str:
-    task_config = get_task_config_for_session(session_name=session_name)
-    task_context = get_similarity_task_context_for_session(session_name=session_name)
+def _build_similarity_system_prompt(session_name: str, task_name: str | None = None) -> str:
+    resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
+    task_context = get_similarity_task_context_for_session(session_name=session_name, task_id=resolved_task_name)
     return f"""
 # Role
 You judge whether a new idea block meaningfully resonates with one existing candidate idea block in a {task_config["title"]} group ranking discussion.
@@ -147,22 +148,36 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         idea_block.summary,
     )
 
-    task_item_ids = await _get_task_item_ids(idea_block.id, db)
-    logger.info(
-        "similarity_detection_task_items idea_block_id=%s task_item_ids=%s count=%s",
-        idea_block.id,
-        task_item_ids,
-        len(task_item_ids),
-    )
-    if not task_item_ids:
-        await _clear_similarity_for_idea_block(idea_block, "No task items", db)
-        return
-
     if idea_block.embedding_vector is None:
         await _clear_similarity_for_idea_block(idea_block, "Missing embedding vector", db)
         return
 
-    same_item_blocks = await _find_same_item_blocks(idea_block, task_item_ids, db)
+    task_name = resolve_task_id(session_name=idea_block.session_name, task_id=idea_block.task_name)
+    if get_task_config_for_session(session_name=idea_block.session_name, task_id=task_name).get("task_id") == "enhance-the-poster":
+        component_ids = await _get_poster_component_ids(idea_block.id, db)
+        logger.info(
+            "similarity_detection_poster_components idea_block_id=%s component_ids=%s count=%s",
+            idea_block.id,
+            component_ids,
+            len(component_ids),
+        )
+        if not component_ids:
+            await _clear_similarity_for_idea_block(idea_block, "No poster component mappings", db)
+            return
+        same_item_blocks = await _find_same_component_blocks(idea_block, component_ids, db)
+    else:
+        task_item_ids = await _get_task_item_ids(idea_block.id, db)
+        logger.info(
+            "similarity_detection_task_items idea_block_id=%s task_item_ids=%s count=%s",
+            idea_block.id,
+            task_item_ids,
+            len(task_item_ids),
+        )
+        if not task_item_ids:
+            await _clear_similarity_for_idea_block(idea_block, "No task items", db)
+            return
+        same_item_blocks = await _find_same_item_blocks(idea_block, task_item_ids, db)
+
     same_item_ids = [block.id for block in same_item_blocks]
     logger.info(
         "similarity_detection_same_item_blocks idea_block_id=%s candidate_ids=%s count=%s",
@@ -182,7 +197,25 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(idea_block, "No same-item candidates", db)
         return
 
-    cosine_candidates = await _find_cosine_candidates(idea_block, same_item_ids, db)
+    scored_cosine_candidates = await _score_cosine_candidates(idea_block, same_item_ids, db)
+    logger.info(
+        "similarity_detection_cosine_scored idea_block_id=%s candidates=%s threshold=%s",
+        idea_block.id,
+        [
+            {
+                "id": candidate.id,
+                "similarity": round(score, 4),
+                "passed": score > COSINE_SIMILARITY_THRESHOLD,
+            }
+            for candidate, score in scored_cosine_candidates
+        ],
+        COSINE_SIMILARITY_THRESHOLD,
+    )
+    cosine_candidates = [
+        (candidate, score)
+        for candidate, score in scored_cosine_candidates
+        if score > COSINE_SIMILARITY_THRESHOLD
+    ]
     logger.info(
         "similarity_detection_cosine_candidates idea_block_id=%s candidates=%s threshold=%s",
         idea_block.id,
@@ -206,7 +239,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         return
 
     candidates = [candidate for candidate, _ in cosine_candidates]
-    llm_result = await _select_first_similar_with_llm(idea_block, candidates)
+    llm_result = await _select_first_similar_with_llm(idea_block, candidates, task_name=task_name)
     candidate_ids = {candidate.id for candidate in candidates}
     selected_id = llm_result.get("id")
     reason = str(llm_result.get("reason") or "").strip()
@@ -254,6 +287,22 @@ async def _get_task_item_ids(idea_block_id: int, db: AsyncSession) -> list[int]:
     return list(result.scalars().all())
 
 
+async def _get_poster_component_ids(idea_block_id: int, db: AsyncSession) -> list[str]:
+    result = await db.execute(
+        select(PosterIdeaBlockTaskItem.component_id)
+        .where(PosterIdeaBlockTaskItem.idea_block_id == idea_block_id)
+        .order_by(PosterIdeaBlockTaskItem.component_id.asc())
+    )
+    component_ids: list[str] = []
+    seen: set[str] = set()
+    for component_id in result.scalars().all():
+        if component_id in seen:
+            continue
+        seen.add(component_id)
+        component_ids.append(component_id)
+    return component_ids
+
+
 async def _find_same_item_blocks(
     idea_block: IdeaBlock,
     task_item_ids: list[int],
@@ -283,7 +332,36 @@ async def _find_same_item_blocks(
     return list(result.scalars().all())
 
 
-async def _find_cosine_candidates(
+async def _find_same_component_blocks(
+    idea_block: IdeaBlock,
+    component_ids: list[str],
+    db: AsyncSession,
+) -> list[IdeaBlock]:
+    id_result = await db.execute(
+        select(distinct(IdeaBlock.id))
+        .join(PosterIdeaBlockTaskItem, PosterIdeaBlockTaskItem.idea_block_id == IdeaBlock.id)
+        .where(
+            IdeaBlock.session_name == idea_block.session_name,
+            IdeaBlock.user_id != idea_block.user_id,
+            IdeaBlock.id != idea_block.id,
+            IdeaBlock.embedding_vector.is_not(None),
+            PosterIdeaBlockTaskItem.component_id.in_(component_ids),
+        )
+        .order_by(IdeaBlock.id.desc())
+    )
+    idea_block_ids = list(id_result.scalars().all())
+    if not idea_block_ids:
+        return []
+
+    result = await db.execute(
+        select(IdeaBlock)
+        .where(IdeaBlock.id.in_(idea_block_ids))
+        .order_by(IdeaBlock.id.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def _score_cosine_candidates(
     idea_block: IdeaBlock,
     same_item_ids: list[int],
     db: AsyncSession,
@@ -295,14 +373,13 @@ async def _find_cosine_candidates(
         .where(
             IdeaBlock.id.in_(same_item_ids),
             IdeaBlock.embedding_vector.is_not(None),
-            distance < COSINE_DISTANCE_THRESHOLD,
         )
         .order_by(IdeaBlock.id.desc())
     )
     return [(idea, float(score)) for idea, score in result.all()]
 
 
-async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock]) -> dict[str, Any]:
+async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock], *, task_name: str | None = None) -> dict[str, Any]:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required for similarity detection")
@@ -324,7 +401,7 @@ Summary: {idea_block.summary}
 
 # Output (JSON Only)
 """.strip()
-    system_prompt = _build_similarity_system_prompt(idea_block.session_name)
+    system_prompt = _build_similarity_system_prompt(idea_block.session_name, task_name=task_name)
     logger.info(
         "similarity_detection_llm_request idea_block_id=%s candidate_ids=%s prompt_chars=%s",
         idea_block.id,

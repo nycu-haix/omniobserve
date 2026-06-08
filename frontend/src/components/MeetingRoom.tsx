@@ -62,6 +62,10 @@ interface RankingSnapshot {
 	items: string[];
 }
 
+function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
+	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
+}
+
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
 const MIN_PRIVATE_BOARD_WIDTH = 520;
@@ -384,6 +388,7 @@ function isBoardStateMessage(message: object | null): message is {
 	ranking?: { items: string[] };
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
+	ranking_items?: TaskConfigItem[] | null;
 	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
@@ -1353,6 +1358,28 @@ export default function MeetingRoom() {
 
 			const publicRanking = lastMessage.public_ranking ?? (lastMessage.ranking ? { revision: lastMessage.revision, items: lastMessage.ranking.items } : null);
 			const privateRanking = lastMessage.private_ranking;
+			if (isTaskConfigItemList(lastMessage.ranking_items)) {
+				const nextTaskItems = lastMessage.ranking_items;
+				const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
+				const nextDefaultItemIds = nextTaskItems.map(item => item.id);
+				const rankingItemsTimer = window.setTimeout(() => {
+					setTaskItems(nextTaskItems);
+					if (publicRanking) {
+						setPublicRankingRevision(publicRanking.revision);
+						setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+					if (privateRanking) {
+						setPrivateRankingRevision(privateRanking.revision);
+						setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+					}
+				}, 0);
+				return () => {
+					if (phaseTimer !== null) {
+						window.clearTimeout(phaseTimer);
+					}
+					window.clearTimeout(rankingItemsTimer);
+				};
+			}
 			const rankings: Array<[RankingScope, RankingSnapshot]> = [];
 			if (publicRanking) {
 				rankings.push(["public", publicRanking]);

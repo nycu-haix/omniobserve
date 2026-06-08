@@ -317,17 +317,26 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無改善項目</div>}
 				{!isLoading &&
 					sortPrivatePhaseTaskItems(items).map((item, index, sortedItems) => (
-						<PrivatePhaseTaskItemRow
-							key={item.id}
-							item={item}
-							index={index}
-							isFirst={index === 0}
-							isLast={index === sortedItems.length - 1}
-							isMoving={movingItemId === item.id}
-							onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
-							onEdit={editTaskItem}
-							onDelete={itemId => void deleteTaskItem(itemId)}
-						/>
+						<div key={item.id} className="contents">
+							{index === 4 && (
+								<div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 py-1 text-xs font-medium text-muted-foreground">
+									<span className="h-px bg-border" />
+									<span className="rounded-full border bg-background px-3 py-1">Only the first four items will be saved for Private Phase 2</span>
+									<span className="h-px bg-border" />
+								</div>
+							)}
+							<PrivatePhaseTaskItemRow
+								key={item.id}
+								item={item}
+								index={index}
+								isFirst={index === 0}
+								isLast={index === sortedItems.length - 1}
+								isMoving={movingItemId === item.id}
+								onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
+								onEdit={editTaskItem}
+								onDelete={itemId => void deleteTaskItem(itemId)}
+							/>
+						</div>
 					))}
 			</div>
 

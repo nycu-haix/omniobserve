@@ -3,12 +3,14 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..models import Visibility
+from .poster_idea_block_task_item import PosterIdeaBlockTaskItemResponse
 from .task_item import TaskItemResponse
 
 
 class IdeaBlockCreate(BaseModel):
     user_id: int
     session_name: str
+    task_name: str = "lost-at-sea"
     title: str
     summary: str
     transcript_id: int | None = None
@@ -77,6 +79,7 @@ class IdeaBlockResponse(BaseModel):
     id: int
     user_id: int
     session_name: str
+    task_name: str
     time_stamp: datetime
     title: str
     summary: str
@@ -96,6 +99,7 @@ class IdeaBlockResponse(BaseModel):
 
 class IdeaBlockListResponse(BaseModel):
     id: int
+    task_name: str
     time_stamp: datetime
     summary: str
     title: str
@@ -116,6 +120,7 @@ class IdeaBlockOverviewResponse(BaseModel):
     id: int
     user_id: int
     session_name: str
+    task_name: str
     time_stamp: datetime
     summary: str
     title: str
@@ -136,5 +141,5 @@ class IdeaBlockGenerationRequest(BaseModel):
 
 class IdeaBlockGenerationResponse(BaseModel):
     idea_blocks: list[IdeaBlockListResponse]
+    task_items: list[TaskItemResponse | PosterIdeaBlockTaskItemResponse]
     duplicate_idea_blocks: list[IdeaBlockListResponse] = Field(default_factory=list)
-    task_items: list[TaskItemResponse]

@@ -12,6 +12,7 @@ from ..config import logger
 from ..db import SessionLocal
 from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
+from ..task_config import resolve_task_id
 from .embedding_service import create_text_embedding
 from .idea_blocks import build_idea_blocks_with_llm
 from .idea_block_deduplication import find_duplicate_idea_block
@@ -41,6 +42,7 @@ async def handle_transcript_segment(
     transcript: StreamTranscript | None,
     is_final: bool,
     visibility: Visibility,
+    task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult | None:
     key = (session_name, user_id)
@@ -96,6 +98,7 @@ async def handle_transcript_segment(
         user_id=user_id,
         visibility=visibility,
         transcripts=transcripts,
+        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
@@ -107,8 +110,10 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     user_id: int,
     visibility: Visibility,
     transcripts: list[StreamTranscript],
+    task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
+    resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
     if not transcript_text:
         logger.info(
@@ -141,7 +146,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(transcript_text),
         )
-        generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name)
+        generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
         logger.info(
             "pipeline_idea_llm_done session_name=%s user_id=%s count=%s",
             session_name,
@@ -184,7 +189,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 len(summary),
             )
-            task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name)
+            task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name, task_name=resolved_task_name)
             logger.info(
                 "pipeline_task_item_ids_done session_name=%s user_id=%s block_index=%s task_item_ids=%s",
                 session_name,
@@ -225,6 +230,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             idea_block = IdeaBlock(
                 user_id=user_id,
                 session_name=session_name,
+                task_name=resolved_task_name,
                 title=title,
                 summary=summary,
                 transcript_id=main_transcript_id,
@@ -256,6 +262,9 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     db,
                     idea_block_id=idea_block.id,
                     task_item_ids=task_item_ids,
+                    session_name=session_name,
+                    task_name=resolved_task_name,
+                    text=summary,
                 )
             )
             logger.info(
@@ -317,6 +326,7 @@ async def generate_idea_blocks_with_task_items_from_text(
     user_id: int,
     visibility: Visibility,
     transcript_text: str,
+    task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     transcript = StreamTranscript(segment_id="manual", text=transcript_text)
@@ -326,6 +336,7 @@ async def generate_idea_blocks_with_task_items_from_text(
         user_id=user_id,
         visibility=visibility,
         transcripts=[transcript],
+        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
@@ -337,6 +348,7 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
     user_id: int,
     visibility: Visibility,
     transcript_ids: list[int],
+    task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     if not transcript_ids:
@@ -365,6 +377,7 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
         user_id=user_id,
         visibility=visibility,
         transcripts=stream_transcripts,
+        task_name=task_name,
         on_similarity_update=on_similarity_update,
     )
 
