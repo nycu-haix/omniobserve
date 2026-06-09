@@ -418,28 +418,34 @@ def _schedule_public_context_matching(
             if not matches:
                 return
 
-            await board_manager.broadcast(
-                session_id,
-                {
-                    "type": "public_context_matches",
-                    "payload": {
-                        "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
-                        "participantId": participant_id,
-                        "textChars": len(text),
-                        "contextChars": len(match_text),
-                        "matches": [
-                            {
-                                "ideaBlockId": str(match.idea_block_id),
-                                "userId": str(match.user_id),
-                                "score": match.score,
-                                "reason": match.reason,
-                                "taskItemIds": match.task_item_ids,
-                            }
-                            for match in matches
-                        ],
+            matches_by_user: dict[str, list[Any]] = {}
+            for match in matches:
+                matches_by_user.setdefault(str(match.user_id), []).append(match)
+
+            for target_participant_id, user_matches in matches_by_user.items():
+                await board_manager.send_to(
+                    session_id,
+                    target_participant_id,
+                    {
+                        "type": "public_context_matches",
+                        "payload": {
+                            "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                            "participantId": participant_id,
+                            "textChars": len(text),
+                            "contextChars": len(match_text),
+                            "matches": [
+                                {
+                                    "ideaBlockId": str(match.idea_block_id),
+                                    "userId": str(match.user_id),
+                                    "score": match.score,
+                                    "reason": match.reason,
+                                    "taskItemIds": match.task_item_ids,
+                                }
+                                for match in user_matches
+                            ],
+                        },
                     },
-                },
-            )
+                )
         except Exception as exc:
             logger.exception(
                 "public_context_matching_failed session_id=%s participant_id=%s transcript_segment_id=%s error_type=%s error=%s",
