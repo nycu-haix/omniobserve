@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,6 +31,7 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
+from .public_context_matching import find_public_context_matches
 from .phase_task_item_snapshot_service import initialize_phase_rankings
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
 from .ranking_state_query_service import get_effective_ranking_state
@@ -43,6 +44,13 @@ DUPLICATE_PARTICIPANT_MESSAGE = (
 DUPLICATE_ADMIN_MESSAGE = "這個 admin 已經在此 session 中，不能重複進入。"
 ADMIN_PARTICIPANT_ID = "admin"
 ADMIN_PARTICIPANT_ID_PREFIX = f"{ADMIN_PARTICIPANT_ID}-"
+PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS = 4
+PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS = 700
+PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS = 0.75
+_public_context_windows: dict[str, deque[str]] = defaultdict(
+    lambda: deque(maxlen=PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS)
+)
+_public_context_matching_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def _is_admin_participant_id(participant_id: str | None) -> bool:
@@ -350,6 +358,8 @@ def _serialize_admin_idea_blocks(idea_blocks: list[Any]) -> list[dict[str, Any]]
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
             "similarity_is_same_reason": block.similarity_is_same_reason,
+            "similarity_has_same_reason": block.similarity_has_same_reason,
+            "similarity_has_different_reason": block.similarity_has_different_reason,
         }
         for block in idea_blocks
     ]
@@ -380,6 +390,109 @@ async def broadcast_public_transcript_line(
             },
         },
     )
+    _schedule_public_context_matching(
+        session_id=session_id,
+        participant_id=participant_id,
+        text=text,
+        transcript_segment_id=transcript_segment_id,
+    )
+
+
+def _schedule_public_context_matching(
+    *,
+    session_id: str,
+    participant_id: str,
+    text: str,
+    transcript_segment_id: str | int | None,
+) -> None:
+    if not text.strip():
+        return
+    match_text = _append_public_context_text(session_id, text)
+
+    async def run_matching() -> None:
+        try:
+            await asyncio.sleep(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS)
+            async with SessionLocal() as db:
+                matches = await find_public_context_matches(
+                    db,
+                    session_name=session_id,
+                    public_text=match_text,
+                )
+            if not matches:
+                return
+
+            matches_by_user: dict[str, list[Any]] = {}
+            for match in matches:
+                matches_by_user.setdefault(str(match.user_id), []).append(match)
+
+            for target_participant_id, user_matches in matches_by_user.items():
+                await board_manager.send_to(
+                    session_id,
+                    target_participant_id,
+                    {
+                        "type": "public_context_matches",
+                        "payload": {
+                            "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                            "participantId": participant_id,
+                            "textChars": len(text),
+                            "contextChars": len(match_text),
+                            "matches": [
+                                {
+                                    "ideaBlockId": str(match.idea_block_id),
+                                    "userId": str(match.user_id),
+                                    "score": match.score,
+                                    "reason": match.reason,
+                                    "taskItemIds": match.task_item_ids,
+                                }
+                                for match in user_matches
+                            ],
+                        },
+                    },
+                )
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.exception(
+                "public_context_matching_failed session_id=%s participant_id=%s transcript_segment_id=%s error_type=%s error=%s",
+                session_id,
+                participant_id,
+                transcript_segment_id,
+                exc.__class__.__name__,
+                exc,
+            )
+        finally:
+            current_task = asyncio.current_task()
+            if _public_context_matching_tasks.get(session_id) is current_task:
+                _public_context_matching_tasks.pop(session_id, None)
+
+    logger.info(
+        "public_context_matching_scheduled session_id=%s participant_id=%s transcript_segment_id=%s text_chars=%s",
+        session_id,
+        participant_id,
+        transcript_segment_id,
+        len(text),
+    )
+    previous_task = _public_context_matching_tasks.get(session_id)
+    if previous_task is not None and not previous_task.done():
+        previous_task.cancel()
+    _public_context_matching_tasks[session_id] = asyncio.create_task(run_matching())
+
+
+def _append_public_context_text(session_id: str, text: str) -> str:
+    window = _public_context_windows[session_id]
+    normalized_text = text.strip()
+    window.append(normalized_text)
+
+    selected: list[str] = []
+    total_chars = 0
+    for segment in reversed(window):
+        segment_chars = len(segment)
+        if selected and total_chars + segment_chars > PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS:
+            break
+        selected.append(segment)
+        total_chars += segment_chars
+
+    return "\n".join(reversed(selected))
 
 
 def _normalize_int(value: Any, default: int) -> int:
@@ -975,6 +1088,11 @@ async def handle_board_websocket(
             raise
     finally:
         await board_manager.disconnect(session_id, participant_id, websocket)
+        if not board_manager.get_participants(session_id):
+            _public_context_windows.pop(session_id, None)
+            pending_public_context_task = _public_context_matching_tasks.pop(session_id, None)
+            if pending_public_context_task is not None and not pending_public_context_task.done():
+                pending_public_context_task.cancel()
         logger.info(
             "board ws disconnected session_id=%s participant_id=%s participants=%s",
             session_id,

@@ -1,4 +1,4 @@
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import IdeaBlock, Similarity
@@ -9,43 +9,44 @@ async def attach_similarity_reason_flags(
     db: AsyncSession,
 ) -> IdeaBlock | list[IdeaBlock]:
     blocks = [idea_blocks] if isinstance(idea_blocks, IdeaBlock) else list(idea_blocks)
-    pair_keys = [
-        (block.id, block.similarity_id)
-        for block in blocks
-        if block.id is not None and block.similarity_id is not None
-    ]
-    if not pair_keys:
+    block_ids = [block.id for block in blocks if block.id is not None]
+    if not block_ids:
         for block in blocks:
             block.similarity_is_same_reason = None
+            block.similarity_has_same_reason = False
+            block.similarity_has_different_reason = False
         return idea_blocks
 
     result = await db.execute(
         select(Similarity).where(
             or_(
-                *[
-                    or_(
-                        and_(
-                            Similarity.idea_block_id_1 == idea_block_id,
-                            Similarity.idea_block_id_2 == similar_idea_block_id,
-                        ),
-                        and_(
-                            Similarity.idea_block_id_1 == similar_idea_block_id,
-                            Similarity.idea_block_id_2 == idea_block_id,
-                        ),
-                    )
-                    for idea_block_id, similar_idea_block_id in pair_keys
-                ]
+                Similarity.idea_block_id_1.in_(block_ids),
+                Similarity.idea_block_id_2.in_(block_ids),
             )
         )
     )
-    flags_by_pair = {
-        frozenset((similarity.idea_block_id_1, similarity.idea_block_id_2)): similarity.is_same_reason
-        for similarity in result.scalars().all()
+    reason_flags_by_block_id = {
+        block_id: {"same": False, "different": False}
+        for block_id in block_ids
     }
+    for similarity in result.scalars().all():
+        for block_id in (similarity.idea_block_id_1, similarity.idea_block_id_2):
+            if block_id not in reason_flags_by_block_id:
+                continue
+            if similarity.is_same_reason:
+                reason_flags_by_block_id[block_id]["same"] = True
+            else:
+                reason_flags_by_block_id[block_id]["different"] = True
+
     for block in blocks:
-        if block.similarity_id is None:
+        flags = reason_flags_by_block_id.get(block.id, {"same": False, "different": False})
+        has_same_reason = flags["same"]
+        has_different_reason = flags["different"]
+        block.similarity_has_same_reason = has_same_reason
+        block.similarity_has_different_reason = has_different_reason
+        if has_same_reason == has_different_reason:
             block.similarity_is_same_reason = None
             continue
-        block.similarity_is_same_reason = flags_by_pair.get(frozenset((block.id, block.similarity_id)))
+        block.similarity_is_same_reason = has_same_reason
 
     return idea_blocks

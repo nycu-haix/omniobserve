@@ -116,7 +116,7 @@ async def create_idea_block(payload: IdeaBlockCreate, db: AsyncSession) -> IdeaB
 
 
 def _title_from_content(content: str) -> str:
-    value = content.strip()[:10]
+    value = content.strip()[:20]
     return value or "Idea"
 
 

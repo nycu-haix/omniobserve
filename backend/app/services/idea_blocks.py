@@ -352,7 +352,7 @@ def _build_mock_idea_blocks(transcript_text: str) -> list[dict[str, Any]] | None
 
 
 def _title_from_content(content: str) -> str:
-    value = content.strip()[:10]
+    value = content.strip()[:20]
     return value or "Idea"
 
 

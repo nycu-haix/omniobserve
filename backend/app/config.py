@@ -29,6 +29,9 @@ IDEA_LLM_ENABLE_THINKING = os.getenv("IDEA_LLM_ENABLE_THINKING", "0").lower() in
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "bge-m3")
 OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "30"))
+OLLAMA_EMBED_RETRY_ATTEMPTS = int(os.getenv("OLLAMA_EMBED_RETRY_ATTEMPTS", "2"))
+OLLAMA_EMBED_RETRY_DELAY_SECONDS = float(os.getenv("OLLAMA_EMBED_RETRY_DELAY_SECONDS", "0.75"))
+OLLAMA_EMBED_WARMUP_ON_STARTUP = os.getenv("OLLAMA_EMBED_WARMUP_ON_STARTUP", "1").lower() in {"1", "true", "yes", "on"}
 
 STREAM_CHUNK_SAMPLES = 16000
 STREAM_WINDOW_SECONDS = float(os.getenv("STREAM_WINDOW_SECONDS", "4"))
@@ -82,7 +85,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 6) 與題目目標有關的問題或不確定性
 
 每個 idea block 請輸出：
-1) content：一句最多10個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）
+1) content：一句最多20個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）
 2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文；必須使用第一人稱「我覺得...」保留說話者原本的主觀立場，不要寫成「說話者明確表示...」這類第三人稱描述
 3) transcript：該 idea block 對應的逐字稿原文片段
 
@@ -159,7 +162,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 
 [
   {{
-    "content": "一句最多10個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）",
+    "content": "一句最多20個字的短總結，描述此 idea block 與任務清單中哪個 item 或哪個決策有關（給前端顯示用）",
     "summary": "針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思與其和題目任務的關係，但不要直接複製原文；必須使用第一人稱「我覺得...」保留說話者原本的主觀立場，不要寫成「說話者明確表示...」這類第三人稱描述",
     "transcript": "對應逐字稿原文片段"
   }},
@@ -187,7 +190,7 @@ IDEA_BLOCK_SYSTEM_PROMPT = PROMPT_TEMPLATE = '''
 # <Task>
 # 閱讀 <Context> 標籤中的逐字稿內容，並根據 <Principle> 中定義的準則將其分割成獨立的 idea blocks。
 # 每個 idea block 應代表一個完整的想法或觀點，並輸出：
-# 1) content：一句最多10個字的短總結（給前端顯示）
+# 1) content：一句最多20個字的短總結（給前端顯示）
 # 2) summary：針對 content 原本逐字稿的部分進行解釋說明，讓人能理解 content 的意思，但不要直接複製原文。這部分應該是對 content 的補充說明，幫助使用者理解這個 idea block 的核心想法和背景。
 # 3) transcript：該 idea block 對應的逐字稿原文片段
 # </Task>
