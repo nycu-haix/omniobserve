@@ -1166,8 +1166,8 @@ export function PrivateBoard({
 	const [timerEndTime, setTimerEndTime] = useState<number>(0);
 	const visiblePhase = controlledPhase ?? currentPhase;
 	const visibleTimerEndTime = controlledTimerEndTime ?? timerEndTime;
-	const canShowIdeaBlocks = cueCondition === "experimental";
-	const visibleActiveTab = !canShowIdeaBlocks && activeTab === "ideablock" ? "transcript" : activeTab;
+	const canShowSimilarityCues = cueCondition === "experimental";
+	const visibleActiveTab = activeTab;
 	const [ideaBlocks, setIdeaBlocks] = useState<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const [transcriptLines, setTranscriptLines] = useState<TranscriptLineType[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_TRANSCRIPT_LINES : []);
 	const [publicChatMessages, setPublicChatMessages] = useState<PublicChatMessage[]>([]);
@@ -1220,7 +1220,7 @@ export function PrivateBoard({
 	});
 	const queueSimilarityCueFromBlock = useCallback(
 		(block: IdeaBlock) => {
-			if (cueCondition !== "experimental") {
+			if (!canShowSimilarityCues) {
 				console.info("[private-board] similarity cue fallback skipped", {
 					reason: "cue_condition",
 					cueCondition,
@@ -1258,10 +1258,10 @@ export function PrivateBoard({
 				return nextCues;
 			});
 		},
-		[cueCondition]
+		[canShowSimilarityCues, cueCondition]
 	);
 
-	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
+	const isIdeaBlocksTabActive = visibleActiveTab === "ideablock";
 
 	const captureIdeaBlockPositions = useCallback(() => {
 		const nextTops: Record<string, number> = {};
@@ -1325,23 +1325,23 @@ export function PrivateBoard({
 			const isEnteringGroupPhase = !isGroupPhase(previousPhase) && isGroupPhase(nextPhase);
 			const isLeavingGroupPhase = isGroupPhase(previousPhase) && !isGroupPhase(nextPhase);
 
-			if (isEnteringGroupPhase && cueCondition === "experimental") {
+			if (isEnteringGroupPhase && canShowSimilarityCues) {
 				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
 				clearCuesSoon();
 				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
 			}
 
-			if (isLeavingGroupPhase || cueCondition !== "experimental") {
+			if (isLeavingGroupPhase || !canShowSimilarityCues) {
 				clearPhaseTransitionCueBatchTimer();
 				phaseTransitionCueBatchRef.current = null;
-				if (cueCondition !== "experimental") {
+				if (!canShowSimilarityCues) {
 					clearCuesSoon();
 				}
 			}
 
 			previousVisiblePhaseRef.current = nextPhase;
 		},
-		[clearCuesSoon, clearPhaseTransitionCueBatchTimer, cueCondition, startPhaseTransitionCueBatch]
+		[canShowSimilarityCues, clearCuesSoon, clearPhaseTransitionCueBatchTimer, startPhaseTransitionCueBatch]
 	);
 
 	const selectBoardTab = useCallback((tab: BoardTab) => {
@@ -1356,14 +1356,11 @@ export function PrivateBoard({
 
 	const jumpToBlock = useCallback(
 		(blockId: string) => {
-			if (!canShowIdeaBlocks) {
-				return;
-			}
 			onRequestOpen?.();
 			selectBoardTab("ideablock");
 			setHighlightedBlockId(blockId);
 		},
-		[canShowIdeaBlocks, onRequestOpen, selectBoardTab]
+		[onRequestOpen, selectBoardTab]
 	);
 
 	const dismissIdeaBlockChatShareNotice = useCallback((noticeId: string) => {
@@ -1429,7 +1426,7 @@ export function PrivateBoard({
 				return;
 			}
 
-			if (event.code === "Digit2" && canShowIdeaBlocks) {
+			if (event.code === "Digit2") {
 				event.preventDefault();
 				selectBoardTab("ideablock");
 				return;
@@ -1448,7 +1445,7 @@ export function PrivateBoard({
 
 		window.addEventListener("keydown", handleComposerShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleComposerShortcutKeyDown);
-	}, [canShowIdeaBlocks, focusActiveComposer, selectBoardTab]);
+	}, [focusActiveComposer, selectBoardTab]);
 
 	useEffect(() => {
 		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
@@ -1753,7 +1750,7 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "similarity_cue") {
-				if (cueCondition !== "experimental") {
+				if (!canShowSimilarityCues) {
 					return;
 				}
 				console.info("[private-board] similarity_cue received", {
@@ -1816,7 +1813,7 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "similarity_reason_shared") {
-				if (cueCondition !== "experimental") {
+				if (!canShowSimilarityCues) {
 					return;
 				}
 				const sharedReason = lastMessage.payload;
@@ -1876,7 +1873,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [captureIdeaBlockPositions, cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
+	}, [canShowSimilarityCues, captureIdeaBlockPositions, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
@@ -2647,6 +2644,9 @@ export function PrivateBoard({
 	);
 
 	const shareSimilarityReason = (cue: SimilarityCueData) => {
+		if (!canShowSimilarityCues) {
+			return;
+		}
 		if (cue.kind === "phase-transition-summary") {
 			return;
 		}
@@ -2675,11 +2675,11 @@ export function PrivateBoard({
 
 	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
-	const transcriptTabLines = canShowIdeaBlocks ? publicTranscriptLines : transcriptLines;
-	const transcriptTabEmptyText = canShowIdeaBlocks ? "尚無公開逐字稿" : "尚無逐字稿";
+	const transcriptTabLines = publicTranscriptLines;
+	const transcriptTabEmptyText = "尚無公開逐字稿";
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
-	const visibleSimilarityCues = canShowIdeaBlocks && isGroupPhase(visiblePhase) ? cues : [];
+	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
 	const ideaBlockChatShareCueContent =
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
@@ -2721,27 +2721,25 @@ export function PrivateBoard({
 							>
 								逐字稿
 							</Button>
-							{canShowIdeaBlocks && (
-								<Button
-									aria-pressed={visibleActiveTab === "ideablock"}
-									className={cn(
-										"relative transition-all active:translate-y-px active:scale-[0.98]",
-										visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
-									)}
-									variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
-									onClick={() => selectBoardTab("ideablock")}
-								>
-									Idea Blocks
-									{unreadIdeaBlockCount > 0 && (
-										<span
-											className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
-											aria-label={`${unreadIdeaBlockCount} unread idea blocks`}
-										>
-											{unreadIdeaBlockCountLabel}
-										</span>
-									)}
-								</Button>
-							)}
+							<Button
+								aria-pressed={visibleActiveTab === "ideablock"}
+								className={cn(
+									"relative transition-all active:translate-y-px active:scale-[0.98]",
+									visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
+								)}
+								variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
+								onClick={() => selectBoardTab("ideablock")}
+							>
+								Idea Blocks
+								{unreadIdeaBlockCount > 0 && (
+									<span
+										className="absolute -right-1.5 -top-1.5 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-card bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground shadow-sm"
+										aria-label={`${unreadIdeaBlockCount} unread idea blocks`}
+									>
+										{unreadIdeaBlockCountLabel}
+									</span>
+								)}
+							</Button>
 							<Button
 								aria-pressed={visibleActiveTab === "public-chat"}
 								className={cn(
@@ -2796,7 +2794,7 @@ export function PrivateBoard({
 								<TranscriptLines
 									lines={privateTranscriptLines}
 									emptyText="尚無逐字稿"
-									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+									onJumpToBlock={jumpToBlock}
 									onTranscriptRef={setTranscriptRef}
 									highlightedTranscriptId={highlightedTranscriptId}
 								/>
@@ -2845,6 +2843,7 @@ export function PrivateBoard({
 												canJumpToTranscript={canJumpToTranscript(block)}
 												canShareToChat={isConnected}
 												currentPhase={visiblePhase}
+												showSimilarityCue={canShowSimilarityCues}
 											/>
 										</div>
 									))}
