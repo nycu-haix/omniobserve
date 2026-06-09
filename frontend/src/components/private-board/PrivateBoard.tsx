@@ -769,9 +769,9 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 								isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
 								cueText: nextBlock.cueText ?? block.cueText,
 								hasCue: nextBlock.hasCue ?? block.hasCue,
-								similarityIsSameReason: nextBlock.similarityIsSameReason,
-								similarityHasSameReason: nextBlock.similarityHasSameReason ?? false,
-								similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? false,
+								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+								similarityHasSameReason: nextBlock.similarityHasSameReason ?? block.similarityHasSameReason ?? false,
+								similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? block.similarityHasDifferentReason ?? false
 								publicContextRelevant: block.publicContextRelevant || nextBlock.publicContextRelevant,
 								publicContextScore: nextBlock.publicContextScore ?? block.publicContextScore,
 								publicContextReason: nextBlock.publicContextReason ?? block.publicContextReason,
