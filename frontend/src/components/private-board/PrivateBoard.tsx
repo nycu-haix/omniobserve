@@ -760,27 +760,30 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 					return [...blocks, { ...nextBlock, isUnread: options?.markNewUnread ? true : nextBlock.isUnread }];
 				}
 
-				return blocks.map(block =>
-					block.id === nextBlock.id
-						? {
-								...block,
-								...nextBlock,
-								expanded: block.expanded,
-								isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
-								cueText: nextBlock.cueText ?? block.cueText,
-								hasCue: nextBlock.hasCue ?? block.hasCue,
-								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
-								similarityHasSameReason: nextBlock.similarityHasSameReason ?? block.similarityHasSameReason ?? false,
-								similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? block.similarityHasDifferentReason ?? false
-								publicContextRelevant: block.publicContextRelevant || nextBlock.publicContextRelevant,
-								publicContextScore: nextBlock.publicContextScore ?? block.publicContextScore,
-								publicContextReason: nextBlock.publicContextReason ?? block.publicContextReason,
-								publicContextExpiresAtMs: Math.max(block.publicContextExpiresAtMs ?? 0, nextBlock.publicContextExpiresAtMs ?? 0) || undefined,
-								sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
-								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
-							}
-						: block
-				);
+				return blocks.map(block => {
+					if (block.id !== nextBlock.id) {
+						return block;
+					}
+
+					const isClearingPublicContext = nextBlock.publicContextRelevant === false;
+					return {
+						...block,
+						...nextBlock,
+						expanded: block.expanded,
+						isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
+						cueText: nextBlock.cueText ?? block.cueText,
+						hasCue: nextBlock.hasCue ?? block.hasCue,
+						similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+						similarityHasSameReason: nextBlock.similarityHasSameReason ?? block.similarityHasSameReason ?? false,
+						similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? block.similarityHasDifferentReason ?? false,
+						publicContextRelevant: nextBlock.publicContextRelevant ?? block.publicContextRelevant,
+						publicContextScore: isClearingPublicContext ? null : (nextBlock.publicContextScore ?? block.publicContextScore),
+						publicContextReason: isClearingPublicContext ? undefined : (nextBlock.publicContextReason ?? block.publicContextReason),
+						publicContextExpiresAtMs: isClearingPublicContext ? undefined : Math.max(block.publicContextExpiresAtMs ?? 0, nextBlock.publicContextExpiresAtMs ?? 0) || undefined,
+						sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
+						createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
+					};
+				});
 			}, baseBlocks)
 		)
 	);

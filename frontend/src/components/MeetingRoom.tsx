@@ -543,17 +543,7 @@ function isJoinRejectedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "join_rejected";
 }
 
-function SortableLostAtSeaItem({
-	item,
-	rankDelta,
-	showImage,
-	onPreview
-}: {
-	item: LostAtSeaItem;
-	rankDelta?: number;
-	showImage: boolean;
-	onPreview: (item: LostAtSeaItem) => void;
-}) {
+function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item: LostAtSeaItem; rankDelta?: number; showImage: boolean; onPreview: (item: LostAtSeaItem) => void }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});

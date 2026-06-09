@@ -46,6 +46,7 @@ ADMIN_PARTICIPANT_ID = "admin"
 ADMIN_PARTICIPANT_ID_PREFIX = f"{ADMIN_PARTICIPANT_ID}-"
 PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS = 4
 PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS = 700
+PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS = 0.75
 _public_context_windows: dict[str, deque[str]] = defaultdict(
     lambda: deque(maxlen=PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS)
 )
@@ -410,6 +411,7 @@ def _schedule_public_context_matching(
 
     async def run_matching() -> None:
         try:
+            await asyncio.sleep(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS)
             async with SessionLocal() as db:
                 matches = await find_public_context_matches(
                     db,
@@ -1088,6 +1090,9 @@ async def handle_board_websocket(
         await board_manager.disconnect(session_id, participant_id, websocket)
         if not board_manager.get_participants(session_id):
             _public_context_windows.pop(session_id, None)
+            pending_public_context_task = _public_context_matching_tasks.pop(session_id, None)
+            if pending_public_context_task is not None and not pending_public_context_task.done():
+                pending_public_context_task.cancel()
         logger.info(
             "board ws disconnected session_id=%s participant_id=%s participants=%s",
             session_id,
