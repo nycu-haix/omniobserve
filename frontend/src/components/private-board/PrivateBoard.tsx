@@ -848,10 +848,8 @@ function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueDa
 }
 
 function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
-	const similarity = typeof response.duplicate_similarity === "number" ? Math.round(response.duplicate_similarity * 100) : null;
-	const similarityText = similarity == null ? "" : `相似度 ${similarity}%`;
 	const blockTitle = (block.aiSummary || block.summary).trim() || "既有想法";
-	const message = similarityText ? `已找到相似的既有想法：「${blockTitle}」(${similarityText})` : `已找到相似的既有想法：「${blockTitle}」`;
+	const message = `已找到相似的既有想法：「${blockTitle}」`;
 
 	return {
 		id: `duplicate-${block.id}-${Date.now()}`,
