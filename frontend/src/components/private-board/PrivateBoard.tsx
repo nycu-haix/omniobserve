@@ -161,6 +161,8 @@ type AudioDraftTargetMessage = AudioTranscriptMessage | AudioTranscriptBoundaryM
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const AUDIO_FINAL_DUPLICATE_WINDOW_MS = 5000;
+const MAX_PUBLIC_CHAT_MESSAGE_LENGTH = 2000;
+const IDEA_BLOCK_CHAT_PREFIX = "Idea block：";
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
@@ -720,6 +722,28 @@ function sortPublicChatMessages(messages: PublicChatMessage[]): PublicChatMessag
 
 		return left.id.localeCompare(right.id, undefined, { numeric: true });
 	});
+}
+
+function buildIdeaBlockChatMessage(block: IdeaBlock): string {
+	const title = block.summary.trim();
+	const content = (block.aiSummary?.trim() || title).trim();
+	if (!content) {
+		return "";
+	}
+
+	const heading = `${IDEA_BLOCK_CHAT_PREFIX}${title || content}`;
+	if (content === title || !title) {
+		return heading.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
+	}
+
+	const separator = "\n";
+	const availableContentLength = MAX_PUBLIC_CHAT_MESSAGE_LENGTH - heading.length - separator.length;
+	if (availableContentLength <= 0) {
+		return heading.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
+	}
+
+	const truncatedContent = content.slice(0, availableContentLength).trimEnd();
+	return `${heading}${separator}${truncatedContent}`.trim();
 }
 
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], options?: { markNewUnread?: boolean }): IdeaBlock[] {
@@ -2203,24 +2227,48 @@ export function PrivateBoard({
 		}
 	};
 
-	const sendPublicChatMessage = () => {
-		const normalizedMessage = publicChatText.trim();
-		if (!normalizedMessage) {
-			return;
-		}
+	const sendPublicChatPayload = useCallback(
+		(message: string) => {
+			const normalizedMessage = message.trim();
+			if (!normalizedMessage) {
+				return false;
+			}
 
-		setIsSendingPublicChat(true);
-		setPublicChatError(null);
-		onSendBoardMessage({
-			type: "public_chat_send",
-			message: normalizedMessage,
-			displayName
-		});
-		setPublicChatText("");
-		window.setTimeout(() => {
-			setIsSendingPublicChat(false);
-		}, 5000);
+			if (!isConnected) {
+				setPublicChatError("公開聊天室尚未連線");
+				return false;
+			}
+
+			setIsSendingPublicChat(true);
+			setPublicChatError(null);
+			onSendBoardMessage({
+				type: "public_chat_send",
+				message: normalizedMessage.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd(),
+				displayName
+			});
+			window.setTimeout(() => {
+				setIsSendingPublicChat(false);
+			}, 5000);
+			return true;
+		},
+		[displayName, isConnected, onSendBoardMessage]
+	);
+
+	const sendPublicChatMessage = () => {
+		if (sendPublicChatPayload(publicChatText)) {
+			setPublicChatText("");
+		}
 	};
+
+	const shareIdeaBlockToChat = useCallback(
+		(block: IdeaBlock) => {
+			if (block.status === "generating" || block.isDeleted) {
+				return;
+			}
+			sendPublicChatPayload(buildIdeaBlockChatMessage(block));
+		},
+		[sendPublicChatPayload]
+	);
 
 	const shareSimilarityReason = (cue: SimilarityCueData) => {
 		if (cue.kind === "phase-transition-summary") {
@@ -2412,7 +2460,9 @@ export function PrivateBoard({
 												onSave={saveIdeaBlock}
 												onDelete={deleteIdeaBlock}
 												onJumpToTranscript={jumpToTranscript}
+												onShareToChat={shareIdeaBlockToChat}
 												canJumpToTranscript={canJumpToTranscript(block)}
+												canShareToChat={isConnected}
 												currentPhase={visiblePhase}
 											/>
 										</div>

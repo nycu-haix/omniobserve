@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
@@ -14,11 +14,24 @@ interface IdeaBlockItemProps {
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
+	onShareToChat?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
+	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = DEFAULT_SESSION_PHASE }: IdeaBlockItemProps) {
+export function IdeaBlockItem({
+	block,
+	isHighlighted = false,
+	onToggle,
+	onSave,
+	onDelete,
+	onJumpToTranscript,
+	onShareToChat,
+	canJumpToTranscript = false,
+	canShareToChat = false,
+	currentPhase = DEFAULT_SESSION_PHASE
+}: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -42,6 +55,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
+	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
 	const similarityReasonTag =
 		block.similarityIsSameReason == null
@@ -105,6 +119,14 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			return;
 		}
 		setShowDeleteConfirm(true);
+	};
+
+	const shareBlockToChat = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!canShareCurrentBlock) {
+			return;
+		}
+		onShareToChat?.(block);
 	};
 
 	const confirmDelete = async () => {
@@ -268,6 +290,11 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 								<Badge className={cn("shrink-0 whitespace-nowrap", similarityReasonTag.className)} variant="outline">
 									{similarityReasonTag.label}
 								</Badge>
+							)}
+							{!isDeleted && (
+								<Button aria-label="Share idea block to public chat" title="送到聊天室" size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
+									<Send className="h-4 w-4" />
+								</Button>
 							)}
 							{!isDeleted && !block.isDraft && (
 								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>

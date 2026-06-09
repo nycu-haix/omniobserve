@@ -956,13 +956,12 @@ async def handle_board_websocket(
                         )
                         continue
 
-                await board_manager.broadcast(
-                    session_id,
-                    {
-                        "type": "public_chat_message",
-                        "payload": _chat_message_payload(saved_message),
-                    },
-                )
+                chat_msg = {
+                    "type": "public_chat_message",
+                    "payload": _chat_message_payload(saved_message),
+                }
+                await board_manager.broadcast(session_id, chat_msg)
+                await admin_manager.broadcast(session_id, chat_msg)
                 continue
 
             if message_type in {"block_publish", "block_discard", "block_edit"}:
