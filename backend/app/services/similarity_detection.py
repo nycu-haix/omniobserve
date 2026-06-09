@@ -480,6 +480,7 @@ async def _replace_similarity_pairs(
 ) -> None:
     deleted_count = await _delete_pairs_for_idea_block(idea_block.id, db)
     similarities: list[tuple[Similarity, IdeaBlock]] = []
+    idea_block.similarity_id = None
     for similar_idea_block, reason, is_same_reason in matches:
         similarity = Similarity(
             idea_block_id_1=idea_block.id,
@@ -488,9 +489,12 @@ async def _replace_similarity_pairs(
             is_same_reason=is_same_reason,
         )
         db.add(similarity)
-        idea_block.similarity_id = similar_idea_block.id
-        similar_idea_block.similarity_id = idea_block.id
         similarities.append((similarity, similar_idea_block))
+
+    if len(matches) == 1:
+        single_match = matches[0][0]
+        idea_block.similarity_id = single_match.id
+        single_match.similarity_id = idea_block.id
 
     await db.flush()
     logger.info(
