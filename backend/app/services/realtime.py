@@ -49,6 +49,7 @@ PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS = 700
 _public_context_windows: dict[str, deque[str]] = defaultdict(
     lambda: deque(maxlen=PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS)
 )
+_public_context_matching_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 def _is_admin_participant_id(participant_id: str | None) -> bool:
@@ -446,6 +447,8 @@ def _schedule_public_context_matching(
                         },
                     },
                 )
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             logger.exception(
                 "public_context_matching_failed session_id=%s participant_id=%s transcript_segment_id=%s error_type=%s error=%s",
@@ -455,6 +458,10 @@ def _schedule_public_context_matching(
                 exc.__class__.__name__,
                 exc,
             )
+        finally:
+            current_task = asyncio.current_task()
+            if _public_context_matching_tasks.get(session_id) is current_task:
+                _public_context_matching_tasks.pop(session_id, None)
 
     logger.info(
         "public_context_matching_scheduled session_id=%s participant_id=%s transcript_segment_id=%s text_chars=%s",
@@ -463,7 +470,10 @@ def _schedule_public_context_matching(
         transcript_segment_id,
         len(text),
     )
-    asyncio.create_task(run_matching())
+    previous_task = _public_context_matching_tasks.get(session_id)
+    if previous_task is not None and not previous_task.done():
+        previous_task.cancel()
+    _public_context_matching_tasks[session_id] = asyncio.create_task(run_matching())
 
 
 def _append_public_context_text(session_id: str, text: str) -> str:
