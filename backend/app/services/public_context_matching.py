@@ -8,8 +8,9 @@ from ..models import IdeaBlock, TaskItem
 from .embedding_service import create_text_embedding
 from .task_item_generation import build_task_item_ids_with_llm
 
-PUBLIC_CONTEXT_SIMILARITY_THRESHOLD = 0.68
+PUBLIC_CONTEXT_SIMILARITY_THRESHOLD = 0.74
 PUBLIC_CONTEXT_DISTANCE_THRESHOLD = 1 - PUBLIC_CONTEXT_SIMILARITY_THRESHOLD
+PUBLIC_CONTEXT_MAX_MATCHES = 3
 
 
 @dataclass(frozen=True)
@@ -63,18 +64,15 @@ async def find_public_context_matches(
         )
     except Exception as exc:
         logger.info(
-            "public_context_match_embedding_fallback session_name=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
+            "public_context_match_skipped session_name=%s reason=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
             session_name,
+            "embedding_failed",
             task_item_ids,
             len(candidate_ids),
             exc.__class__.__name__,
             exc,
         )
-        return await _build_task_item_matches(
-            db,
-            idea_block_ids=candidate_ids,
-            task_item_ids=task_item_ids,
-        )
+        return []
 
     semantic_matches = await _find_semantic_matches(
         db,
@@ -83,20 +81,16 @@ async def find_public_context_matches(
         candidate_idea_block_ids=candidate_ids,
         task_item_ids=task_item_ids,
     )
-    semantic_matches_by_id = {match.idea_block_id: match for match in semantic_matches}
-    matches = await _build_task_item_matches(
-        db,
-        idea_block_ids=candidate_ids,
-        task_item_ids=task_item_ids,
-        semantic_matches_by_id=semantic_matches_by_id,
-    )
+    matches = semantic_matches[:PUBLIC_CONTEXT_MAX_MATCHES]
     logger.info(
-        "public_context_match_done session_name=%s task_item_ids=%s candidate_count=%s semantic_match_count=%s match_count=%s",
+        "public_context_match_done session_name=%s task_item_ids=%s candidate_count=%s semantic_match_count=%s match_count=%s threshold=%s max_matches=%s",
         session_name,
         task_item_ids,
         len(candidate_ids),
         len(semantic_matches),
         len(matches),
+        PUBLIC_CONTEXT_SIMILARITY_THRESHOLD,
+        PUBLIC_CONTEXT_MAX_MATCHES,
     )
     return matches
 
@@ -151,45 +145,3 @@ async def _find_semantic_matches(
         )
         for idea_block, similarity in result.all()
     ]
-
-
-async def _build_task_item_matches(
-    db: AsyncSession,
-    *,
-    idea_block_ids: list[int],
-    task_item_ids: list[int],
-    semantic_matches_by_id: dict[int, PublicContextMatch] | None = None,
-) -> list[PublicContextMatch]:
-    semantic_matches_by_id = semantic_matches_by_id or {}
-    result = await db.execute(
-        select(IdeaBlock)
-        .where(
-            IdeaBlock.id.in_(idea_block_ids),
-            IdeaBlock.is_deleted.is_(False),
-        )
-        .order_by(IdeaBlock.id.desc())
-    )
-    matches: list[PublicContextMatch] = []
-    for idea_block in result.scalars().all():
-        semantic_match = semantic_matches_by_id.get(idea_block.id)
-        if semantic_match is not None:
-            matches.append(semantic_match)
-            continue
-        matches.append(
-            PublicContextMatch(
-                idea_block_id=idea_block.id,
-                user_id=idea_block.user_id,
-                score=None,
-                reason="same task item",
-                task_item_ids=task_item_ids,
-            )
-        )
-
-    return sorted(
-        matches,
-        key=lambda match: (
-            match.score is None,
-            -(match.score or 0),
-            -match.idea_block_id,
-        ),
-    )
