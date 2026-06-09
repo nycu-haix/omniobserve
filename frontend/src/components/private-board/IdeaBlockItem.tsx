@@ -18,6 +18,7 @@ interface IdeaBlockItemProps {
 	canJumpToTranscript?: boolean;
 	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
+	showSimilarityCue?: boolean;
 }
 
 export function IdeaBlockItem({
@@ -30,7 +31,8 @@ export function IdeaBlockItem({
 	onShareToChat,
 	canJumpToTranscript = false,
 	canShareToChat = false,
-	currentPhase = DEFAULT_SESSION_PHASE
+	currentPhase = DEFAULT_SESSION_PHASE,
+	showSimilarityCue = true
 }: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
@@ -57,7 +59,7 @@ export function IdeaBlockItem({
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
-	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
+	const shouldShowCue = showSimilarityCue && block.hasCue && isGroupPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
 	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
@@ -441,7 +443,7 @@ export function IdeaBlockItem({
 						</div>
 					)}
 
-					{sharedReasons.length > 0 && (
+					{showSimilarityCue && sharedReasons.length > 0 && (
 						<div className="grid gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge className="w-fit border-yellow-700/30 bg-yellow-100 text-yellow-900" variant="outline">
