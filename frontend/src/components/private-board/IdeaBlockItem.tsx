@@ -195,7 +195,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			className={cn(
 				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
-				shouldShowPublicContext && "border-neutral-900/70",
+				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
@@ -217,7 +217,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{shouldShowPublicContext && (
 				<span
-					className="pointer-events-none absolute left-3 top-0 z-10 -translate-y-1/2 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
+					className="pointer-events-none absolute left-3 top-1.5 z-10 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
 					aria-label="現在公開討論相關"
 					title="現在公開討論相關"
 				>
