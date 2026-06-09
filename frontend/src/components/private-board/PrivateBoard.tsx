@@ -198,7 +198,6 @@ const IDEA_BLOCK_CHAT_PREFIX = "Idea block：";
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
-const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
 const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
 const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
@@ -1193,7 +1192,6 @@ export function PrivateBoard({
 	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
 	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
 	const [whisperTransient, setWhisperTransient] = useState<WhisperTransient>({ status: "idle", text: "" });
-	const ideaBlocksSplitRatio = 50;
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const previousIdeaBlockTopsRef = useRef<Record<string, number>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1203,7 +1201,6 @@ export function PrivateBoard({
 	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
 	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
 	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
-	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -2271,9 +2268,6 @@ export function PrivateBoard({
 	const handlePublicChatScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
 		shouldAutoScrollRef.current["public-chat"] = isNearScrollBottom(event.currentTarget);
 	}, []);
-	const handleIdeaBlocksSplitResizeStart = useCallback(() => {}, []);
-	const handleIdeaBlocksSplitResizeKeyDown = useCallback(() => {}, []);
-
 	useLayoutEffect(() => {
 		const previousTops = previousIdeaBlockTopsRef.current;
 		if (Object.keys(previousTops).length === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -2673,7 +2667,6 @@ export function PrivateBoard({
 		});
 	};
 
-	const privateTranscriptLines = transcriptLines.filter(line => line.source !== "public");
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
 	const publicSubtitleLines = micMode === "private" ? publicTranscriptLines.filter(line => line.text.trim()).slice(-2) : [];
 	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
@@ -2811,92 +2804,12 @@ export function PrivateBoard({
 							<div className="flex items-center justify-between gap-3 border-b px-3 py-2">
 								<div className="text-sm font-medium">Idea Blocks</div>
 								{whisperStatusLabel && (
-									<span className="inline-flex shrink-0 items-center rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-										{whisperStatusLabel}
-									</span>
+									<span className="inline-flex shrink-0 items-center rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{whisperStatusLabel}</span>
 								)}
 							</div>
 							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleIdeaBlocksScroll }}>
 								<div className="grid gap-2 pb-3">
 									{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無 Idea Blocks</div>}
-									{ideaBlocks.map(block => (
-										<div
-											key={block.id}
-											ref={node => {
-												blockRefs.current[block.id] = node;
-											}}
-										>
-											<IdeaBlockItem
-												block={block}
-												isHighlighted={highlightedBlockId === block.id}
-												onToggle={toggleBlock}
-												onSave={saveIdeaBlock}
-												onDelete={deleteIdeaBlock}
-												onJumpToTranscript={jumpToTranscript}
-												canJumpToTranscript={canJumpToTranscript(block)}
-												currentPhase={visiblePhase}
-											/>
-										</div>
-									))}
-									{showWhisperTransient && (
-										<div className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
-											<div className="mb-1 text-xs font-semibold text-muted-foreground">
-												{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}
-											</div>
-											<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
-										</div>
-									)}
-								</div>
-							</ScrollArea>
-						</section>
-					</div>
-				)}
-
-				{false && isIdeaBlocksTabActive && (
-					<div
-						ref={ideaBlocksSplitContainerRef}
-						className="grid min-h-0 flex-1 p-3"
-						style={{
-							gridTemplateRows: `minmax(0, ${ideaBlocksSplitRatio}fr) 1rem minmax(0, ${100 - ideaBlocksSplitRatio}fr)`
-						}}
-					>
-						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
-							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
-							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-								<TranscriptLines
-									lines={privateTranscriptLines}
-									emptyText="尚無逐字稿"
-									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
-									onTranscriptRef={setTranscriptRef}
-									highlightedTranscriptId={highlightedTranscriptId}
-								/>
-							</ScrollArea>
-						</section>
-
-						<div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-							<div />
-							<button
-								type="button"
-								className="group grid h-4 w-20 cursor-row-resize place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								aria-label="調整私人逐字稿與 Idea Blocks 高度"
-								aria-orientation="horizontal"
-								aria-valuemin={MIN_IDEA_BLOCKS_SPLIT_RATIO}
-								aria-valuemax={100 - MIN_IDEA_BLOCKS_SPLIT_RATIO}
-								aria-valuenow={Math.round(ideaBlocksSplitRatio)}
-								role="separator"
-								onPointerDown={handleIdeaBlocksSplitResizeStart}
-								onKeyDown={handleIdeaBlocksSplitResizeKeyDown}
-							>
-								<span className="h-0.5 w-20 rounded-full bg-border transition-colors group-hover:bg-primary/30" aria-hidden="true" />
-							</button>
-							<div />
-						</div>
-
-						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
-							<div className="border-b px-3 py-2 text-sm font-medium">Idea Blocks</div>
-							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleIdeaBlocksScroll }}>
-								<div className="grid gap-2 pb-3">
-									{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無想法</div>}
 									{ideaBlocks.map(block => (
 										<div
 											key={block.id}
@@ -2918,11 +2831,18 @@ export function PrivateBoard({
 											/>
 										</div>
 									))}
+									{showWhisperTransient && (
+										<div className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
+											<div className="mb-1 text-xs font-semibold text-muted-foreground">{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}</div>
+											<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
+										</div>
+									)}
 								</div>
 							</ScrollArea>
 						</section>
 					</div>
 				)}
+
 				{visibleActiveTab === "public-chat" && (
 					<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={publicChatScrollViewportRef} viewportProps={{ onScroll: handlePublicChatScroll }}>
 						<PublicChatMessages messages={publicChatMessages} />
