@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
@@ -14,11 +14,24 @@ interface IdeaBlockItemProps {
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
+	onShareToChat?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
+	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
 }
 
-export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, onDelete, onJumpToTranscript, canJumpToTranscript = false, currentPhase = DEFAULT_SESSION_PHASE }: IdeaBlockItemProps) {
+export function IdeaBlockItem({
+	block,
+	isHighlighted = false,
+	onToggle,
+	onSave,
+	onDelete,
+	onJumpToTranscript,
+	onShareToChat,
+	canJumpToTranscript = false,
+	canShareToChat = false,
+	currentPhase = DEFAULT_SESSION_PHASE
+}: IdeaBlockItemProps) {
 	const [draftTitle, setDraftTitle] = useState(block.summary);
 	const [savedTitle, setSavedTitle] = useState(block.summary);
 	const [draftAiSummary, setDraftAiSummary] = useState(block.aiSummary || "");
@@ -29,6 +42,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const [isDeleting, setIsDeleting] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+	const itemRootRef = useRef<HTMLDivElement | null>(null);
 	const aiSummaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
 	const isGenerating = block.status === "generating";
@@ -42,6 +56,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
+	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
@@ -93,6 +108,33 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		textarea.style.height = `${textarea.scrollHeight}px`;
 	}, [block.expanded, draftAiSummary, isGenerating]);
 
+	useEffect(() => {
+		if (!showDeleteConfirm) {
+			return;
+		}
+
+		const closeDeleteConfirmOnOutsidePointer = (event: PointerEvent) => {
+			const target = event.target;
+			if (target instanceof Node && itemRootRef.current?.contains(target)) {
+				return;
+			}
+			setShowDeleteConfirm(false);
+		};
+
+		const closeDeleteConfirmOnEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				setShowDeleteConfirm(false);
+			}
+		};
+
+		document.addEventListener("pointerdown", closeDeleteConfirmOnOutsidePointer);
+		document.addEventListener("keydown", closeDeleteConfirmOnEscape);
+		return () => {
+			document.removeEventListener("pointerdown", closeDeleteConfirmOnOutsidePointer);
+			document.removeEventListener("keydown", closeDeleteConfirmOnEscape);
+		};
+	}, [showDeleteConfirm]);
+
 	const cancelAiSummaryEditing = () => {
 		setDraftAiSummary(savedAiSummary);
 		setSaveError(null);
@@ -105,6 +147,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 		}
 		setDraftTitle(savedTitle);
 		setSaveError(null);
+		setShowDeleteConfirm(false);
 		setIsEditingTitle(true);
 	};
 
@@ -120,6 +163,15 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			return;
 		}
 		setShowDeleteConfirm(true);
+	};
+
+	const shareBlockToChat = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!canShareCurrentBlock) {
+			return;
+		}
+		setShowDeleteConfirm(false);
+		onShareToChat?.(block);
 	};
 
 	const confirmDelete = async () => {
@@ -190,6 +242,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 
 	const row = (
 		<div
+			ref={itemRootRef}
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
@@ -234,10 +287,9 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 			{isEditingTitle ? (
 				<input
 					className={cn(
-						"min-w-12 max-w-full justify-self-start rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
+						"min-w-0 max-w-full justify-self-stretch rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
 						titleTooLong && "border-destructive focus:border-destructive"
 					)}
-					style={{ width: `${Math.max(4, Math.min(draftTitle.length + 1, 24))}ch` }}
 					value={draftTitle}
 					onClick={event => event.stopPropagation()}
 					onChange={event => setDraftTitle(event.target.value)}
@@ -263,7 +315,6 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 						<>
 							<Button
 								aria-label="Cancel title edit"
-								className="h-7 w-7"
 								size="icon"
 								variant="ghost"
 								onClick={event => {
@@ -272,11 +323,10 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 								}}
 								disabled={isSaving}
 							>
-								<X className="h-3.5 w-3.5" />
+								<X className="h-4 w-4" />
 							</Button>
 							<Button
 								aria-label="Save title edit"
-								className="h-7 w-7"
 								size="icon"
 								onClick={event => {
 									event.stopPropagation();
@@ -284,7 +334,7 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 								}}
 								disabled={!canSaveTitle}
 							>
-								<Check className="h-3.5 w-3.5" />
+								<Check className="h-4 w-4" />
 							</Button>
 						</>
 					) : (
@@ -294,29 +344,52 @@ export function IdeaBlockItem({ block, isHighlighted = false, onToggle, onSave, 
 									{similarityReasonTag.label}
 								</Badge>
 							)}
-							{!isDeleted && !block.isDraft && (
-								<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
-									<Pencil className="h-4 w-4" />
-								</Button>
-							)}
-							{!isDeleted && (
-								<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
-									<Trash2 className="h-4 w-4" />
-								</Button>
+							{showDeleteConfirm ? (
+								<>
+									<Button
+										aria-label="Confirm delete idea block"
+										size="icon"
+										variant="destructive"
+										onClick={event => {
+											event.stopPropagation();
+											void confirmDelete();
+										}}
+										disabled={isDeleting}
+									>
+										<Check className="h-4 w-4" />
+									</Button>
+									<Button
+										aria-label="Cancel delete idea block"
+										size="icon"
+										variant="ghost"
+										onClick={event => {
+											event.stopPropagation();
+											setShowDeleteConfirm(false);
+										}}
+									>
+										<X className="h-4 w-4" />
+									</Button>
+								</>
+							) : (
+								<>
+									{!isDeleted && (
+										<Button aria-label="Share idea block to public chat" title="送到聊天室" size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
+											<Send className="h-4 w-4" />
+										</Button>
+									)}
+									{!isDeleted && !block.isDraft && (
+										<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
+											<Pencil className="h-4 w-4" />
+										</Button>
+									)}
+									{!isDeleted && (
+										<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
+											<Trash2 className="h-4 w-4" />
+										</Button>
+									)}
+								</>
 							)}
 						</>
-					)}
-					{showDeleteConfirm && !isDeleted && (
-						<div className="absolute right-0 top-full z-50 mt-1 rounded-md border bg-popover p-1 shadow-lg ring-1 ring-black/5" onClick={event => event.stopPropagation()}>
-							<div className="flex items-center gap-1">
-								<Button aria-label="Confirm delete idea block" className="h-7 w-7" size="icon" variant="destructive" onClick={() => void confirmDelete()} disabled={isDeleting}>
-									<Check className="h-3.5 w-3.5" />
-								</Button>
-								<Button aria-label="Cancel delete idea block" className="h-7 w-7" size="icon" variant="ghost" onClick={() => setShowDeleteConfirm(false)}>
-									<X className="h-3.5 w-3.5" />
-								</Button>
-							</div>
-						</div>
 					)}
 
 					{hasLinkedTranscript && (
