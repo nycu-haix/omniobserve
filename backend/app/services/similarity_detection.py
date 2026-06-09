@@ -100,19 +100,19 @@ Return `id: null` if any of the following apply:
 - The match would not create a meaningful bridge for discussion or consensus-building.
 
 # Selection Rule
-Review the candidate list and choose only the first candidate that satisfies the similarity criteria.
+Review the candidate list and choose every candidate that satisfies the similarity criteria.
 
 # Output Requirements
 Return JSON only. Do not include Markdown, comments, or extra text.
 
-If a similar idea is found:
-{{"id": 123, "reason": "Briefly explain the shared ranking stance, then compare the primary rationale.", "is_same_reason": true}}
+If one or more similar ideas are found:
+{{"matches": [{{"id": 123, "reason": "Briefly explain the shared ranking stance, then compare the primary rationale.", "is_same_reason": true}}]}}
 
 If the ranking stance is similar but the reason is different:
-{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their primary rationales are different.", "is_same_reason": false}}
+{{"matches": [{{"id": 123, "reason": "Both ideas share a compatible ranking stance, but their primary rationales are different.", "is_same_reason": false}}]}}
 
 If no candidate has a compatible ranking stance:
-{{"id": null, "reason": "No similar ideas found", "is_same_reason": false}}
+{{"matches": [], "reason": "No similar ideas found"}}
 """.strip()
 
 
@@ -239,43 +239,68 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         return
 
     candidates = [candidate for candidate, _ in cosine_candidates]
-    llm_result = await _select_first_similar_with_llm(idea_block, candidates, task_name=task_name)
+    llm_result = await _select_similar_candidates_with_llm(idea_block, candidates, task_name=task_name)
     candidate_ids = {candidate.id for candidate in candidates}
-    selected_id = llm_result.get("id")
-    reason = str(llm_result.get("reason") or "").strip()
-    is_same_reason = _coerce_bool(llm_result.get("is_same_reason"), default=True)
+    selected_matches = _normalize_llm_similarity_matches(llm_result)
 
-    if selected_id is None:
-        await _clear_similarity_for_idea_block(idea_block, reason or "No similar ideas found", db)
-        return
-    if not isinstance(selected_id, int) or selected_id not in candidate_ids:
+    if not selected_matches:
         await _clear_similarity_for_idea_block(
             idea_block,
-            f"LLM returned invalid candidate id: {selected_id}",
+            str(llm_result.get("reason") or "No similar ideas found"),
             db,
         )
         return
-    if _reason_rejects_similarity(reason):
-        await _clear_similarity_for_idea_block(
-            idea_block,
-            f"LLM selected a candidate while rejecting similarity: {reason}",
-            db,
-        )
-        return
-    if not reason:
-        reason = "Similarity detected by task item, cosine similarity, and LLM comparison"
 
-    selected_candidate = next((candidate for candidate in candidates if candidate.id == selected_id), None)
-    logger.info(
-        "similarity_detection_debug_llm_selected idea_block_a_id=%s idea_block_b_id=%s b_user_id=%s is_same_reason=%s reason=%s b_summary=%s",
-        idea_block.id,
-        selected_id,
-        selected_candidate.user_id if selected_candidate is not None else None,
-        is_same_reason,
-        reason,
-        selected_candidate.summary if selected_candidate is not None else None,
-    )
-    await _replace_similarity_pair(idea_block, selected_id, reason, is_same_reason, db)
+    valid_matches: list[tuple[IdeaBlock, str, bool]] = []
+    seen_selected_ids: set[int] = set()
+    for match in selected_matches:
+        selected_id = match.get("id")
+        if isinstance(selected_id, str) and selected_id.isdigit():
+            selected_id = int(selected_id)
+        reason = str(match.get("reason") or "").strip()
+        is_same_reason = _coerce_bool(match.get("is_same_reason"), default=True)
+
+        if not isinstance(selected_id, int) or selected_id not in candidate_ids:
+            logger.info(
+                "similarity_detection_llm_match_skipped idea_block_id=%s reason=%s selected_id=%s",
+                idea_block.id,
+                "invalid_candidate_id",
+                selected_id,
+            )
+            continue
+        if selected_id in seen_selected_ids:
+            continue
+        seen_selected_ids.add(selected_id)
+        if _reason_rejects_similarity(reason):
+            logger.info(
+                "similarity_detection_llm_match_skipped idea_block_id=%s selected_id=%s reason=%s",
+                idea_block.id,
+                selected_id,
+                reason,
+            )
+            continue
+        if not reason:
+            reason = "Similarity detected by task item, cosine similarity, and LLM comparison"
+
+        selected_candidate = next((candidate for candidate in candidates if candidate.id == selected_id), None)
+        if selected_candidate is None:
+            continue
+        logger.info(
+            "similarity_detection_debug_llm_selected idea_block_a_id=%s idea_block_b_id=%s b_user_id=%s is_same_reason=%s reason=%s b_summary=%s",
+            idea_block.id,
+            selected_id,
+            selected_candidate.user_id,
+            is_same_reason,
+            reason,
+            selected_candidate.summary,
+        )
+        valid_matches.append((selected_candidate, reason, is_same_reason))
+
+    if not valid_matches:
+        await _clear_similarity_for_idea_block(idea_block, "No valid similar ideas found", db)
+        return
+
+    await _replace_similarity_pairs(idea_block, valid_matches, db)
 
 
 async def _get_task_item_ids(idea_block_id: int, db: AsyncSession) -> list[int]:
@@ -379,7 +404,7 @@ async def _score_cosine_candidates(
     return [(idea, float(score)) for idea, score in result.all()]
 
 
-async def _select_first_similar_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock], *, task_name: str | None = None) -> dict[str, Any]:
+async def _select_similar_candidates_with_llm(idea_block: IdeaBlock, candidates: list[IdeaBlock], *, task_name: str | None = None) -> dict[str, Any]:
     openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required for similarity detection")
@@ -431,73 +456,90 @@ Summary: {idea_block.summary}
     return parsed
 
 
-async def _replace_similarity_pair(
+def _normalize_llm_similarity_matches(llm_result: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_matches = llm_result.get("matches")
+    if isinstance(raw_matches, list):
+        return [match for match in raw_matches if isinstance(match, dict)]
+
+    selected_id = llm_result.get("id")
+    if selected_id is None:
+        return []
+    return [
+        {
+            "id": selected_id,
+            "reason": llm_result.get("reason"),
+            "is_same_reason": llm_result.get("is_same_reason"),
+        }
+    ]
+
+
+async def _replace_similarity_pairs(
     idea_block: IdeaBlock,
-    similar_idea_block_id: int,
-    reason: str,
-    is_same_reason: bool,
+    matches: list[tuple[IdeaBlock, str, bool]],
     db: AsyncSession,
 ) -> None:
-    similar_idea_block = await db.get(IdeaBlock, similar_idea_block_id)
-    if similar_idea_block is None:
-        await _clear_similarity_for_idea_block(
-            idea_block,
-            f"Selected similar idea block not found: {similar_idea_block_id}",
-            db,
-        )
-        return
-
     deleted_count = await _delete_pairs_for_idea_block(idea_block.id, db)
-    similarity = Similarity(
-        idea_block_id_1=idea_block.id,
-        idea_block_id_2=similar_idea_block_id,
-        reason=reason,
-        is_same_reason=is_same_reason,
-    )
-    db.add(similarity)
-    idea_block.similarity_id = similar_idea_block_id
-    similar_idea_block.similarity_id = idea_block.id
+    similarities: list[tuple[Similarity, IdeaBlock]] = []
+    idea_block.similarity_id = None
+    for similar_idea_block, reason, is_same_reason in matches:
+        similarity = Similarity(
+            idea_block_id_1=idea_block.id,
+            idea_block_id_2=similar_idea_block.id,
+            reason=reason,
+            is_same_reason=is_same_reason,
+        )
+        db.add(similarity)
+        similarities.append((similarity, similar_idea_block))
+
+    if len(matches) == 1:
+        single_match = matches[0][0]
+        idea_block.similarity_id = single_match.id
+        single_match.similarity_id = idea_block.id
+
     await db.flush()
     logger.info(
         "similarity_detection_pair_deleted idea_block_id=%s deleted_count=%s",
         idea_block.id,
         deleted_count,
     )
-    logger.info(
-        (
-            "similarity_detection_pair_created idea_block_id=%s idea_block_user_id=%s "
-            "idea_block_similarity_id=%s similar_idea_block_id=%s similar_idea_block_user_id=%s "
-            "similar_idea_block_similarity_id=%s similarity_id=%s is_same_reason=%s"
-        ),
-        idea_block.id,
-        idea_block.user_id,
-        idea_block.similarity_id,
-        similar_idea_block_id,
-        similar_idea_block.user_id,
-        similar_idea_block.similarity_id,
-        similarity.id,
-        similarity.is_same_reason,
-    )
+    for similarity, similar_idea_block in similarities:
+        logger.info(
+            (
+                "similarity_detection_pair_created idea_block_id=%s idea_block_user_id=%s "
+                "idea_block_similarity_id=%s similar_idea_block_id=%s similar_idea_block_user_id=%s "
+                "similar_idea_block_similarity_id=%s similarity_id=%s is_same_reason=%s"
+            ),
+            idea_block.id,
+            idea_block.user_id,
+            idea_block.similarity_id,
+            similar_idea_block.id,
+            similar_idea_block.user_id,
+            similar_idea_block.similarity_id,
+            similarity.id,
+            similarity.is_same_reason,
+        )
+
     await db.commit()
     await db.refresh(idea_block)
-    await db.refresh(similar_idea_block)
-    await db.refresh(similarity)
-    try:
-        await notify_similarity_cue_for_blocks(
-            similarity_id=similarity.id,
-            is_same_reason=similarity.is_same_reason,
-            idea_a=idea_block,
-            idea_b=similar_idea_block,
-        )
-    except Exception as exc:
-        logger.warning(
-            "similarity_detection_notify_failed similarity_id=%s idea_block_id=%s similar_idea_block_id=%s error_type=%s error=%s",
-            similarity.id,
-            idea_block.id,
-            similar_idea_block.id,
-            exc.__class__.__name__,
-            exc,
-        )
+    for similarity, similar_idea_block in similarities:
+        await db.refresh(similar_idea_block)
+        await db.refresh(similarity)
+        try:
+            await notify_similarity_cue_for_blocks(
+                similarity_id=similarity.id,
+                is_same_reason=similarity.is_same_reason,
+                idea_a=idea_block,
+                idea_b=similar_idea_block,
+            )
+        except Exception as exc:
+            logger.warning(
+                "similarity_detection_notify_failed similarity_id=%s idea_block_id=%s similar_idea_block_id=%s error_type=%s error=%s",
+                similarity.id,
+                idea_block.id,
+                similar_idea_block.id,
+                exc.__class__.__name__,
+                exc,
+            )
 
 
 async def _clear_similarity_for_idea_block(idea_block: IdeaBlock, reason: str, db: AsyncSession) -> None:

@@ -19,8 +19,8 @@ class IdeaBlockCreate(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title_length(cls, value: str) -> str:
-        if len(value) > 10:
-            raise ValueError("title must be at most 10 characters")
+        if len(value) > 20:
+            raise ValueError("title must be at most 20 characters")
         return value
 
     @field_validator("embedding_vector")
@@ -40,8 +40,8 @@ class IdeaBlockCreateRequest(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title_length(cls, value: str | None) -> str | None:
-        if value is not None and len(value) > 10:
-            raise ValueError("title must be at most 10 characters")
+        if value is not None and len(value) > 20:
+            raise ValueError("title must be at most 20 characters")
         return value
 
     @model_validator(mode="after")
@@ -63,8 +63,8 @@ class IdeaBlockUpdate(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title_length(cls, value: str | None) -> str | None:
-        if value is not None and len(value) > 10:
-            raise ValueError("title must be at most 10 characters")
+        if value is not None and len(value) > 20:
+            raise ValueError("title must be at most 20 characters")
         return value
 
     @field_validator("embedding_vector")
@@ -88,6 +88,8 @@ class IdeaBlockResponse(BaseModel):
     embedding_vector: list[float] | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
     is_duplicate: bool = False
     duplicate_of_id: int | None = None
@@ -107,6 +109,8 @@ class IdeaBlockListResponse(BaseModel):
     transcript: str | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
     is_duplicate: bool = False
     duplicate_of_id: int | None = None
@@ -128,6 +132,8 @@ class IdeaBlockOverviewResponse(BaseModel):
     transcript: str | None
     similarity_id: int | None
     similarity_is_same_reason: bool | None = None
+    similarity_has_same_reason: bool = False
+    similarity_has_different_reason: bool = False
     is_deleted: bool
 
     model_config = ConfigDict(from_attributes=True)

@@ -35,6 +35,7 @@ type BoardMessage =
 	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityPairCueData }
+	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
 	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
@@ -63,6 +64,8 @@ interface IdeaBlockResponse {
 	transcript: string | null;
 	similarity_id: number | null;
 	similarity_is_same_reason?: boolean | null;
+	similarity_has_same_reason?: boolean | null;
+	similarity_has_different_reason?: boolean | null;
 	is_deleted?: boolean;
 	time_stamp?: string | null;
 	is_duplicate?: boolean;
@@ -89,6 +92,21 @@ interface PublicChatMessagePayload {
 	message: string;
 	timestampMs?: number;
 	isDeleted?: boolean;
+}
+
+interface PublicContextMatchPayload {
+	ideaBlockId?: string | number | null;
+	userId?: string | number | null;
+	score?: number | null;
+	reason?: string | null;
+	taskItemIds?: number[];
+}
+
+interface PublicContextMatchesPayload {
+	transcriptId?: string | number | null;
+	participantId?: string | number | null;
+	textChars?: number;
+	matches?: PublicContextMatchPayload[];
 }
 
 interface IdeaBlockNotice {
@@ -180,6 +198,7 @@ const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
+const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
 const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
@@ -229,6 +248,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "update_idea_block" ||
 		message.type === "new_transcript_line" ||
 		message.type === "similarity_cue" ||
+		message.type === "public_context_matches" ||
 		message.type === "similarity_reason_shared" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
@@ -405,6 +425,8 @@ async function fetchChatMessageHistory(url: string, signal: AbortSignal): Promis
 function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 	const transcriptLineId = item.transcript_id == null ? undefined : String(item.transcript_id);
 	const createdAtMs = parseIdeaBlockCreatedAt(item.time_stamp);
+	const hasSameReason = item.similarity_has_same_reason ?? item.similarity_is_same_reason === true;
+	const hasDifferentReason = item.similarity_has_different_reason ?? item.similarity_is_same_reason === false;
 
 	return {
 		id: String(item.id),
@@ -413,8 +435,10 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		transcript: item.transcript ?? undefined,
 		transcriptLineId,
 		sourceTranscriptIds: transcriptLineId ? [transcriptLineId] : undefined,
-		hasCue: !!item.similarity_id,
+		hasCue: hasSameReason || hasDifferentReason || !!item.similarity_id,
 		similarityIsSameReason: item.similarity_is_same_reason ?? null,
+		similarityHasSameReason: hasSameReason,
+		similarityHasDifferentReason: hasDifferentReason,
 		isDeleted: item.is_deleted ?? false,
 		createdAtMs,
 		status: "ready"
@@ -435,7 +459,12 @@ function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | nul
 		id: `block-cue-${block.id}`,
 		blockId: block.id,
 		blockSummary,
-		isSameReason: block.similarityIsSameReason ?? undefined
+		isSameReason:
+			block.similarityHasDifferentReason && !block.similarityHasSameReason
+				? false
+				: block.similarityHasSameReason && !block.similarityHasDifferentReason
+					? true
+					: (block.similarityIsSameReason ?? undefined)
 	};
 }
 
@@ -775,21 +804,30 @@ function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], optio
 					return [...blocks, { ...nextBlock, isUnread: options?.markNewUnread ? true : nextBlock.isUnread }];
 				}
 
-				return blocks.map(block =>
-					block.id === nextBlock.id
-						? {
-								...block,
-								...nextBlock,
-								expanded: block.expanded,
-								isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
-								cueText: nextBlock.cueText ?? block.cueText,
-								hasCue: block.hasCue || nextBlock.hasCue,
-								similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
-								sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
-								createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
-							}
-						: block
-				);
+				return blocks.map(block => {
+					if (block.id !== nextBlock.id) {
+						return block;
+					}
+
+					const isClearingPublicContext = nextBlock.publicContextRelevant === false;
+					return {
+						...block,
+						...nextBlock,
+						expanded: block.expanded,
+						isUnread: block.isUnread || nextBlock.isUnread || (!!nextBlock.hasCue && !block.hasCue && !block.expanded),
+						cueText: nextBlock.cueText ?? block.cueText,
+						hasCue: nextBlock.hasCue ?? block.hasCue,
+						similarityIsSameReason: nextBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+						similarityHasSameReason: nextBlock.similarityHasSameReason ?? block.similarityHasSameReason ?? false,
+						similarityHasDifferentReason: nextBlock.similarityHasDifferentReason ?? block.similarityHasDifferentReason ?? false,
+						publicContextRelevant: nextBlock.publicContextRelevant ?? block.publicContextRelevant,
+						publicContextScore: isClearingPublicContext ? null : (nextBlock.publicContextScore ?? block.publicContextScore),
+						publicContextReason: isClearingPublicContext ? undefined : (nextBlock.publicContextReason ?? block.publicContextReason),
+						publicContextExpiresAtMs: isClearingPublicContext ? undefined : Math.max(block.publicContextExpiresAtMs ?? 0, nextBlock.publicContextExpiresAtMs ?? 0) || undefined,
+						sharedReasons: mergeSharedReasons(block.sharedReasons, nextBlock.sharedReasons),
+						createdAtMs: block.createdAtMs ?? nextBlock.createdAtMs
+					};
+				});
 			}, baseBlocks)
 		)
 	);
@@ -856,11 +894,9 @@ function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueDa
 	return cue.kind !== "phase-transition-summary";
 }
 
-function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
-	const similarity = typeof response.duplicate_similarity === "number" ? Math.round(response.duplicate_similarity * 100) : null;
-	const similarityText = similarity == null ? "" : `相似度 ${similarity}%`;
+function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
 	const blockTitle = (block.aiSummary || block.summary).trim() || "既有想法";
-	const message = similarityText ? `已找到相似的既有想法：「${blockTitle}」(${similarityText})` : `已找到相似的既有想法：「${blockTitle}」`;
+	const message = `已找到相似的既有想法：「${blockTitle}」`;
 
 	return {
 		id: `duplicate-${block.id}-${Date.now()}`,
@@ -870,6 +906,57 @@ function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaB
 	};
 }
 
+function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMatchesPayload): IdeaBlock[] {
+	const matches = Array.isArray(payload.matches) ? payload.matches : [];
+	if (matches.length === 0) {
+		return blocks;
+	}
+
+	const expiresAtMs = Date.now() + PUBLIC_CONTEXT_RELEVANCE_MS;
+	const matchesByBlockId = new Map<string, PublicContextMatchPayload>();
+	for (const match of matches) {
+		if (match.ideaBlockId == null) {
+			continue;
+		}
+		matchesByBlockId.set(String(match.ideaBlockId), match);
+	}
+	if (matchesByBlockId.size === 0) {
+		return blocks;
+	}
+
+	return blocks.map(block => {
+		const match = matchesByBlockId.get(block.id);
+		if (!match || block.isDeleted) {
+			return block;
+		}
+		return {
+			...block,
+			publicContextRelevant: true,
+			publicContextScore: typeof match.score === "number" ? match.score : null,
+			publicContextReason: typeof match.reason === "string" ? match.reason : undefined,
+			publicContextExpiresAtMs: expiresAtMs
+		};
+	});
+}
+
+function clearExpiredPublicContextMatches(blocks: IdeaBlock[], nowMs: number): IdeaBlock[] {
+	let didChange = false;
+	const nextBlocks = blocks.map(block => {
+		if (!block.publicContextRelevant || !block.publicContextExpiresAtMs || block.publicContextExpiresAtMs > nowMs) {
+			return block;
+		}
+		didChange = true;
+		return {
+			...block,
+			publicContextRelevant: false,
+			publicContextScore: null,
+			publicContextReason: undefined,
+			publicContextExpiresAtMs: undefined
+		};
+	});
+	return didChange ? nextBlocks : blocks;
+}
+
 function isDuplicateIdeaBlockResponse(response: IdeaBlockResponse): boolean {
 	return response.is_duplicate === true || response.duplicate_of_id != null;
 }
@@ -877,7 +964,19 @@ function isDuplicateIdeaBlockResponse(response: IdeaBlockResponse): boolean {
 function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
 		if (!!left.isDeleted !== !!right.isDeleted) {
-			return left.isDeleted ? -1 : 1;
+			return left.isDeleted ? 1 : -1;
+		}
+
+		if (!!left.publicContextRelevant !== !!right.publicContextRelevant) {
+			return left.publicContextRelevant ? -1 : 1;
+		}
+
+		if (left.publicContextRelevant && right.publicContextRelevant) {
+			const leftScore = left.publicContextScore ?? 0;
+			const rightScore = right.publicContextScore ?? 0;
+			if (leftScore !== rightScore) {
+				return rightScore - leftScore;
+			}
 		}
 
 		if ((left.status === "generating") !== (right.status === "generating")) {
@@ -1087,6 +1186,7 @@ export function PrivateBoard({
 	const [ideaBlocksSplitRatio, setIdeaBlocksSplitRatio] = useState(50);
 	const [resizeCursor, setResizeCursor] = useState<"row-resize" | null>(null);
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
+	const previousIdeaBlockTopsRef = useRef<Record<string, number>>({});
 	const transcriptRefs = useRef<Record<string, HTMLDivElement | null>>({});
 	const manualIdeaTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const publicChatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1161,6 +1261,16 @@ export function PrivateBoard({
 	);
 
 	const isIdeaBlocksTabActive = canShowIdeaBlocks && visibleActiveTab === "ideablock";
+
+	const captureIdeaBlockPositions = useCallback(() => {
+		const nextTops: Record<string, number> = {};
+		Object.entries(blockRefs.current).forEach(([blockId, node]) => {
+			if (node) {
+				nextTops[blockId] = node.getBoundingClientRect().top;
+			}
+		});
+		previousIdeaBlockTopsRef.current = nextTops;
+	}, []);
 
 	const clearPhaseTransitionCueBatchTimer = useCallback(() => {
 		const batch = phaseTransitionCueBatchRef.current;
@@ -1478,6 +1588,26 @@ export function PrivateBoard({
 	}, [ideaBlocks]);
 
 	useEffect(() => {
+		if (!ideaBlocks.some(block => block.publicContextRelevant)) {
+			return;
+		}
+
+		const interval = window.setInterval(() => {
+			captureIdeaBlockPositions();
+			setIdeaBlocks(prev => {
+				const clearedBlocks = clearExpiredPublicContextMatches(prev, Date.now());
+				if (clearedBlocks === prev) {
+					return prev;
+				}
+				const nextBlocks = sortIdeaBlocks(clearedBlocks);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
+		}, 1000);
+		return () => window.clearInterval(interval);
+	}, [captureIdeaBlockPositions, ideaBlocks]);
+
+	useEffect(() => {
 		publicChatMessagesRef.current = publicChatMessages;
 	}, [publicChatMessages]);
 
@@ -1655,11 +1785,32 @@ export function PrivateBoard({
 									hasCue: true,
 									cueText: lastMessage.payload.blockSummary,
 									similarityIsSameReason: lastMessage.payload.isSameReason,
+									similarityHasSameReason: block.similarityHasSameReason || lastMessage.payload.isSameReason === true,
+									similarityHasDifferentReason: block.similarityHasDifferentReason || lastMessage.payload.isSameReason === false,
 									isUnread: !block.expanded
 								}
 							: block
 					)
 				);
+			}
+
+			if (lastMessage.type === "public_context_matches") {
+				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
+				if (matchedIds.size > 0) {
+					const visibleMatchedIds = [...matchedIds].filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
+					captureIdeaBlockPositions();
+					setIdeaBlocks(prev => {
+						const nextBlocks = sortIdeaBlocks(applyPublicContextMatches(prev, lastMessage.payload));
+						ideaBlocksRef.current = nextBlocks;
+						return nextBlocks;
+					});
+					const firstVisibleMatchId = visibleMatchedIds[0];
+					if (firstVisibleMatchId && visibleActiveTab === "ideablock") {
+						setHighlightedBlockId(firstVisibleMatchId);
+					} else if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
+						setUnreadIdeaBlockCount(current => current + visibleMatchedIds.length);
+					}
+				}
 			}
 
 			if (lastMessage.type === "similarity_reason_shared") {
@@ -1680,6 +1831,7 @@ export function PrivateBoard({
 									expanded: true,
 									hasCue: true,
 									similarityIsSameReason: false,
+									similarityHasDifferentReason: true,
 									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
 								}
 							: block
@@ -1722,7 +1874,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
+	}, [captureIdeaBlockPositions, cueCondition, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
@@ -1975,7 +2127,7 @@ export function PrivateBoard({
 				const firstDuplicateResponse = duplicateIdeaBlockResponses[0];
 				const firstDuplicateBlock = duplicateBlocks[0];
 				if (firstDuplicateResponse && firstDuplicateBlock) {
-					setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(firstDuplicateResponse, firstDuplicateBlock));
+					setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(firstDuplicateBlock));
 					jumpToBlock(firstDuplicateBlock.id);
 				}
 				shouldRefreshIdeaBlocks = true;
@@ -2121,6 +2273,63 @@ export function PrivateBoard({
 	}, []);
 
 	useLayoutEffect(() => {
+		const previousTops = previousIdeaBlockTopsRef.current;
+		if (Object.keys(previousTops).length === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+			previousIdeaBlockTopsRef.current = {};
+			return;
+		}
+
+		const animatedNodes: HTMLDivElement[] = [];
+		Object.entries(blockRefs.current).forEach(([blockId, node]) => {
+			if (!node) {
+				return;
+			}
+			const previousTop = previousTops[blockId];
+			if (previousTop == null) {
+				return;
+			}
+			const nextTop = node.getBoundingClientRect().top;
+			const deltaY = previousTop - nextTop;
+			if (Math.abs(deltaY) < 1) {
+				return;
+			}
+			node.style.transition = "none";
+			node.style.transform = `translateY(${deltaY}px)`;
+			node.style.willChange = "transform";
+			animatedNodes.push(node);
+		});
+		previousIdeaBlockTopsRef.current = {};
+
+		if (animatedNodes.length === 0) {
+			return;
+		}
+
+		const animationFrame = window.requestAnimationFrame(() => {
+			animatedNodes.forEach(node => {
+				node.style.transition = "transform 650ms cubic-bezier(0.22, 1, 0.36, 1)";
+				node.style.transform = "";
+			});
+		});
+
+		const cleanupTimer = window.setTimeout(() => {
+			animatedNodes.forEach(node => {
+				node.style.transition = "";
+				node.style.willChange = "";
+			});
+		}, 700);
+
+		return () => {
+			window.cancelAnimationFrame(animationFrame);
+			window.clearTimeout(cleanupTimer);
+			animatedNodes.forEach(node => {
+				node.style.transition = "";
+				node.style.transform = "";
+				node.style.willChange = "";
+			});
+		};
+	}, [ideaBlocks]);
+
+	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
 		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
 		const publicChatViewport = publicChatScrollViewportRef.current;
@@ -2182,7 +2391,7 @@ export function PrivateBoard({
 
 		const isDraft = currentBlock ? !!currentBlock.isDraft : id.startsWith("draft-");
 		const derivedTitle = isDraft
-			? normalizedContent.slice(0, 10) || values.summary.trim() || "Idea"
+			? normalizedContent.slice(0, 20) || values.summary.trim() || "Idea"
 			: values.updateTitle
 				? values.summary.trim() || currentBlock?.summary || "Idea"
 				: currentBlock?.summary || values.summary.trim() || "Idea";
@@ -2243,7 +2452,7 @@ export function PrivateBoard({
 				ideaBlocksRef.current = nextBlocks;
 				return nextBlocks;
 			});
-			setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+			setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedBlock));
 			jumpToBlock(savedBlock.id);
 			setIdeaBlockRefreshKey(current => current + 1);
 			return;
@@ -2257,8 +2466,10 @@ export function PrivateBoard({
 							...savedBlock,
 							expanded: block.expanded,
 							cueText: block.cueText,
-							hasCue: block.hasCue || savedBlock.hasCue,
-							similarityIsSameReason: savedBlock.similarityIsSameReason ?? block.similarityIsSameReason,
+							hasCue: savedBlock.hasCue,
+							similarityIsSameReason: savedBlock.similarityIsSameReason,
+							similarityHasSameReason: savedBlock.similarityHasSameReason ?? false,
+							similarityHasDifferentReason: savedBlock.similarityHasDifferentReason ?? false,
 							isDraft: false,
 							createdAtMs: block.createdAtMs ?? savedBlock.createdAtMs
 						}
@@ -2310,7 +2521,7 @@ export function PrivateBoard({
 		});
 		try {
 			if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
-				const derivedTitle = normalizedContent.slice(0, 10) || "Idea";
+				const derivedTitle = normalizedContent.slice(0, 20) || "Idea";
 				const newBlock: IdeaBlock = {
 					...createDraftIdeaBlock(),
 					id: `manual-${Date.now()}`,
@@ -2356,7 +2567,7 @@ export function PrivateBoard({
 				return nextBlocks;
 			});
 			if (isDuplicateBlock) {
-				setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+				setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedBlock));
 				jumpToBlock(savedBlock.id);
 			} else if (lastVisibleActiveTabRef.current === "ideablock") {
 				setHighlightedBlockId(savedBlock.id);

@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -174,13 +175,11 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 len(summary),
             )
-            embedding_vector = await create_text_embedding(summary)
-            logger.info(
-                "pipeline_embedding_done session_name=%s user_id=%s block_index=%s dimensions=%s",
-                session_name,
-                user_id,
-                block_index,
-                len(embedding_vector),
+            embedding_vector = await _create_embedding_or_none(
+                summary,
+                session_name=session_name,
+                user_id=user_id,
+                block_index=block_index,
             )
             title = _title_from_content(content)
             logger.info(
@@ -410,6 +409,8 @@ def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:
             "transcript": block.transcript,
             "similarity_id": block.similarity_id,
             "similarity_is_same_reason": block.similarity_is_same_reason,
+            "similarity_has_same_reason": block.similarity_has_same_reason,
+            "similarity_has_different_reason": block.similarity_has_different_reason,
             "is_deleted": block.is_deleted,
             "is_duplicate": block.is_duplicate,
             "duplicate_of_id": block.duplicate_of_id,
@@ -432,8 +433,42 @@ async def get_idea_block_for_payload(idea_block_id: int, db: AsyncSession) -> Id
     return idea_block
 
 
+async def _create_embedding_or_none(
+    text: str,
+    *,
+    session_name: str,
+    user_id: int,
+    block_index: int,
+) -> list[float] | None:
+    try:
+        embedding_vector = await create_text_embedding(text)
+        logger.info(
+            "pipeline_embedding_done session_name=%s user_id=%s block_index=%s dimensions=%s",
+            session_name,
+            user_id,
+            block_index,
+            len(embedding_vector),
+        )
+        return embedding_vector
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.warning(
+            (
+                "pipeline_embedding_skipped reason=embedding_provider_error session_name=%s "
+                "user_id=%s block_index=%s status=%s detail=%s"
+            ),
+            session_name,
+            user_id,
+            block_index,
+            exc.status_code,
+            exc.detail,
+        )
+        return None
+
+
 def _title_from_content(content: str) -> str:
-    value = content.strip()[:10]
+    value = content.strip()[:20]
     return value or "Idea"
 
 

@@ -2,13 +2,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text as sql_text
 
-from .config import CORS_ALLOW_CREDENTIALS, CORS_ALLOWED_ORIGINS, RESET_DB_ON_STARTUP, SKIP_DB_STARTUP, logger
+from .config import (
+    CORS_ALLOW_CREDENTIALS,
+    CORS_ALLOWED_ORIGINS,
+    OLLAMA_EMBED_WARMUP_ON_STARTUP,
+    RESET_DB_ON_STARTUP,
+    SKIP_DB_STARTUP,
+    logger,
+)
 from .db import engine
 from .error_handlers import register_exception_handlers
 from .models import Base
 from .routes.api_spec import router as api_spec_router
 from .routes.http import router as http_router
 from .routes.ws import router as ws_router
+from .services.embedding_service import warm_up_embedding_model
 
 OPENAPI_TAGS = [
     {"name": "Transcripts", "description": "Create and read transcript records."},
@@ -45,6 +53,8 @@ async def health() -> dict[str, str]:
 async def startup() -> None:
     if SKIP_DB_STARTUP:
         logger.warning("Skipping database startup initialization because SKIP_DB_STARTUP is enabled")
+        if OLLAMA_EMBED_WARMUP_ON_STARTUP:
+            await warm_up_embedding_model()
         return
 
     async with engine.begin() as conn:
@@ -151,6 +161,18 @@ async def startup() -> None:
                             ALTER TABLE idea_blocks ADD COLUMN task_name varchar(64) NOT NULL DEFAULT 'lost-at-sea';
                         END IF;
 
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'idea_blocks'
+                              AND column_name = 'title'
+                              AND character_maximum_length IS NOT NULL
+                              AND character_maximum_length < 20
+                        ) THEN
+                            ALTER TABLE idea_blocks ALTER COLUMN title TYPE varchar(20);
+                        END IF;
+
                         SELECT data_type
                         INTO similarity_id_type
                         FROM information_schema.columns
@@ -208,6 +230,7 @@ async def startup() -> None:
             )
         )
         logger.info("startup_similarity_schema_compat_check_done")
+
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(sql_text("DROP INDEX IF EXISTS idx_transcript_session_id"))
         await conn.execute(sql_text("CREATE INDEX IF NOT EXISTS idx_transcript_session_name ON transcript(session_name)"))
@@ -222,3 +245,6 @@ async def startup() -> None:
                 "ON similarities (LEAST(idea_block_id_1, idea_block_id_2), GREATEST(idea_block_id_1, idea_block_id_2))"
             )
         )
+
+    if OLLAMA_EMBED_WARMUP_ON_STARTUP:
+        await warm_up_embedding_model()

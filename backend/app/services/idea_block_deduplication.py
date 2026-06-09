@@ -12,8 +12,9 @@ from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, TaskItem
 
 DEDUPLICATION_SIMILARITY_THRESHOLD = 0.85
-DEDUPLICATION_DISTANCE_THRESHOLD = 1 - DEDUPLICATION_SIMILARITY_THRESHOLD
 DEDUPLICATION_CANDIDATE_LIMIT = 5
+DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD = 0.90
+DEDUPLICATION_FALLBACK_RECENT_CANDIDATE_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,13 @@ class DuplicateIdeaBlockMatch:
     idea_block_id: int
     reason: str
     similarity: float | None = None
+
+
+@dataclass(frozen=True)
+class SemanticCandidateSearchResult:
+    candidates: list[tuple[IdeaBlock, float]]
+    best_candidate_id: int | None
+    best_similarity: float | None
 
 
 async def find_duplicate_idea_block(
@@ -33,6 +41,18 @@ async def find_duplicate_idea_block(
     embedding_vector: list[float] | None,
     task_item_ids: list[int],
 ) -> DuplicateIdeaBlockMatch | None:
+    logger.info(
+        (
+            "idea_block_dedup_start session_name=%s user_id=%s title_chars=%s summary_chars=%s "
+            "has_embedding=%s task_item_ids=%s"
+        ),
+        session_name,
+        user_id,
+        len(title),
+        len(summary),
+        embedding_vector is not None,
+        task_item_ids,
+    )
     exact_match = await _find_exact_text_match(
         db,
         session_name=session_name,
@@ -54,26 +74,89 @@ async def find_duplicate_idea_block(
         )
 
     normalized_task_item_ids = _normalize_task_item_ids(task_item_ids)
-    if embedding_vector is None or not normalized_task_item_ids:
+    if embedding_vector is None:
+        logger.info(
+            "idea_block_dedup_skipped session_name=%s user_id=%s reason=missing_embedding task_item_count=%s",
+            session_name,
+            user_id,
+            len(normalized_task_item_ids),
+        )
         return None
 
-    same_item_block_ids = await _find_same_task_item_block_ids(
-        db,
-        session_name=session_name,
-        user_id=user_id,
-        task_item_ids=normalized_task_item_ids,
-    )
-    if not same_item_block_ids:
-        return None
+    same_item_block_ids: list[int] = []
+    if normalized_task_item_ids:
+        same_item_block_ids = await _find_same_task_item_block_ids(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            task_item_ids=normalized_task_item_ids,
+        )
+    else:
+        logger.info(
+            "idea_block_dedup_task_item_gate_skipped session_name=%s user_id=%s reason=no_task_items",
+            session_name,
+            user_id,
+        )
 
-    semantic_candidates = await _find_semantic_candidates(
+    same_item_result = await _find_semantic_candidates(
         db,
         session_name=session_name,
         user_id=user_id,
         embedding_vector=embedding_vector,
         candidate_idea_block_ids=same_item_block_ids,
+        threshold=DEDUPLICATION_SIMILARITY_THRESHOLD,
     )
+    _log_candidate_search(
+        session_name=session_name,
+        user_id=user_id,
+        source="same_task_item",
+        candidate_count=len(same_item_block_ids),
+        threshold=DEDUPLICATION_SIMILARITY_THRESHOLD,
+        result=same_item_result,
+    )
+
+    semantic_candidates = same_item_result.candidates
+    candidate_source = "same_task_item"
+    threshold = DEDUPLICATION_SIMILARITY_THRESHOLD
     if not semantic_candidates:
+        fallback_block_ids = await _find_recent_block_ids(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            limit=DEDUPLICATION_FALLBACK_RECENT_CANDIDATE_LIMIT,
+        )
+        fallback_result = await _find_semantic_candidates(
+            db,
+            session_name=session_name,
+            user_id=user_id,
+            embedding_vector=embedding_vector,
+            candidate_idea_block_ids=fallback_block_ids,
+            threshold=DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD,
+        )
+        _log_candidate_search(
+            session_name=session_name,
+            user_id=user_id,
+            source="recent_fallback",
+            candidate_count=len(fallback_block_ids),
+            threshold=DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD,
+            result=fallback_result,
+        )
+        semantic_candidates = fallback_result.candidates
+        candidate_source = "recent_fallback"
+        threshold = DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD
+
+    if not semantic_candidates:
+        logger.info(
+            (
+                "idea_block_dedup_no_match session_name=%s user_id=%s reason=no_semantic_candidate "
+                "same_item_count=%s threshold=%s fallback_threshold=%s"
+            ),
+            session_name,
+            user_id,
+            len(same_item_block_ids),
+            DEDUPLICATION_SIMILARITY_THRESHOLD,
+            DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD,
+        )
         return None
 
     confirmed_match = await _select_duplicate_with_llm(
@@ -82,25 +165,32 @@ async def find_duplicate_idea_block(
     )
     if confirmed_match is None:
         logger.info(
-            "idea_block_dedup_semantic_rejected session_name=%s user_id=%s candidate_ids=%s",
+            (
+                "idea_block_dedup_semantic_rejected session_name=%s user_id=%s source=%s "
+                "candidate_ids=%s best_similarity=%s threshold=%s"
+            ),
             session_name,
             user_id,
+            candidate_source,
             [candidate.id for candidate, _ in semantic_candidates],
+            round(semantic_candidates[0][1], 4),
+            threshold,
         )
         return None
 
     matched_block, similarity, reason = confirmed_match
     logger.info(
-        "idea_block_dedup_semantic_match session_name=%s user_id=%s duplicate_id=%s similarity=%s threshold=%s",
+        "idea_block_dedup_semantic_match session_name=%s user_id=%s source=%s duplicate_id=%s similarity=%s threshold=%s",
         session_name,
         user_id,
+        candidate_source,
         matched_block.id,
         round(similarity, 4),
-        DEDUPLICATION_SIMILARITY_THRESHOLD,
+        threshold,
     )
     return DuplicateIdeaBlockMatch(
         idea_block_id=matched_block.id,
-        reason=reason or "shared task item semantic duplicate",
+        reason=reason or ("shared task item semantic duplicate" if candidate_source == "same_task_item" else "recent semantic duplicate"),
         similarity=similarity,
     )
 
@@ -160,6 +250,27 @@ async def _find_same_task_item_block_ids(
     return list(result.scalars().all())
 
 
+async def _find_recent_block_ids(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    user_id: int,
+    limit: int,
+) -> list[int]:
+    result = await db.execute(
+        select(IdeaBlock.id)
+        .where(
+            IdeaBlock.session_name == session_name,
+            IdeaBlock.user_id == user_id,
+            IdeaBlock.is_deleted.is_(False),
+            IdeaBlock.embedding_vector.is_not(None),
+        )
+        .order_by(IdeaBlock.id.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def _find_semantic_candidates(
     db: AsyncSession,
     *,
@@ -167,7 +278,11 @@ async def _find_semantic_candidates(
     user_id: int,
     embedding_vector: list[float],
     candidate_idea_block_ids: list[int],
-) -> list[tuple[IdeaBlock, float]]:
+    threshold: float,
+) -> SemanticCandidateSearchResult:
+    if not candidate_idea_block_ids:
+        return SemanticCandidateSearchResult(candidates=[], best_candidate_id=None, best_similarity=None)
+
     distance = IdeaBlock.embedding_vector.cosine_distance(embedding_vector)
     similarity_score = (1 - distance).label("similarity_score")
     result = await db.execute(
@@ -178,12 +293,43 @@ async def _find_semantic_candidates(
             IdeaBlock.is_deleted.is_(False),
             IdeaBlock.id.in_(candidate_idea_block_ids),
             IdeaBlock.embedding_vector.is_not(None),
-            distance < DEDUPLICATION_DISTANCE_THRESHOLD,
         )
         .order_by(similarity_score.desc(), IdeaBlock.id.desc())
         .limit(DEDUPLICATION_CANDIDATE_LIMIT)
     )
-    return [(idea_block, float(similarity)) for idea_block, similarity in result.all()]
+    scored_candidates = [(idea_block, float(similarity)) for idea_block, similarity in result.all()]
+    best_candidate = scored_candidates[0] if scored_candidates else None
+    return SemanticCandidateSearchResult(
+        candidates=[(idea_block, similarity) for idea_block, similarity in scored_candidates if similarity >= threshold],
+        best_candidate_id=best_candidate[0].id if best_candidate else None,
+        best_similarity=best_candidate[1] if best_candidate else None,
+    )
+
+
+def _log_candidate_search(
+    *,
+    session_name: str,
+    user_id: int,
+    source: str,
+    candidate_count: int,
+    threshold: float,
+    result: SemanticCandidateSearchResult,
+) -> None:
+    logger.info(
+        (
+            "idea_block_dedup_candidates session_name=%s user_id=%s source=%s "
+            "candidate_count=%s accepted_count=%s accepted_ids=%s best_candidate_id=%s best_similarity=%s threshold=%s"
+        ),
+        session_name,
+        user_id,
+        source,
+        candidate_count,
+        len(result.candidates),
+        [candidate.id for candidate, _ in result.candidates],
+        result.best_candidate_id,
+        round(result.best_similarity, 4) if result.best_similarity is not None else None,
+        threshold,
+    )
 
 
 async def _select_duplicate_with_llm(

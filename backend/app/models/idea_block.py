@@ -31,7 +31,7 @@ class IdeaBlock(Base):
         nullable=False,
         server_default=func.now(),
     )
-    title: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(20), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     transcript_id: Mapped[int | None] = mapped_column(
         BigInteger,
@@ -99,6 +99,14 @@ class IdeaBlock(Base):
         return getattr(self, "_similarity_is_same_reason", None)
 
     @property
+    def similarity_has_same_reason(self) -> bool:
+        return bool(getattr(self, "_similarity_has_same_reason", False))
+
+    @property
+    def similarity_has_different_reason(self) -> bool:
+        return bool(getattr(self, "_similarity_has_different_reason", False))
+
+    @property
     def is_duplicate(self) -> bool:
         return self.duplicate_of_id is not None
 
@@ -117,6 +125,14 @@ class IdeaBlock(Base):
     @similarity_is_same_reason.setter
     def similarity_is_same_reason(self, value: bool | None) -> None:
         self._similarity_is_same_reason = value
+
+    @similarity_has_same_reason.setter
+    def similarity_has_same_reason(self, value: bool) -> None:
+        self._similarity_has_same_reason = bool(value)
+
+    @similarity_has_different_reason.setter
+    def similarity_has_different_reason(self, value: bool) -> None:
+        self._similarity_has_different_reason = bool(value)
 
     @property
     def created_at(self) -> datetime:

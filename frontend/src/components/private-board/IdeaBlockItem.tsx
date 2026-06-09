@@ -52,20 +52,35 @@ export function IdeaBlockItem({
 	const aiSummaryChanged = draftAiSummary.trim() !== savedAiSummary.trim();
 	const canSaveAiSummary = draftAiSummary.trim().length > 0 && aiSummaryChanged && !isSaving && !isDeleted;
 	const titleChanged = draftTitle.trim() !== savedTitle.trim();
-	const titleTooLong = draftTitle.trim().length > 10;
+	const titleTooLong = draftTitle.trim().length > 20;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shouldShowCue = block.hasCue && isGroupPhase(currentPhase);
+	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
+	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
+	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+	const hasMixedSimilarityReasons = hasSameSimilarityReason && hasDifferentSimilarityReason;
 	const similarityReasonTag =
-		block.similarityIsSameReason == null
+		!hasSameSimilarityReason && !hasDifferentSimilarityReason
 			? null
 			: {
-					label: block.similarityIsSameReason ? "same reason" : "different reason",
-					className: block.similarityIsSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
+					label: hasMixedSimilarityReasons ? "same + different" : hasSameSimilarityReason ? "same reason" : "different reason",
+					className: hasMixedSimilarityReasons
+						? "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
+						: hasSameSimilarityReason
+							? "border-green-700/30 bg-green-100 text-green-900"
+							: "border-yellow-700/30 bg-yellow-100 text-yellow-900"
 				};
-	const similarityReasonTitleColor = shouldShowCue && block.similarityIsSameReason != null ? (block.similarityIsSameReason ? "bg-[rgb(205,255,186)]" : "bg-[rgb(255,249,184)]") : null;
+	const similarityReasonTitleColor =
+		shouldShowCue && (hasSameSimilarityReason || hasDifferentSimilarityReason)
+			? hasMixedSimilarityReasons
+				? "bg-[#ffeace]"
+				: hasSameSimilarityReason
+					? "bg-[rgb(205,255,186)]"
+					: "bg-[rgb(255,249,184)]"
+			: null;
 	const sharedReasons = block.sharedReasons ?? [];
 
 	useEffect(() => {
@@ -178,7 +193,7 @@ export function IdeaBlockItem({
 
 	const saveDraft = async () => {
 		const nextAiSummary = draftAiSummary.trim();
-		const nextSummary = nextAiSummary.slice(0, 10) || "Idea";
+		const nextSummary = nextAiSummary.slice(0, 20) || "Idea";
 		if (!nextAiSummary || isSaving || isDeleted) {
 			return;
 		}
@@ -202,7 +217,7 @@ export function IdeaBlockItem({
 
 	const saveTitle = async () => {
 		const nextTitle = draftTitle.trim();
-		if (!nextTitle || nextTitle.length > 10 || isSaving || isDeleted) {
+		if (!nextTitle || nextTitle.length > 20 || isSaving || isDeleted) {
 			return;
 		}
 
@@ -233,6 +248,7 @@ export function IdeaBlockItem({
 			className={cn(
 				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
+				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
@@ -252,6 +268,15 @@ export function IdeaBlockItem({
 			}}
 		>
 			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
+			{shouldShowPublicContext && (
+				<span
+					className="pointer-events-none absolute left-3 top-1.5 z-10 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
+					aria-label="現在公開討論相關"
+					title="現在公開討論相關"
+				>
+					NOW
+				</span>
+			)}
 			{isGenerating ? (
 				<CircleDashed className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			) : isDeleted ? (
@@ -399,7 +424,7 @@ export function IdeaBlockItem({
 				row
 			)}
 
-			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過10個字，請將標題刪減至10字以下"}</p>}
+			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
 
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
