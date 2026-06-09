@@ -290,7 +290,6 @@ export function IdeaBlockItem({
 						<>
 							<Button
 								aria-label="Cancel title edit"
-								className="h-7 w-7"
 								size="icon"
 								variant="ghost"
 								onClick={event => {
@@ -299,11 +298,10 @@ export function IdeaBlockItem({
 								}}
 								disabled={isSaving}
 							>
-								<X className="h-3.5 w-3.5" />
+								<X className="h-4 w-4" />
 							</Button>
 							<Button
 								aria-label="Save title edit"
-								className="h-7 w-7"
 								size="icon"
 								onClick={event => {
 									event.stopPropagation();
@@ -311,7 +309,7 @@ export function IdeaBlockItem({
 								}}
 								disabled={!canSaveTitle}
 							>
-								<Check className="h-3.5 w-3.5" />
+								<Check className="h-4 w-4" />
 							</Button>
 						</>
 					) : (
@@ -322,14 +320,31 @@ export function IdeaBlockItem({
 								</Badge>
 							)}
 							{showDeleteConfirm ? (
-								<div className="flex items-center gap-1 rounded-md border bg-popover p-0.5 shadow-sm" onClick={event => event.stopPropagation()}>
-									<Button aria-label="Confirm delete idea block" className="h-7 w-7" size="icon" variant="destructive" onClick={() => void confirmDelete()} disabled={isDeleting}>
-										<Check className="h-3.5 w-3.5" />
+								<>
+									<Button
+										aria-label="Confirm delete idea block"
+										size="icon"
+										variant="destructive"
+										onClick={event => {
+											event.stopPropagation();
+											void confirmDelete();
+										}}
+										disabled={isDeleting}
+									>
+										<Check className="h-4 w-4" />
 									</Button>
-									<Button aria-label="Cancel delete idea block" className="h-7 w-7" size="icon" variant="ghost" onClick={() => setShowDeleteConfirm(false)}>
-										<X className="h-3.5 w-3.5" />
+									<Button
+										aria-label="Cancel delete idea block"
+										size="icon"
+										variant="ghost"
+										onClick={event => {
+											event.stopPropagation();
+											setShowDeleteConfirm(false);
+										}}
+									>
+										<X className="h-4 w-4" />
 									</Button>
-								</div>
+								</>
 							) : (
 								<>
 									{!isDeleted && (
