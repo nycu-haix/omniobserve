@@ -1,4 +1,4 @@
-import { ChevronRight, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
@@ -98,6 +98,19 @@ interface IdeaBlockNotice {
 	message: string;
 }
 
+type IdeaBlockChatShareNoticeStatus = "sending" | "sent" | "failed";
+
+interface IdeaBlockChatShareNotice {
+	id: string;
+	message: string;
+	status: IdeaBlockChatShareNoticeStatus;
+}
+
+interface PendingIdeaBlockChatShare {
+	noticeId: string;
+	message: string;
+}
+
 interface AudioIdeaBlocksUpdateMessage {
 	type: "idea_blocks_update";
 	idea_blocks?: IdeaBlockResponse[];
@@ -168,6 +181,13 @@ const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const MIN_IDEA_BLOCKS_SPLIT_RATIO = 24;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
+const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
+const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
+const IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS = 12000;
+
+function createClientNoticeId(prefix: string): string {
+	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 interface PhaseTransitionCueBatch {
 	cues: SimilarityPairCueData[];
@@ -962,6 +982,71 @@ function TranscriptLines({
 	);
 }
 
+function IdeaBlockChatShareCueContent({
+	notices,
+	onView,
+	onRetry,
+	onDismiss
+}: {
+	notices: IdeaBlockChatShareNotice[];
+	onView: (noticeId: string) => void;
+	onRetry: (notice: IdeaBlockChatShareNotice) => void;
+	onDismiss: (noticeId: string) => void;
+}) {
+	useEffect(() => {
+		const timers = notices
+			.filter(notice => notice.status !== "sending")
+			.map(notice => window.setTimeout(() => onDismiss(notice.id), notice.status === "failed" ? IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS : IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS));
+		return () => timers.forEach(timer => window.clearTimeout(timer));
+	}, [notices, onDismiss]);
+
+	if (notices.length === 0) {
+		return null;
+	}
+
+	return (
+		<>
+			{notices.map(notice => {
+				const title = notice.status === "sending" ? "正在送到聊天室" : notice.status === "failed" ? "傳送失敗" : "已送到聊天室";
+				return (
+					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={notice.id} role="status" aria-live="polite">
+						<div className="mb-3 flex items-start gap-2 text-sm">
+							{notice.status === "sending" ? (
+								<Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+							) : notice.status === "failed" ? (
+								<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+							) : (
+								<CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+							)}
+							<div className="grid min-w-0 gap-2">
+								<span className="font-medium">{title}</span>
+								<div className="max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-muted-foreground">{notice.message}</div>
+							</div>
+						</div>
+						<div className="flex flex-wrap justify-end gap-2">
+							{notice.status === "sent" && (
+								<Button className="gap-1.5" size="sm" onClick={() => onView(notice.id)}>
+									<Eye className="h-3.5 w-3.5" />
+									查看
+								</Button>
+							)}
+							{notice.status === "failed" && (
+								<Button className="gap-1.5" size="sm" onClick={() => onRetry(notice)}>
+									<RotateCcw className="h-3.5 w-3.5" />
+									重試
+								</Button>
+							)}
+							<Button aria-label="Dismiss idea block chat notification" size="icon" variant="ghost" onClick={() => onDismiss(notice.id)}>
+								<X className="h-4 w-4" />
+							</Button>
+						</div>
+					</div>
+				);
+			})}
+		</>
+	);
+}
+
 export function PrivateBoard({
 	sessionId,
 	participantId,
@@ -992,6 +1077,7 @@ export function PrivateBoard({
 	const [manualIdeaText, setManualIdeaText] = useState("");
 	const [manualIdeaError, setManualIdeaError] = useState<string | null>(null);
 	const [ideaBlockNotice, setIdeaBlockNotice] = useState<IdeaBlockNotice | null>(null);
+	const [ideaBlockChatShareNotices, setIdeaBlockChatShareNotices] = useState<IdeaBlockChatShareNotice[]>([]);
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
@@ -1007,6 +1093,7 @@ export function PrivateBoard({
 	const ideaBlocksRef = useRef<IdeaBlock[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_IDEA_BLOCKS : []);
 	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
 	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
+	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
 	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1167,6 +1254,42 @@ export function PrivateBoard({
 		},
 		[canShowIdeaBlocks, onRequestOpen, selectBoardTab]
 	);
+
+	const dismissIdeaBlockChatShareNotice = useCallback((noticeId: string) => {
+		setIdeaBlockChatShareNotices(prev => prev.filter(notice => notice.id !== noticeId));
+	}, []);
+
+	const viewIdeaBlockChatShareNotice = useCallback(
+		(noticeId: string) => {
+			onRequestOpen?.();
+			selectBoardTab("public-chat");
+			setIdeaBlockChatShareNotices(prev => prev.filter(notice => notice.id !== noticeId));
+		},
+		[onRequestOpen, selectBoardTab]
+	);
+
+	const queueIdeaBlockChatShareNotice = useCallback((message: string, noticeId = createClientNoticeId("idea-block-chat-share")) => {
+		pendingIdeaBlockChatSharesRef.current = [...pendingIdeaBlockChatSharesRef.current.filter(pendingShare => pendingShare.noticeId !== noticeId), { noticeId, message }];
+		setIdeaBlockChatShareNotices(prev =>
+			[
+				...prev.filter(notice => notice.id !== noticeId),
+				{
+					id: noticeId,
+					message,
+					status: "sending" as const
+				}
+			].slice(-3)
+		);
+		window.setTimeout(() => {
+			const pendingShare = pendingIdeaBlockChatSharesRef.current.find(item => item.noticeId === noticeId);
+			if (!pendingShare) {
+				return;
+			}
+			pendingIdeaBlockChatSharesRef.current = pendingIdeaBlockChatSharesRef.current.filter(item => item.noticeId !== noticeId);
+			setIdeaBlockChatShareNotices(prev => prev.map(notice => (notice.id === noticeId ? { ...notice, status: "failed" } : notice)));
+		}, IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS);
+		return noticeId;
+	}, []);
 
 	const focusActiveComposer = useCallback(() => {
 		if (isIdeaBlocksTabActive) {
@@ -1439,6 +1562,11 @@ export function PrivateBoard({
 			if (lastMessage.type === "public_chat_error") {
 				setIsSendingPublicChat(false);
 				setPublicChatError(lastMessage.reason || "公開訊息傳送失敗");
+				const failedShare = pendingIdeaBlockChatSharesRef.current[0];
+				if (failedShare) {
+					pendingIdeaBlockChatSharesRef.current = pendingIdeaBlockChatSharesRef.current.filter(item => item.noticeId !== failedShare.noticeId);
+					setIdeaBlockChatShareNotices(prev => prev.map(notice => (notice.id === failedShare.noticeId ? { ...notice, status: "failed" } : notice)));
+				}
 				return;
 			}
 
@@ -1568,6 +1696,25 @@ export function PrivateBoard({
 				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
 				setIsSendingPublicChat(false);
 				setPublicChatMessages(prev => appendPublicChatMessage(prev, nextMessage));
+				if (nextMessage.isOwn && !nextMessage.isDeleted) {
+					const nextMessageText = nextMessage.message.trim();
+					const pendingShareIndex = pendingIdeaBlockChatSharesRef.current.findIndex(item => item.message === nextMessageText);
+					if (pendingShareIndex >= 0) {
+						const pendingShare = pendingIdeaBlockChatSharesRef.current[pendingShareIndex];
+						pendingIdeaBlockChatSharesRef.current = pendingIdeaBlockChatSharesRef.current.filter((_, index) => index !== pendingShareIndex);
+						setIdeaBlockChatShareNotices(prev =>
+							prev.map(notice =>
+								notice.id === pendingShare.noticeId
+									? {
+											...notice,
+											message: nextMessage.message,
+											status: "sent"
+										}
+									: notice
+							)
+						);
+					}
+				}
 				if (isNewUnreadMessage && visibleActiveTab !== "public-chat") {
 					setUnreadPublicChatCount(current => current + 1);
 				}
@@ -2231,25 +2378,26 @@ export function PrivateBoard({
 		(message: string) => {
 			const normalizedMessage = message.trim();
 			if (!normalizedMessage) {
-				return false;
+				return null;
 			}
 
 			if (!isConnected) {
 				setPublicChatError("公開聊天室尚未連線");
-				return false;
+				return null;
 			}
 
+			const sentMessage = normalizedMessage.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
 			setIsSendingPublicChat(true);
 			setPublicChatError(null);
 			onSendBoardMessage({
 				type: "public_chat_send",
-				message: normalizedMessage.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd(),
+				message: sentMessage,
 				displayName
 			});
 			window.setTimeout(() => {
 				setIsSendingPublicChat(false);
 			}, 5000);
-			return true;
+			return sentMessage;
 		},
 		[displayName, isConnected, onSendBoardMessage]
 	);
@@ -2260,14 +2408,29 @@ export function PrivateBoard({
 		}
 	};
 
+	const retryIdeaBlockChatShareNotice = useCallback(
+		(notice: IdeaBlockChatShareNotice) => {
+			const sentMessage = sendPublicChatPayload(notice.message);
+			if (!sentMessage) {
+				setIdeaBlockChatShareNotices(prev => prev.map(item => (item.id === notice.id ? { ...item, status: "failed" } : item)));
+				return;
+			}
+			queueIdeaBlockChatShareNotice(sentMessage, notice.id);
+		},
+		[queueIdeaBlockChatShareNotice, sendPublicChatPayload]
+	);
+
 	const shareIdeaBlockToChat = useCallback(
 		(block: IdeaBlock) => {
 			if (block.status === "generating" || block.isDeleted) {
 				return;
 			}
-			sendPublicChatPayload(buildIdeaBlockChatMessage(block));
+			const sentMessage = sendPublicChatPayload(buildIdeaBlockChatMessage(block));
+			if (sentMessage) {
+				queueIdeaBlockChatShareNotice(sentMessage);
+			}
 		},
-		[sendPublicChatPayload]
+		[queueIdeaBlockChatShareNotice, sendPublicChatPayload]
 	);
 
 	const shareSimilarityReason = (cue: SimilarityCueData) => {
@@ -2303,6 +2466,11 @@ export function PrivateBoard({
 	const transcriptTabEmptyText = canShowIdeaBlocks ? "尚無公開逐字稿" : "尚無逐字稿";
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
+	const visibleSimilarityCues = canShowIdeaBlocks && isGroupPhase(visiblePhase) ? cues : [];
+	const ideaBlockChatShareCueContent =
+		ideaBlockChatShareNotices.length > 0 ? (
+			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
+		) : undefined;
 
 	return (
 		<>
@@ -2534,7 +2702,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			{canShowIdeaBlocks && isGroupPhase(visiblePhase) && <SimilarityCue cues={cues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} />}
+			<SimilarityCue cues={visibleSimilarityCues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={ideaBlockChatShareCueContent} />
 		</>
 	);
 }

@@ -38,7 +38,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
-	if (cues.length === 0) {
+	if (cues.length === 0 && !topContent) {
 		return null;
 	}
 
