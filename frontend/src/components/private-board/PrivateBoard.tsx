@@ -847,7 +847,7 @@ function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueDa
 	return cue.kind !== "phase-transition-summary";
 }
 
-function buildDuplicateIdeaBlockNotice(response: IdeaBlockResponse, block: IdeaBlock): IdeaBlockNotice {
+function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
 	const blockTitle = (block.aiSummary || block.summary).trim() || "既有想法";
 	const message = `已找到相似的既有想法：「${blockTitle}」`;
 
@@ -1953,7 +1953,7 @@ export function PrivateBoard({
 				const firstDuplicateResponse = duplicateIdeaBlockResponses[0];
 				const firstDuplicateBlock = duplicateBlocks[0];
 				if (firstDuplicateResponse && firstDuplicateBlock) {
-					setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(firstDuplicateResponse, firstDuplicateBlock));
+					setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(firstDuplicateBlock));
 					jumpToBlock(firstDuplicateBlock.id);
 				}
 				shouldRefreshIdeaBlocks = true;
@@ -2278,7 +2278,7 @@ export function PrivateBoard({
 				ideaBlocksRef.current = nextBlocks;
 				return nextBlocks;
 			});
-			setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+			setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedBlock));
 			jumpToBlock(savedBlock.id);
 			setIdeaBlockRefreshKey(current => current + 1);
 			return;
@@ -2393,7 +2393,7 @@ export function PrivateBoard({
 				return nextBlocks;
 			});
 			if (isDuplicateBlock) {
-				setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedIdeaBlockResponse, savedBlock));
+				setIdeaBlockNotice(buildDuplicateIdeaBlockNotice(savedBlock));
 				jumpToBlock(savedBlock.id);
 			} else if (lastVisibleActiveTabRef.current === "ideablock") {
 				setHighlightedBlockId(savedBlock.id);
