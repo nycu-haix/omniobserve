@@ -543,7 +543,17 @@ function isJoinRejectedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "join_rejected";
 }
 
-function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSeaItem; rankDelta?: number; onPreview: (item: LostAtSeaItem) => void }) {
+function SortableLostAtSeaItem({
+	item,
+	rankDelta,
+	showImage,
+	onPreview
+}: {
+	item: LostAtSeaItem;
+	rankDelta?: number;
+	showImage: boolean;
+	onPreview: (item: LostAtSeaItem) => void;
+}) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
@@ -569,18 +579,20 @@ function SortableLostAtSeaItem({ item, rankDelta, onPreview }: { item: LostAtSea
 			{...attributes}
 			{...listeners}
 		>
-			<button
-				type="button"
-				className="h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-				aria-label={`放大查看 ${item.label}`}
-				onClick={event => {
-					event.stopPropagation();
-					onPreview(item);
-				}}
-				onPointerDown={event => event.stopPropagation()}
-			>
-				<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
-			</button>
+			{showImage && (
+				<button
+					type="button"
+					className="h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					aria-label={`放大查看 ${item.label}`}
+					onClick={event => {
+						event.stopPropagation();
+						onPreview(item);
+					}}
+					onPointerDown={event => event.stopPropagation()}
+				>
+					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
+				</button>
+			)}
 			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			{hasRankDelta && (
@@ -619,6 +631,7 @@ function LostAtSeaRankingPanel({
 	onDragStart,
 	onDragCancel,
 	onDragEnd,
+	showImages,
 	onPreviewItem,
 	getRankDelta,
 	scrollContainerRef
@@ -630,6 +643,7 @@ function LostAtSeaRankingPanel({
 	onDragStart: () => void;
 	onDragCancel: () => void;
 	onDragEnd: (event: DragEndEvent) => void;
+	showImages: boolean;
 	onPreviewItem: (item: LostAtSeaItem) => void;
 	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
@@ -641,7 +655,7 @@ function LostAtSeaRankingPanel({
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
 						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} onPreview={onPreviewItem} />
+							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} onPreview={onPreviewItem} />
 						))}
 					</div>
 				</SortableContext>
@@ -1172,6 +1186,7 @@ export default function MeetingRoom() {
 				const nextItems = createInitialItems(taskConfig.items);
 
 				setTaskId(taskConfig.task_id);
+				setPreviewItem(null);
 				setTaskTitle(taskConfig.title);
 				setTaskDetail(taskConfig.task_detail);
 				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
@@ -1606,6 +1621,7 @@ export default function MeetingRoom() {
 							}}
 							onDragCancel={() => handleRankingDragCancel("public")}
 							onDragEnd={event => handleRankingDragEnd("public", event)}
+							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
 							scrollContainerRef={publicRankingScrollRef}
 						/>
@@ -1621,6 +1637,7 @@ export default function MeetingRoom() {
 							}}
 							onDragCancel={() => handleRankingDragCancel("private")}
 							onDragEnd={event => handleRankingDragEnd("private", event)}
+							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
 							scrollContainerRef={privateRankingScrollRef}
 							getRankDelta={item => {
@@ -1793,7 +1810,7 @@ export default function MeetingRoom() {
 				</div>
 			</section>
 
-			{previewItem && (
+			{previewItem && taskId !== "enhance-the-poster" && (
 				<div className="fixed inset-0 z-40 grid place-items-center bg-background/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" onClick={() => setPreviewItem(null)}>
 					<div className="grid w-full max-w-md gap-3 rounded-lg border bg-card p-3 shadow-lg" onClick={event => event.stopPropagation()}>
 						<img
