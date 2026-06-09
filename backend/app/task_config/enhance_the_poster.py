@@ -278,6 +278,12 @@ PHASE1_POSTER_COMPONENTS = [
         "label_en": "Title group",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
     },
+    {
+        "id": "info_group",
+        "label_zh": "下方資訊",
+        "label_en": "Info group",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
+    },
 ]
 
 PHASE1_ACTION_ITEMS = [

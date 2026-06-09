@@ -62,16 +62,40 @@ def merge_transcript_text(previous_text: str, next_text: str) -> str:
     if not next_value:
         return previous
     if previous.endswith(next_value) or next_value in previous:
-        return previous
+        return collapse_repeated_transcript_tail(previous)
     if next_value.startswith(previous) or previous in next_value:
-        return next_value
+        return collapse_repeated_transcript_tail(next_value)
 
     max_overlap = min(len(previous), len(next_value))
     for overlap in range(max_overlap, 1, -1):
         if previous[-overlap:] == next_value[:overlap]:
-            return f"{previous}{next_value[overlap:]}"
+            return collapse_repeated_transcript_tail(f"{previous}{next_value[overlap:]}")
 
-    return f"{previous}{next_value}"
+    return collapse_repeated_transcript_tail(f"{previous}{next_value}")
+
+
+def merge_transcript_segments(texts: list[str]) -> str:
+    merged_text = ""
+    for text in texts:
+        merged_text = merge_transcript_text(merged_text, text)
+    return merged_text.strip()
+
+
+def collapse_repeated_transcript_tail(text: str) -> str:
+    cleaned = text.strip()
+    max_unit_length = min(len(cleaned) // 2, 80)
+    for unit_length in range(max_unit_length, 3, -1):
+        unit = cleaned[-unit_length:]
+        if not unit.strip():
+            continue
+        prefix = cleaned[: -unit_length]
+        repeats = 1
+        while prefix.endswith(unit):
+            repeats += 1
+            prefix = prefix[: -unit_length]
+        if repeats > 1:
+            return collapse_repeated_transcript_tail(f"{prefix}{unit}")
+    return cleaned
 
 
 def parse_stream_start_message(raw_text: str, *, expected_session_name: str | None = None) -> StreamContext:
@@ -895,7 +919,7 @@ async def handle_transcript_segments_websocket(
                         else:
                             _pending_transcript_batch_texts[batch_key].append(text)
                             batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
-                            batch_text = "\n".join(item for item in batch_texts if item.strip()).strip()
+                            batch_text = merge_transcript_segments(batch_texts)
                         logger.info(
                             "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s retranscribed_final=%s batch_segments=%s batch_chars=%s",
                             session_name,
