@@ -580,30 +580,51 @@ function mergeTranscriptText(previousText: string, nextText: string): string {
 	const previous = previousText.trim();
 	const next = nextText.trim();
 	if (!previous) {
-		return next;
+		return collapseRepeatedTranscriptTail(next);
 	}
 	if (!next) {
-		return previous;
+		return collapseRepeatedTranscriptTail(previous);
 	}
 	if (previous.endsWith(next)) {
-		return previous;
+		return collapseRepeatedTranscriptTail(previous);
 	}
 	if (next.startsWith(previous)) {
-		return next;
+		return collapseRepeatedTranscriptTail(next);
 	}
 	if (previous.includes(next)) {
-		return previous;
+		return collapseRepeatedTranscriptTail(previous);
 	}
 	if (next.includes(previous)) {
-		return next;
+		return collapseRepeatedTranscriptTail(next);
 	}
 	const maxOverlap = Math.min(previous.length, next.length);
 	for (let overlap = maxOverlap; overlap > 1; overlap -= 1) {
 		if (previous.slice(-overlap) === next.slice(0, overlap)) {
-			return `${previous}${next.slice(overlap)}`;
+			return collapseRepeatedTranscriptTail(`${previous}${next.slice(overlap)}`);
 		}
 	}
-	return `${previous}${next}`;
+	return collapseRepeatedTranscriptTail(`${previous}${next}`);
+}
+
+function collapseRepeatedTranscriptTail(text: string): string {
+	const cleaned = text.trim();
+	const maxUnitLength = Math.min(Math.floor(cleaned.length / 2), 80);
+	for (let unitLength = maxUnitLength; unitLength > 3; unitLength -= 1) {
+		const unit = cleaned.slice(-unitLength);
+		if (!unit.trim()) {
+			continue;
+		}
+		let prefix = cleaned.slice(0, -unitLength);
+		let repeats = 1;
+		while (prefix.endsWith(unit)) {
+			repeats += 1;
+			prefix = prefix.slice(0, -unitLength);
+		}
+		if (repeats > 1) {
+			return collapseRepeatedTranscriptTail(`${prefix}${unit}`);
+		}
+	}
+	return cleaned;
 }
 
 function audioTranscriptDisplaySignature(message: AudioDraftTargetMessage, line: TranscriptLineType): string {
