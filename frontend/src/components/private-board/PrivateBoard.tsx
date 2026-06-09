@@ -1205,7 +1205,6 @@ export function PrivateBoard({
 	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
 	const ideaBlocksSplitContainerRef = useRef<HTMLDivElement | null>(null);
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const privateTranscriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const splitResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -2335,7 +2334,6 @@ export function PrivateBoard({
 
 	useLayoutEffect(() => {
 		const transcriptViewport = transcriptScrollViewportRef.current;
-		const privateTranscriptViewport = privateTranscriptScrollViewportRef.current;
 		const ideaBlocksViewport = ideaBlocksScrollViewportRef.current;
 		const publicChatViewport = publicChatScrollViewportRef.current;
 		const didEnterIdeaBlocks = lastVisibleActiveTabRef.current !== "ideablock" && isIdeaBlocksTabActive;
@@ -2349,9 +2347,6 @@ export function PrivateBoard({
 			if (transcriptViewport) {
 				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
 			}
-			if (privateTranscriptViewport) {
-				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
-			}
 			if (ideaBlocksViewport) {
 				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
 			}
@@ -2361,9 +2356,6 @@ export function PrivateBoard({
 		if (isIdeaBlocksTabActive) {
 			if (transcriptViewport && shouldAutoScrollRef.current.transcript) {
 				transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
-			}
-			if (privateTranscriptViewport && shouldAutoScrollRef.current.transcript) {
-				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
 			}
 			if (ideaBlocksViewport && shouldAutoScrollRef.current.ideablock) {
 				ideaBlocksViewport.scrollTop = ideaBlocksViewport.scrollHeight;
@@ -2377,9 +2369,6 @@ export function PrivateBoard({
 
 		if (visibleActiveTab === "transcript" && transcriptViewport && shouldAutoScrollRef.current.transcript) {
 			transcriptViewport.scrollTop = transcriptViewport.scrollHeight;
-			if (privateTranscriptViewport) {
-				privateTranscriptViewport.scrollTop = privateTranscriptViewport.scrollHeight;
-			}
 			return;
 		}
 
@@ -2785,32 +2774,18 @@ export function PrivateBoard({
 				</header>
 
 				{visibleActiveTab === "transcript" && (
-					<div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:grid-cols-2">
-						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
-							<div className="border-b px-3 py-2 text-sm font-medium">公開逐字稿</div>
-							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-								<TranscriptLines
-									lines={publicTranscriptLines}
-									emptyText="尚無公開逐字稿"
-									onJumpToBlock={undefined}
-									onTranscriptRef={setTranscriptRef}
-									highlightedTranscriptId={highlightedTranscriptId}
-								/>
-							</ScrollArea>
-						</section>
-						<section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
-							<div className="border-b px-3 py-2 text-sm font-medium">私人逐字稿</div>
-							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={privateTranscriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-								<TranscriptLines
-									lines={privateTranscriptLines}
-									emptyText="尚無私人逐字稿"
-									onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
-									onTranscriptRef={setTranscriptRef}
-									highlightedTranscriptId={highlightedTranscriptId}
-								/>
-							</ScrollArea>
-						</section>
-					</div>
+					<section className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-background">
+						<div className="border-b px-3 py-2 text-sm font-medium">逐字稿</div>
+						<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
+							<TranscriptLines
+								lines={transcriptLines}
+								emptyText="尚無逐字稿"
+								onJumpToBlock={canShowIdeaBlocks ? jumpToBlock : undefined}
+								onTranscriptRef={setTranscriptRef}
+								highlightedTranscriptId={highlightedTranscriptId}
+							/>
+						</ScrollArea>
+					</section>
 				)}
 
 				{isIdeaBlocksTabActive && (
