@@ -127,6 +127,7 @@ interface IdeaBlockChatShareNotice {
 interface PendingIdeaBlockChatShare {
 	noticeId: string;
 	message: string;
+	attemptId: string;
 }
 
 interface AudioIdeaBlocksUpdateMessage {
@@ -1379,7 +1380,8 @@ export function PrivateBoard({
 	);
 
 	const queueIdeaBlockChatShareNotice = useCallback((message: string, noticeId = createClientNoticeId("idea-block-chat-share")) => {
-		pendingIdeaBlockChatSharesRef.current = [...pendingIdeaBlockChatSharesRef.current.filter(pendingShare => pendingShare.noticeId !== noticeId), { noticeId, message }];
+		const attemptId = createClientNoticeId("idea-block-chat-share-attempt");
+		pendingIdeaBlockChatSharesRef.current = [...pendingIdeaBlockChatSharesRef.current.filter(pendingShare => pendingShare.noticeId !== noticeId), { noticeId, message, attemptId }];
 		setIdeaBlockChatShareNotices(prev =>
 			[
 				...prev.filter(notice => notice.id !== noticeId),
@@ -1391,11 +1393,11 @@ export function PrivateBoard({
 			].slice(-3)
 		);
 		window.setTimeout(() => {
-			const pendingShare = pendingIdeaBlockChatSharesRef.current.find(item => item.noticeId === noticeId);
+			const pendingShare = pendingIdeaBlockChatSharesRef.current.find(item => item.noticeId === noticeId && item.attemptId === attemptId);
 			if (!pendingShare) {
 				return;
 			}
-			pendingIdeaBlockChatSharesRef.current = pendingIdeaBlockChatSharesRef.current.filter(item => item.noticeId !== noticeId);
+			pendingIdeaBlockChatSharesRef.current = pendingIdeaBlockChatSharesRef.current.filter(item => item.noticeId !== noticeId || item.attemptId !== attemptId);
 			setIdeaBlockChatShareNotices(prev => prev.map(notice => (notice.id === noticeId ? { ...notice, status: "failed" } : notice)));
 		}, IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS);
 		return noticeId;
