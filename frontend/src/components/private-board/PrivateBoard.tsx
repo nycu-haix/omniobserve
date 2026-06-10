@@ -135,6 +135,16 @@ interface AudioIdeaBlocksUpdateMessage {
 	type: "idea_blocks_update";
 	idea_blocks?: IdeaBlockResponse[];
 	duplicate_idea_blocks?: IdeaBlockResponse[];
+	scope?: string | null;
+	mic_mode?: string | null;
+	local_mic_mode?: string | null;
+}
+
+interface AudioTerminalErrorMessage {
+	type: "transcript_error" | "pipeline_error" | "asr_error";
+	scope?: string | null;
+	mic_mode?: string | null;
+	local_mic_mode?: string | null;
 }
 
 interface AudioTranscriptBoundaryMessage {
@@ -203,6 +213,7 @@ const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
 const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
 const IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS = 12000;
+const VOICE_GENERATING_ID_PREFIX = "voice-generating";
 
 function createClientNoticeId(prefix: string): string {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -275,6 +286,15 @@ function isAudioIdeaBlocksUpdateMessage(message: object | null): message is Audi
 	return !!message && "type" in message && message.type === "idea_blocks_update";
 }
 
+function isAudioTerminalErrorMessage(message: object | null): message is AudioTerminalErrorMessage {
+	return !!message && "type" in message && (message.type === "transcript_error" || message.type === "pipeline_error" || message.type === "asr_error");
+}
+
+function isPrivateAudioCompletionScope(message: { scope?: string | null; mic_mode?: string | null; local_mic_mode?: string | null }): boolean {
+	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode;
+	return source !== "public";
+}
+
 const createDraftIdeaBlock = (): IdeaBlock => ({
 	id: `draft-${Date.now()}`,
 	summary: "新增 idea block",
@@ -286,15 +306,40 @@ const createDraftIdeaBlock = (): IdeaBlock => ({
 	status: "ready"
 });
 
-const createGeneratingIdeaBlock = (content: string): IdeaBlock => ({
-	id: `manual-generating-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-	summary: "正在生成...",
-	aiSummary: content,
-	transcript: "",
-	expanded: false,
-	createdAtMs: Date.now(),
-	status: "generating"
-});
+function normalizeClientIdPart(value: string): string {
+	return (
+		value
+			.replace(/[^a-zA-Z0-9_-]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 80) || "active"
+	);
+}
+
+function createGeneratingIdeaBlock(
+	content: string,
+	options: {
+		id?: string;
+		idPrefix?: string;
+		transcript?: string;
+		transcriptLineId?: string;
+		createdAtMs?: number;
+	} = {}
+): IdeaBlock {
+	const block: IdeaBlock = {
+		id: options.id ?? `${options.idPrefix ?? "manual-generating"}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		summary: "正在生成...",
+		aiSummary: content,
+		transcript: options.transcript ?? "",
+		expanded: false,
+		createdAtMs: options.createdAtMs ?? Date.now(),
+		status: "generating"
+	};
+	if (options.transcriptLineId) {
+		block.transcriptLineId = options.transcriptLineId;
+		block.sourceTranscriptIds = [options.transcriptLineId];
+	}
+	return block;
+}
 
 function getTranscriptUserId(participantId: string): number {
 	const userId = Number(participantId);
@@ -1182,6 +1227,7 @@ export function PrivateBoard({
 	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
 	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
 	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
+	const voiceGeneratingBlocksRef = useRef<Map<string, string>>(new Map());
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1383,6 +1429,68 @@ export function PrivateBoard({
 			setIdeaBlockChatShareNotices(prev => prev.map(notice => (notice.id === noticeId ? { ...notice, status: "failed" } : notice)));
 		}, IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS);
 		return noticeId;
+	}, []);
+
+	const takeVoiceGeneratingBlockIds = useCallback(() => {
+		const blockIds = new Set(voiceGeneratingBlocksRef.current.values());
+		voiceGeneratingBlocksRef.current.clear();
+		return blockIds;
+	}, []);
+
+	const removeVoiceGeneratingBlocksByIds = useCallback((blockIds: Set<string>) => {
+		if (blockIds.size === 0) {
+			return;
+		}
+
+		setIdeaBlocks(prev => {
+			const nextBlocks = prev.filter(block => !blockIds.has(block.id));
+			if (nextBlocks.length === prev.length) {
+				return prev;
+			}
+			const sortedBlocks = sortIdeaBlocks(nextBlocks);
+			ideaBlocksRef.current = sortedBlocks;
+			return sortedBlocks;
+		});
+	}, []);
+
+	const clearVoiceGeneratingBlocks = useCallback(() => {
+		removeVoiceGeneratingBlocksByIds(takeVoiceGeneratingBlockIds());
+	}, [removeVoiceGeneratingBlocksByIds, takeVoiceGeneratingBlockIds]);
+
+	const queueVoiceGeneratingIdeaBlock = useCallback(({ segmentKey, text, transcriptLineId, timestampMs }: { segmentKey: string; text: string; transcriptLineId?: string; timestampMs?: number }) => {
+		const normalizedText = text.trim();
+		if (!normalizedText) {
+			return;
+		}
+
+		const existingBlockId = voiceGeneratingBlocksRef.current.get(segmentKey);
+		const blockId = existingBlockId ?? `${VOICE_GENERATING_ID_PREFIX}-${normalizeClientIdPart(segmentKey)}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+		voiceGeneratingBlocksRef.current.set(segmentKey, blockId);
+		const generatingBlock = createGeneratingIdeaBlock(normalizedText, {
+			id: blockId,
+			transcript: normalizedText,
+			transcriptLineId,
+			createdAtMs: timestampMs
+		});
+
+		setIdeaBlocks(prev => {
+			const nextBlocks = sortIdeaBlocks(
+				prev.some(block => block.id === blockId)
+					? prev.map(block =>
+							block.id === blockId
+								? {
+										...block,
+										...generatingBlock,
+										isUnread: block.isUnread,
+										createdAtMs: block.createdAtMs ?? generatingBlock.createdAtMs
+									}
+								: block
+						)
+					: [...prev, generatingBlock]
+			);
+			ideaBlocksRef.current = nextBlocks;
+			return nextBlocks;
+		});
 	}, []);
 
 	useEffect(() => {
@@ -1898,15 +2006,21 @@ export function PrivateBoard({
 			if (!boundaryText) {
 				return;
 			}
+			const finalDraftId = matchingDraft?.id ?? transcriptLine.id;
 			if (isPrivateAudioLineForParticipant(transcriptLine, participantId)) {
 				setWhisperTransient({
 					status: "generating",
 					text: boundaryText,
 					segmentKey: draftKey
 				});
+				queueVoiceGeneratingIdeaBlock({
+					segmentKey: draftKey,
+					text: boundaryText,
+					transcriptLineId: finalDraftId,
+					timestampMs: matchingDraft?.timestampMs ?? transcriptLine.timestampMs
+				});
 			}
 
-			const finalDraftId = matchingDraft?.id ?? transcriptLine.id;
 			activeTranscriptDraftsRef.current.set(draftKey, {
 				id: finalDraftId,
 				text: boundaryText,
@@ -1928,7 +2042,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [displayName, ideaBlocks, lastAudioMessage, participantId]);
+	}, [displayName, ideaBlocks, lastAudioMessage, participantId, queueVoiceGeneratingIdeaBlock]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptMessage(lastAudioMessage)) {
@@ -1953,6 +2067,8 @@ export function PrivateBoard({
 				let replaceDraftLineId: string | null = null;
 				let persistedReplacementDraft: { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean } | null = null;
 				const draftKey = transcriptDraftTargetKey(lastAudioMessage, transcriptLine, participantId);
+				let voiceGeneratingSegmentKey = draftKey;
+				let shouldQueueVoiceGeneratingBlock = false;
 				const matchingDraft = activeTranscriptDraftsRef.current.get(draftKey) ?? null;
 				const matchingFinalDraft = isTranscriptFinal && matchingDraft && !matchingDraft.isFinal ? matchingDraft : null;
 				const isOwnPrivateAudioMessage = isPrivateAudioLineForParticipant(transcriptLine, participantId);
@@ -2017,6 +2133,7 @@ export function PrivateBoard({
 							text: transcriptLine.text,
 							segmentKey: draftKey
 						});
+						shouldQueueVoiceGeneratingBlock = true;
 					}
 				} else if (isTranscriptFinal && matchingDraft?.isFinal) {
 					replaceDraftLineId = matchingDraft.id;
@@ -2041,6 +2158,7 @@ export function PrivateBoard({
 							text: transcriptLine.text,
 							segmentKey: draftKey
 						});
+						shouldQueueVoiceGeneratingBlock = true;
 					}
 				} else if (isPersistedFinal) {
 					if (matchingDraft) {
@@ -2061,6 +2179,7 @@ export function PrivateBoard({
 						const userId = transcriptLine.userId ?? participantId;
 						for (const [key, draft] of activeTranscriptDraftsRef.current) {
 							if (draft.source === transcriptLine.source && draft.userId === userId && !draft.isFinal) {
+								voiceGeneratingSegmentKey = key;
 								replaceDraftLineId = draft.id;
 								persistedReplacementDraft = draft;
 								activeTranscriptDraftsRef.current.set(key, {
@@ -2086,9 +2205,26 @@ export function PrivateBoard({
 						setWhisperTransient({
 							status: "generating",
 							text: transcriptLine.text,
-							segmentKey: draftKey
+							segmentKey: voiceGeneratingSegmentKey
+						});
+						shouldQueueVoiceGeneratingBlock = true;
+					}
+				}
+
+				if (isOwnPrivateAudioMessage && (shouldQueueVoiceGeneratingBlock || isTranscriptFinal || isPersistedFinal) && displayLine.text.trim()) {
+					if (!shouldQueueVoiceGeneratingBlock) {
+						setWhisperTransient({
+							status: "generating",
+							text: displayLine.text,
+							segmentKey: voiceGeneratingSegmentKey
 						});
 					}
+					queueVoiceGeneratingIdeaBlock({
+						segmentKey: voiceGeneratingSegmentKey,
+						text: displayLine.text,
+						transcriptLineId: displayLine.id,
+						timestampMs: displayLine.timestampMs
+					});
 				}
 
 				const signature = audioTranscriptDisplaySignature(lastAudioMessage, displayLine);
@@ -2110,7 +2246,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [displayName, ideaBlocks, lastAudioMessage, participantId]);
+	}, [displayName, ideaBlocks, lastAudioMessage, participantId, queueVoiceGeneratingIdeaBlock]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
@@ -2121,7 +2257,12 @@ export function PrivateBoard({
 				return;
 			}
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
-			setWhisperTransient({ status: "idle", text: "" });
+			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage);
+			const pendingVoiceBlockIds = shouldClearVoiceGeneratingBlocks ? takeVoiceGeneratingBlockIds() : new Set<string>();
+			const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
+			if (shouldClearVoiceGeneratingBlocks) {
+				setWhisperTransient({ status: "idle", text: "" });
+			}
 			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
 			let shouldRefreshIdeaBlocks = false;
 
@@ -2144,8 +2285,9 @@ export function PrivateBoard({
 				});
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
-					const existingActiveBlockIds = new Set(prev.filter(block => !block.isDeleted).map(block => block.id));
-					mergedBlocksSnapshot = mergeIdeaBlocks(prev, updatedBlocks, { markNewUnread: true });
+					const baseBlocks = removePendingVoiceBlocks(prev);
+					const existingActiveBlockIds = new Set(baseBlocks.filter(block => !block.isDeleted).map(block => block.id));
+					mergedBlocksSnapshot = mergeIdeaBlocks(baseBlocks, updatedBlocks, { markNewUnread: true });
 					const newActiveBlockCount = mergedBlocksSnapshot.filter(block => !block.isDeleted && !existingActiveBlockIds.has(block.id)).length;
 					if (newActiveBlockCount > 0 && lastVisibleActiveTabRef.current !== "ideablock") {
 						setUnreadIdeaBlockCount(current => current + newActiveBlockCount);
@@ -2162,7 +2304,7 @@ export function PrivateBoard({
 			if (duplicateIdeaBlockResponses.length > 0) {
 				const duplicateBlocks = duplicateIdeaBlockResponses.map(item => ideaBlockResponseToBlock(item));
 				setIdeaBlocks(prev => {
-					const mergedBlocks = mergeIdeaBlocks(prev, duplicateBlocks);
+					const mergedBlocks = mergeIdeaBlocks(removePendingVoiceBlocks(prev), duplicateBlocks);
 					ideaBlocksRef.current = mergedBlocks;
 					return mergedBlocks;
 				});
@@ -2175,13 +2317,34 @@ export function PrivateBoard({
 				shouldRefreshIdeaBlocks = true;
 			}
 
+			if (pendingVoiceBlockIds.size > 0 && !shouldRefreshIdeaBlocks) {
+				setIdeaBlocks(prev => {
+					const nextBlocks = sortIdeaBlocks(removePendingVoiceBlocks(prev));
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
+			}
+
 			if (shouldRefreshIdeaBlocks) {
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [jumpToBlock, lastAudioMessage, queueSimilarityCueFromBlock]);
+	}, [jumpToBlock, lastAudioMessage, queueSimilarityCueFromBlock, takeVoiceGeneratingBlockIds]);
+
+	useEffect(() => {
+		if (!isAudioTerminalErrorMessage(lastAudioMessage) || !isPrivateAudioCompletionScope(lastAudioMessage)) {
+			return;
+		}
+
+		const timer = window.setTimeout(() => {
+			clearVoiceGeneratingBlocks();
+			setWhisperTransient(current => (current.status === "generating" ? { status: "idle", text: "" } : current));
+		}, 0);
+
+		return () => window.clearTimeout(timer);
+	}, [clearVoiceGeneratingBlocks, lastAudioMessage]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
@@ -2653,7 +2816,7 @@ export function PrivateBoard({
 	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
 	const whisperStatusLabel = whisperTransient.status === "listening" ? "正在聽悄悄話" : whisperTransient.status === "generating" ? "正在生成" : null;
 	const whisperTransientText = whisperTransient.text.trim();
-	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && whisperTransientText;
+	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && (whisperTransient.status === "generating" || !!whisperTransientText);
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
@@ -2808,7 +2971,14 @@ export function PrivateBoard({
 									{showWhisperTransient && (
 										<div className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
 											<div className="mb-1 text-xs font-semibold text-muted-foreground">{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}</div>
-											<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
+											{whisperTransientText ? (
+												<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
+											) : (
+												<div className="flex items-center gap-2 leading-6 text-muted-foreground">
+													<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+													<span>等待 Idea Block 生成</span>
+												</div>
+											)}
 										</div>
 									)}
 								</div>
