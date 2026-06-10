@@ -293,6 +293,14 @@ function normalizeRankingLimit(value: unknown): number | undefined {
 	return Number.isFinite(rankingLimit) && rankingLimit > 0 ? Math.floor(rankingLimit) : undefined;
 }
 
+function shouldDefaultCollapseJitsi() {
+	const roomName = new URLSearchParams(window.location.search)
+		.get("room_name")
+		?.trim()
+		.replace(/^["']|["']$/g, "");
+	return roomName?.startsWith("enhance-the-poster") ?? false;
+}
+
 function getActiveRankingLimit(taskId: string, phase: SessionPhase, configuredLimit: number | undefined, itemCount: number): number | undefined {
 	if (taskId !== "enhance-the-poster" || isPrivatePhase1(phase) || configuredLimit === undefined || itemCount <= 0) {
 		return undefined;
@@ -1227,7 +1235,7 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
-	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
+	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -1258,6 +1266,7 @@ export default function MeetingRoom() {
 	const handleJitsiAudioParticipantsChange = useCallback((snapshot: JitsiAudioSnapshot) => {
 		setJitsiAudioSnapshot(snapshot);
 	}, []);
+
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
