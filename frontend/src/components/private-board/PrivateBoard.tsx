@@ -1190,11 +1190,10 @@ function buildSimilarityReasonShareErrorNotice(message: SimilarityReasonShareErr
 
 function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMatchesPayload): IdeaBlock[] {
 	const matches = Array.isArray(payload.matches) ? payload.matches : [];
-	if (matches.length === 0) {
+	const replaceExisting = payload.replaceExisting !== false;
+	if (matches.length === 0 && !replaceExisting) {
 		return blocks;
 	}
-
-	const replaceExisting = payload.replaceExisting !== false;
 	const matchesByBlockId = new Map<string, PublicContextMatchPayload>();
 	for (const match of matches) {
 		if (match.ideaBlockId == null) {
@@ -2218,7 +2217,7 @@ export function PrivateBoard({
 
 			if (lastMessage.type === "public_context_matches") {
 				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
-				if (matchedIds.size > 0) {
+				if (matchedIds.size > 0 || lastMessage.payload.replaceExisting === true) {
 					const visibleMatchedIds = [...matchedIds].filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
 					captureIdeaBlockPositions();
 					setIdeaBlocks(prev => {

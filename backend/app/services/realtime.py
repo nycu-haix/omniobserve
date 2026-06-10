@@ -19,6 +19,7 @@ from ..task_config import (
     get_default_phase_for_session,
     get_ranking_limit_for_session,
     get_ranking_items_for_session,
+    get_task_config_for_session,
     normalize_phase_for_session,
 )
 from ..utils import utc_now
@@ -32,7 +33,11 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
-from .public_context_matching import find_public_context_matches
+from .public_context_matching import (
+    PublicContextMatch,
+    find_public_context_component_matches,
+    find_public_context_matches,
+)
 from .phase_task_item_snapshot_service import initialize_phase_rankings
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
 from .ranking_cutoff import (
@@ -205,6 +210,7 @@ session_timers: dict[str, dict[str, Any]] = defaultdict(
     lambda: {"end_time_ms": 0, "duration_s": 0}
 )
 session_cue_conditions: dict[str, str] = defaultdict(lambda: "experimental")
+session_public_context_state: dict[str, dict[str, Any]] = {}
 
 
 def _now_ms() -> int:
@@ -263,6 +269,25 @@ def _phase_changed_message(session_id: str) -> dict[str, Any]:
         "cue_condition": session_cue_conditions[session_id],
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
         "timestamp_ms": _now_ms(),
+    }
+
+
+def _public_context_component_state_message(session_id: str) -> dict[str, Any]:
+    state = session_public_context_state.get(session_id) or {}
+    component_ids = list(state.get("component_ids") or [])
+    task_item_ids = list(state.get("task_item_ids") or [])
+    return {
+        "type": "public_context_component_state",
+        "componentIds": component_ids,
+        "component_ids": component_ids,
+        "taskItemIds": task_item_ids,
+        "task_item_ids": task_item_ids,
+        "source": state.get("source"),
+        "matchCount": _normalize_int(state.get("match_count"), 0),
+        "match_count": _normalize_int(state.get("match_count"), 0),
+        "deliveredCount": _normalize_int(state.get("delivered_count"), 0),
+        "delivered_count": _normalize_int(state.get("delivered_count"), 0),
+        "timestamp_ms": _normalize_int(state.get("timestamp_ms"), 0),
     }
 
 
@@ -427,37 +452,15 @@ def _schedule_public_context_matching(
             if not matches:
                 return
 
-            matches_by_user: dict[str, list[Any]] = {}
-            for match in matches:
-                matches_by_user.setdefault(str(match.user_id), []).append(match)
-
-            for target_participant_id, user_matches in matches_by_user.items():
-                await board_manager.send_to(
-                    session_id,
-                    target_participant_id,
-                    {
-                        "type": "public_context_matches",
-                        "payload": {
-                            "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
-                            "participantId": participant_id,
-                            "textChars": len(text),
-                            "contextChars": len(match_text),
-                            "replaceExisting": True,
-                            "pinMode": "public_context_topic",
-                            "matches": [
-                                {
-                                    "ideaBlockId": str(match.idea_block_id),
-                                    "userId": str(match.user_id),
-                                    "score": match.score,
-                                    "reason": match.reason,
-                                    "taskItemIds": match.task_item_ids,
-                                    "componentIds": match.component_ids,
-                                }
-                                for match in user_matches
-                            ],
-                        },
-                    },
-                )
+            await _publish_public_context_matches(
+                session_id,
+                matches=matches,
+                source="auto",
+                participant_id=participant_id,
+                transcript_segment_id=transcript_segment_id,
+                text_chars=len(text),
+                context_chars=len(match_text),
+            )
         except asyncio.CancelledError:
             return
         except Exception as exc:
@@ -485,6 +488,81 @@ def _schedule_public_context_matching(
     if previous_task is not None and not previous_task.done():
         previous_task.cancel()
     _public_context_matching_tasks[session_id] = asyncio.create_task(run_matching())
+
+
+async def _publish_public_context_matches(
+    session_id: str,
+    *,
+    matches: list[PublicContextMatch],
+    source: str,
+    participant_id: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    text_chars: int = 0,
+    context_chars: int = 0,
+    component_ids: list[str] | None = None,
+    task_item_ids: list[int] | None = None,
+) -> None:
+    resolved_component_ids = _unique_strings(
+        component_ids if component_ids is not None else [component_id for match in matches for component_id in match.component_ids]
+    )
+    resolved_task_item_ids = _unique_ints(
+        task_item_ids if task_item_ids is not None else [task_item_id for match in matches for task_item_id in match.task_item_ids]
+    )
+    matches_by_user: dict[str, list[PublicContextMatch]] = {}
+    for match in matches:
+        matches_by_user.setdefault(str(match.user_id), []).append(match)
+
+    delivered_count = 0
+    target_participant_ids = [
+        target_participant_id
+        for target_participant_id in board_manager.get_participants(session_id)
+        if not _is_admin_participant_id(target_participant_id)
+    ]
+    for target_participant_id in target_participant_ids:
+        user_matches = matches_by_user.get(target_participant_id, [])
+        sent = await board_manager.send_to(
+            session_id,
+            target_participant_id,
+            {
+                "type": "public_context_matches",
+                "payload": {
+                    "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                    "participantId": participant_id,
+                    "textChars": text_chars,
+                    "contextChars": context_chars,
+                    "replaceExisting": True,
+                    "pinMode": "public_context_topic",
+                    "componentIds": resolved_component_ids,
+                    "taskItemIds": resolved_task_item_ids,
+                    "source": source,
+                    "matches": [_public_context_match_payload(match) for match in user_matches],
+                },
+            },
+        )
+        if sent:
+            delivered_count += 1
+
+    timestamp_ms = _now_ms()
+    session_public_context_state[session_id] = {
+        "component_ids": resolved_component_ids,
+        "task_item_ids": resolved_task_item_ids,
+        "source": source,
+        "match_count": len(matches),
+        "delivered_count": delivered_count,
+        "timestamp_ms": timestamp_ms,
+    }
+    await admin_manager.broadcast(session_id, _public_context_component_state_message(session_id))
+
+
+def _public_context_match_payload(match: PublicContextMatch) -> dict[str, Any]:
+    return {
+        "ideaBlockId": str(match.idea_block_id),
+        "userId": str(match.user_id),
+        "score": match.score,
+        "reason": match.reason,
+        "taskItemIds": match.task_item_ids,
+        "componentIds": match.component_ids,
+    }
 
 
 def _append_public_context_text(session_id: str, text: str) -> str:
@@ -517,6 +595,44 @@ def _normalize_optional_int(value: Any) -> int | None:
         return None
     parsed = _normalize_int(value, -1)
     return parsed if parsed >= 0 else None
+
+
+def _unique_strings(values: list[Any]) -> list[str]:
+    normalized_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        normalized_value = str(value or "").strip()
+        if not normalized_value or normalized_value in seen_values:
+            continue
+        seen_values.add(normalized_value)
+        normalized_values.append(normalized_value)
+    return normalized_values
+
+
+def _unique_ints(values: list[Any]) -> list[int]:
+    normalized_values: list[int] = []
+    seen_values: set[int] = set()
+    for value in values:
+        parsed_value = _normalize_optional_int(value)
+        if parsed_value is None or parsed_value in seen_values:
+            continue
+        seen_values.add(parsed_value)
+        normalized_values.append(parsed_value)
+    return normalized_values
+
+
+def _normalize_public_context_component_ids(session_id: str, value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_component_ids = [value]
+    elif isinstance(value, list):
+        raw_component_ids = value
+    else:
+        raw_component_ids = []
+
+    task_config = get_task_config_for_session(session_name=session_id)
+    builder = task_config.get("phase1_builder") or {}
+    valid_component_ids = {str(item["id"]) for item in builder.get("components", []) if item.get("id")}
+    return [component_id for component_id in _unique_strings(raw_component_ids) if component_id in valid_component_ids]
 
 
 def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
@@ -1247,6 +1363,11 @@ async def handle_admin_websocket(
             "ranking_state": _admin_ranking_state_message(session_id),
         },
     )
+    await admin_manager.send_to(
+        session_id,
+        admin_id,
+        _public_context_component_state_message(session_id),
+    )
 
     try:
         while True:
@@ -1272,6 +1393,11 @@ async def handle_admin_websocket(
                         **_phase_state_message(session_id),
                         "ranking_state": _admin_ranking_state_message(session_id),
                     },
+                )
+                await admin_manager.send_to(
+                    session_id,
+                    admin_id,
+                    _public_context_component_state_message(session_id),
                 )
             elif message_type == "switch_phase":
                 previous_phase = _get_session_phase(session_id)
@@ -1409,6 +1535,61 @@ async def handle_admin_websocket(
                 await admin_manager.broadcast(session_id, cue_condition_msg)
                 await board_manager.broadcast(session_id, cue_condition_msg)
                 await cue_manager.broadcast(session_id, cue_condition_msg)
+            elif message_type == "set_public_context_components":
+                raw_component_ids = (
+                    payload.get("componentIds")
+                    if "componentIds" in payload
+                    else payload.get("component_ids", payload.get("componentId", payload.get("component_id")))
+                )
+                should_clear = payload.get("clear") is True
+                component_ids = [] if should_clear else _normalize_public_context_component_ids(session_id, raw_component_ids)
+                if not should_clear and raw_component_ids and not component_ids:
+                    await admin_manager.send_to(
+                        session_id,
+                        admin_id,
+                        {
+                            "type": "public_context_component_error",
+                            "reason": "no valid component ids",
+                            "componentIds": [],
+                        },
+                    )
+                    continue
+
+                async with SessionLocal() as db:
+                    try:
+                        matches = await find_public_context_component_matches(
+                            db,
+                            session_name=session_id,
+                            component_ids=component_ids,
+                        )
+                    except Exception as exc:
+                        await db.rollback()
+                        logger.warning(
+                            "admin_public_context_component_failed session_id=%s admin_id=%s component_ids=%s error_type=%s error=%s",
+                            session_id,
+                            admin_id,
+                            component_ids,
+                            exc.__class__.__name__,
+                            exc,
+                        )
+                        await admin_manager.send_to(
+                            session_id,
+                            admin_id,
+                            {
+                                "type": "public_context_component_error",
+                                "reason": "failed to set NOW component",
+                                "componentIds": component_ids,
+                            },
+                        )
+                        continue
+
+                await _publish_public_context_matches(
+                    session_id,
+                    matches=matches,
+                    source="manual_clear" if not component_ids else "manual",
+                    participant_id=admin_id,
+                    component_ids=component_ids,
+                )
             elif message_type == "public_chat_send":
                 message_text = str(payload.get("message") or "").strip()
                 if not message_text:

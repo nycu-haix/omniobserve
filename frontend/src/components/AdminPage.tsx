@@ -13,7 +13,7 @@ import {
 	type SessionPhaseOption
 } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
-import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
+import { apiUrl, fetchTaskConfig, type Phase1BuilderOption, type TaskConfigItem } from "../services/api";
 import type { ParticipantPresence } from "../services/presence";
 import type { PublicChatMessage } from "../types";
 import { PublicChatComposer, PublicChatMessages } from "./private-board/PublicChatPanel";
@@ -107,6 +107,19 @@ interface IdeaBlocksUpdateMessage extends RealtimeMessage {
 	idea_blocks?: unknown;
 }
 
+interface PublicContextComponentStateMessage extends RealtimeMessage {
+	type: "public_context_component_state";
+	componentIds?: unknown;
+	component_ids?: unknown;
+	taskItemIds?: unknown;
+	task_item_ids?: unknown;
+	source?: unknown;
+	matchCount?: unknown;
+	match_count?: unknown;
+	deliveredCount?: unknown;
+	delivered_count?: unknown;
+}
+
 interface LatestParticipantTranscript {
 	scope: string;
 	text: string;
@@ -139,6 +152,7 @@ type CueCondition = "experimental" | "control";
 type AdminTab = "ranking" | "transcript" | "chat";
 type ManualCueReasonType = "same" | "different";
 type SimilarityReasonKind = "same" | "different" | "mixed";
+type PublicNowSource = "auto" | "manual" | "manual_clear" | string;
 
 interface SimilarityLink {
 	id: number;
@@ -320,6 +334,27 @@ function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
+function normalizeStringList(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+	value.forEach(item => {
+		const id = String(item ?? "").trim();
+		if (!id || seen.has(id)) {
+			return;
+		}
+		seen.add(id);
+		normalized.push(id);
+	});
+	return normalized;
+}
+
+function normalizeNumberValue(value: unknown, fallback: number) {
+	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {
 	if (message?.type !== "admin_ranking_state" || !isRankingSnapshot(message.public_ranking)) {
 		return false;
@@ -343,6 +378,10 @@ function isPresenceStateMessage(message: RealtimeMessage | null): message is Pre
 
 function isIdeaBlocksUpdateMessage(message: RealtimeMessage | null): message is IdeaBlocksUpdateMessage {
 	return message?.type === "idea_blocks_update" && Array.isArray(message.idea_blocks);
+}
+
+function isPublicContextComponentStateMessage(message: RealtimeMessage | null): message is PublicContextComponentStateMessage {
+	return message?.type === "public_context_component_state";
 }
 
 function normalizePresenceParticipant(item: unknown): ParticipantPresence | null {
@@ -713,6 +752,7 @@ export function AdminPage() {
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
 	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
+	const [phase1Components, setPhase1Components] = useState<Phase1BuilderOption[]>([]);
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
 	const [selectedCueBlockIds, setSelectedCueBlockIds] = useState<number[]>([]);
@@ -720,6 +760,12 @@ export function AdminPage() {
 	const [isCreatingManualCue, setIsCreatingManualCue] = useState(false);
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
+	const [publicNowComponentIds, setPublicNowComponentIds] = useState<string[]>([]);
+	const [publicNowSource, setPublicNowSource] = useState<PublicNowSource | null>(null);
+	const [publicNowMatchCount, setPublicNowMatchCount] = useState(0);
+	const [publicNowDeliveredCount, setPublicNowDeliveredCount] = useState(0);
+	const [isSettingPublicNow, setIsSettingPublicNow] = useState(false);
+	const [publicNowError, setPublicNowError] = useState<string | null>(null);
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [taskPhases, setTaskPhases] = useState<SessionPhaseOption[]>(DEFAULT_SESSION_PHASE_OPTIONS);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
@@ -741,6 +787,7 @@ export function AdminPage() {
 	const jumpHighlightTimerRef = useRef<number | null>(null);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const phase1ComponentById = useMemo(() => new Map(phase1Components.map(component => [component.id, component])), [phase1Components]);
 	const participantNameById = useMemo(() => {
 		const nextParticipantNameById = new Map<string, string>();
 		participants.forEach(participant => {
@@ -835,6 +882,18 @@ export function AdminPage() {
 		const nextCueCondition = normalizeCueCondition(message.cue_condition) ?? normalizeCueCondition(message.condition);
 		if (nextCueCondition) {
 			setCueCondition(nextCueCondition);
+		}
+		if (isPublicContextComponentStateMessage(message)) {
+			setPublicNowComponentIds(normalizeStringList(message.componentIds ?? message.component_ids));
+			setPublicNowSource(typeof message.source === "string" ? message.source : null);
+			setPublicNowMatchCount(normalizeNumberValue(message.matchCount ?? message.match_count, 0));
+			setPublicNowDeliveredCount(normalizeNumberValue(message.deliveredCount ?? message.delivered_count, 0));
+			setIsSettingPublicNow(false);
+			setPublicNowError(null);
+		}
+		if (message.type === "public_context_component_error") {
+			setIsSettingPublicNow(false);
+			setPublicNowError(typeof message.reason === "string" ? message.reason : "NOW component update failed");
 		}
 
 		if (isBoardStateMessage(message)) {
@@ -950,6 +1009,7 @@ export function AdminPage() {
 			try {
 				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				setTaskItems(taskConfig.items);
+				setPhase1Components(taskConfig.phase1_builder?.components ?? []);
 				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
 				setTaskPhases(nextTaskPhases);
 				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
@@ -1084,6 +1144,30 @@ export function AdminPage() {
 		sendAdminMessage({ type: "set_cue_condition", condition });
 		setCueCondition(condition);
 	};
+	const setPublicNowComponents = (componentIds: string[]) => {
+		if (isSettingPublicNow) {
+			return;
+		}
+		setIsSettingPublicNow(true);
+		setPublicNowError(null);
+		sendAdminMessage({
+			type: "set_public_context_components",
+			componentIds,
+			clear: componentIds.length === 0
+		});
+		window.setTimeout(() => {
+			setIsSettingPublicNow(false);
+		}, 5000);
+	};
+	const selectPublicNowComponent = (componentId: string) => {
+		setPublicNowComponents([componentId]);
+	};
+	const clearPublicNowComponents = () => {
+		if (publicNowComponentIds.length === 0) {
+			return;
+		}
+		setPublicNowComponents([]);
+	};
 	const toggleCueBlockSelection = (blockId: number) => {
 		setManualCueError(null);
 		setSelectedCueBlockIds(current => {
@@ -1156,6 +1240,14 @@ export function AdminPage() {
 
 	const isExperimentalCondition = cueCondition === "experimental";
 	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
+	const activePublicNowComponents = publicNowComponentIds.map(componentId => phase1ComponentById.get(componentId)).filter((component): component is Phase1BuilderOption => !!component);
+	const publicNowLabel =
+		activePublicNowComponents.length > 0
+			? activePublicNowComponents.map(component => component.label_zh || component.label_en || component.id).join(" + ")
+			: publicNowComponentIds.length > 0
+				? publicNowComponentIds.join(" + ")
+				: "尚未指定";
+	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -1532,6 +1624,54 @@ export function AdminPage() {
 									對照組
 								</Button>
 							</div>
+						</div>
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Public NOW</h2>
+						</header>
+						<div className="grid gap-3">
+							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+								<div className="min-w-0">
+									<div className="truncate font-medium">{publicNowLabel}</div>
+									<div className="text-xs text-muted-foreground">
+										{publicNowSourceLabel} · {publicNowMatchCount} blocks · {publicNowDeliveredCount} boards
+									</div>
+								</div>
+								<Badge variant={publicNowComponentIds.length > 0 ? "secondary" : "outline"}>{publicNowComponentIds.length > 0 ? "NOW" : "none"}</Badge>
+							</div>
+							{phase1Components.length > 0 ? (
+								<div className="flex flex-wrap gap-2">
+									{phase1Components.map(component => {
+										const isSelected = publicNowComponentIds.includes(component.id);
+										return (
+											<Button
+												key={component.id}
+												type="button"
+												size="sm"
+												variant={isSelected ? "default" : "outline"}
+												className="h-8 max-w-full px-2 text-xs"
+												onClick={() => selectPublicNowComponent(component.id)}
+												disabled={isSettingPublicNow || !adminConnected}
+												title={component.label_en ? `${component.label_zh} / ${component.label_en}` : component.label_zh}
+											>
+												<span className="truncate">{component.label_zh || component.label_en || component.id}</span>
+											</Button>
+										);
+									})}
+								</div>
+							) : (
+								<p className="rounded-md border border-dashed bg-background p-3 text-xs leading-5 text-muted-foreground">這個 task 沒有可手動指定的 poster component。</p>
+							)}
+							<div className="flex items-center justify-between gap-2">
+								<Button type="button" size="sm" variant="secondary" onClick={clearPublicNowComponents} disabled={isSettingPublicNow || !adminConnected || publicNowComponentIds.length === 0}>
+									Clear NOW
+								</Button>
+								{isSettingPublicNow && <span className="text-xs text-muted-foreground">Updating...</span>}
+							</div>
+							{publicNowError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{publicNowError}</p>}
 						</div>
 					</section>
 
