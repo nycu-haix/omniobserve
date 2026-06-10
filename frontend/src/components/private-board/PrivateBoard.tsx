@@ -2607,7 +2607,7 @@ export function PrivateBoard({
 
 	const shareIdeaBlockToChat = useCallback(
 		(block: IdeaBlock) => {
-			if (block.status === "generating" || block.isDeleted) {
+			if (!isGroupPhase(visiblePhase) || block.status === "generating" || block.isDeleted) {
 				return;
 			}
 			const sentMessage = sendPublicChatPayload(buildIdeaBlockChatMessage(block));
@@ -2615,7 +2615,7 @@ export function PrivateBoard({
 				queueIdeaBlockChatShareNotice(sentMessage);
 			}
 		},
-		[queueIdeaBlockChatShareNotice, sendPublicChatPayload]
+		[queueIdeaBlockChatShareNotice, sendPublicChatPayload, visiblePhase]
 	);
 
 	const shareSimilarityReason = (cue: SimilarityCueData) => {
@@ -2799,7 +2799,7 @@ export function PrivateBoard({
 												onJumpToTranscript={jumpToTranscript}
 												onShareToChat={shareIdeaBlockToChat}
 												canJumpToTranscript={canJumpToTranscript(block)}
-												canShareToChat={isConnected}
+												canShareToChat={isConnected && isGroupPhase(visiblePhase)}
 												currentPhase={visiblePhase}
 												showSimilarityCue={canShowSimilarityCues}
 											/>

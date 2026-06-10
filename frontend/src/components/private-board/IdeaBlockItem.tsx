@@ -58,7 +58,8 @@ export function IdeaBlockItem({
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
-	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
+	const canShareCurrentBlock = !!onShareToChat && canShareToChat && isGroupPhase(currentPhase) && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
+	const shareButtonTitle = isGroupPhase(currentPhase) ? "送到聊天室" : "Public Phase 才能送到聊天室";
 	const shouldShowCue = showSimilarityCue && block.hasCue && isGroupPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
@@ -375,7 +376,7 @@ export function IdeaBlockItem({
 							) : (
 								<>
 									{!isDeleted && (
-										<Button aria-label="Share idea block to public chat" title="送到聊天室" size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
+										<Button aria-label="Share idea block to public chat" title={shareButtonTitle} size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
 											<Send className="h-4 w-4" />
 										</Button>
 									)}
