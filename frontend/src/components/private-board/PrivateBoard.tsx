@@ -32,8 +32,8 @@ interface PrivateBoardProps {
 }
 
 type BoardMessage =
-	| { type: "new_idea_block"; payload: IdeaBlock }
-	| { type: "update_idea_block"; payload: Partial<IdeaBlock> & { id: string } }
+	| ({ type: "new_idea_block"; payload: BoardIdeaBlockPayload } & IdeaBlockCompletionTargetFields)
+	| ({ type: "update_idea_block"; payload: BoardIdeaBlockUpdatePayload } & IdeaBlockCompletionTargetFields)
 	| { type: "new_transcript_line"; payload: TranscriptLineType }
 	| { type: "similarity_cue"; payload: SimilarityPairCueData }
 	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
@@ -142,64 +142,47 @@ interface PendingIdeaBlockChatShare {
 	attemptId: string;
 }
 
-interface AudioIdeaBlocksUpdateMessage {
+interface IdeaBlockCompletionTargetFields {
+	transcript_segment_id?: string | number | null;
+	transcript_segment_ids?: Array<string | number | null> | null;
+	segment_id?: string | number | null;
+	segment_ids?: Array<string | number | null> | null;
+	participant_id?: string | number | null;
+	userId?: string | number | null;
+	user_id?: string | number | null;
+	client_segment_id?: string | number | null;
+	client_segment_ids?: Array<string | number | null> | null;
+	replace_segment_id?: string | number | null;
+	replace_segment_ids?: Array<string | number | null> | null;
+	generation_complete?: boolean | null;
+	scope?: string | null;
+	mic_mode?: string | null;
+	local_mic_mode?: string | null;
+}
+
+interface BoardIdeaBlockPayload extends IdeaBlock {
+	is_deleted?: boolean;
+	transcript_id?: string | number | null;
+	source_transcript_ids?: Array<string | number | null> | null;
+}
+
+interface BoardIdeaBlockUpdatePayload extends Omit<Partial<BoardIdeaBlockPayload>, "id"> {
+	id: string | number;
+}
+
+interface AudioIdeaBlocksUpdateMessage extends IdeaBlockCompletionTargetFields {
 	type: "idea_blocks_update";
 	idea_blocks?: IdeaBlockResponse[];
 	duplicate_idea_blocks?: IdeaBlockResponse[];
-	transcript_segment_id?: string | number | null;
-	transcript_segment_ids?: Array<string | number | null> | null;
-	segment_id?: string | number | null;
-	segment_ids?: Array<string | number | null> | null;
-	participant_id?: string | number | null;
-	userId?: string | number | null;
-	user_id?: string | number | null;
-	client_segment_id?: string | number | null;
-	client_segment_ids?: Array<string | number | null> | null;
-	replace_segment_id?: string | number | null;
-	replace_segment_ids?: Array<string | number | null> | null;
-	generation_complete?: boolean | null;
-	scope?: string | null;
-	mic_mode?: string | null;
-	local_mic_mode?: string | null;
 }
 
-interface AudioProvisionalIdeaBlocksUpdateMessage {
+interface AudioProvisionalIdeaBlocksUpdateMessage extends IdeaBlockCompletionTargetFields {
 	type: "idea_blocks_provisional_update";
 	provisional_idea_blocks?: ProvisionalIdeaBlockResponse[];
-	transcript_segment_id?: string | number | null;
-	transcript_segment_ids?: Array<string | number | null> | null;
-	segment_id?: string | number | null;
-	segment_ids?: Array<string | number | null> | null;
-	participant_id?: string | number | null;
-	userId?: string | number | null;
-	user_id?: string | number | null;
-	client_segment_id?: string | number | null;
-	client_segment_ids?: Array<string | number | null> | null;
-	replace_segment_id?: string | number | null;
-	replace_segment_ids?: Array<string | number | null> | null;
-	generation_complete?: boolean | null;
-	scope?: string | null;
-	mic_mode?: string | null;
-	local_mic_mode?: string | null;
 }
 
-interface AudioTerminalErrorMessage {
+interface AudioTerminalErrorMessage extends IdeaBlockCompletionTargetFields {
 	type: "transcript_error" | "pipeline_error" | "asr_error";
-	transcript_segment_id?: string | number | null;
-	transcript_segment_ids?: Array<string | number | null> | null;
-	segment_id?: string | number | null;
-	segment_ids?: Array<string | number | null> | null;
-	participant_id?: string | number | null;
-	userId?: string | number | null;
-	user_id?: string | number | null;
-	client_segment_id?: string | number | null;
-	client_segment_ids?: Array<string | number | null> | null;
-	replace_segment_id?: string | number | null;
-	replace_segment_ids?: Array<string | number | null> | null;
-	generation_complete?: boolean | null;
-	scope?: string | null;
-	mic_mode?: string | null;
-	local_mic_mode?: string | null;
 }
 
 interface AudioTranscriptBoundaryMessage {
@@ -552,6 +535,42 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 	};
 }
 
+function normalizeSourceTranscriptIds(values: Array<string | number | null> | null | undefined): string[] | undefined {
+	if (!Array.isArray(values)) {
+		return undefined;
+	}
+
+	const ids = values.map(value => (value == null ? "" : String(value).trim())).filter(Boolean);
+	return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+}
+
+function boardIdeaBlockPayloadToBlock(payload: BoardIdeaBlockPayload): IdeaBlock {
+	const sourceTranscriptIds = normalizeSourceTranscriptIds(payload.sourceTranscriptIds ?? payload.source_transcript_ids);
+	const transcriptLineId = payload.transcriptLineId ?? (payload.transcript_id == null ? undefined : String(payload.transcript_id)) ?? sourceTranscriptIds?.[0];
+
+	return {
+		...payload,
+		id: String(payload.id),
+		isDeleted: payload.isDeleted ?? payload.is_deleted ?? false,
+		transcriptLineId,
+		sourceTranscriptIds: sourceTranscriptIds ?? (transcriptLineId ? [transcriptLineId] : undefined),
+		status: payload.status ?? "ready"
+	};
+}
+
+function boardIdeaBlockUpdatePayloadToBlock(payload: BoardIdeaBlockUpdatePayload): IdeaBlock | null {
+	if (typeof payload.summary !== "string") {
+		return null;
+	}
+
+	return boardIdeaBlockPayloadToBlock({
+		...payload,
+		id: payload.id,
+		summary: payload.summary,
+		status: payload.status ?? "ready"
+	} as BoardIdeaBlockPayload);
+}
+
 function provisionalIdeaBlockResponseToGeneratingBlock(
 	item: ProvisionalIdeaBlockResponse,
 	{
@@ -882,7 +901,7 @@ function addAudioCompletionSegmentId(segmentIds: Set<string>, value: string | nu
 	}
 }
 
-function audioCompletionTargetKeys(message: AudioIdeaBlocksUpdateMessage | AudioProvisionalIdeaBlocksUpdateMessage | AudioTerminalErrorMessage, participantId: string): string[] {
+function completionTargetKeys(message: IdeaBlockCompletionTargetFields, participantId: string): string[] {
 	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
 	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
 	const segmentIds = new Set<string>();
@@ -897,7 +916,7 @@ function audioCompletionTargetKeys(message: AudioIdeaBlocksUpdateMessage | Audio
 	return Array.from(segmentIds, segmentId => [source, String(userId), segmentId].join("|"));
 }
 
-function audioActiveCompletionTargetKey(message: AudioIdeaBlocksUpdateMessage | AudioProvisionalIdeaBlocksUpdateMessage | AudioTerminalErrorMessage, participantId: string): string {
+function activeCompletionTargetKey(message: IdeaBlockCompletionTargetFields, participantId: string): string {
 	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
 	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
 	return [source, String(userId), "active"].join("|");
@@ -1604,14 +1623,18 @@ export function PrivateBoard({
 		});
 	}, []);
 
-	const hasActiveVoiceGeneratingBlocks = useCallback(() => {
-		for (const blockIds of voiceGeneratingBlocksRef.current.values()) {
-			if (blockIds.size > 0) {
-				return true;
+	const resolveActiveCompletionSegmentKeys = useCallback(
+		(message: IdeaBlockCompletionTargetFields) => {
+			const baseCompletionSegmentKeys = completionTargetKeys(message, participantId);
+			const activeCompletionKey = activeCompletionTargetKey(message, participantId);
+			const hasMatchingCompletionKey = baseCompletionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
+			if (!hasMatchingCompletionKey && activeCompletionKey && voiceGeneratingBlocksRef.current.has(activeCompletionKey)) {
+				return [...baseCompletionSegmentKeys, activeCompletionKey];
 			}
-		}
-		return false;
-	}, []);
+			return baseCompletionSegmentKeys;
+		},
+		[participantId]
+	);
 
 	const isCurrentWhisperSegmentComplete = useCallback((current: WhisperTransient, segmentKeys: string[]) => {
 		if (current.status !== "generating") {
@@ -1995,24 +2018,44 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "new_idea_block") {
-				if (hasActiveVoiceGeneratingBlocks()) {
-					console.info("[private-board] new_idea_block left to audio completion while voice placeholder is active", {
-						sessionId,
-						participantId,
-						ideaBlockId: lastMessage.payload.id
-					});
-					return;
+				const nextBlock = boardIdeaBlockPayloadToBlock(lastMessage.payload);
+				const completionSegmentKeys = resolveActiveCompletionSegmentKeys(lastMessage);
+				const pendingVoiceBlockIds = completionSegmentKeys.length > 0 ? takeVoiceGeneratingBlockIds(completionSegmentKeys) : new Set<string>();
+				const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
+				if (completionSegmentKeys.length > 0) {
+					setWhisperTransient(current => (isCurrentWhisperSegmentComplete(current, completionSegmentKeys) ? { status: "idle", text: "" } : current));
 				}
-				unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.id);
-				setIdeaBlocks(prev => mergeIdeaBlocks(prev, [{ ...lastMessage.payload, isUnread: true }], { markNewUnread: true }));
-				const isNewActiveBlock = !lastMessage.payload.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === lastMessage.payload.id);
-				if (isNewActiveBlock && visibleActiveTab !== "ideablock") {
-					setUnreadIdeaBlockCount(current => current + 1);
-				}
+				unreadIdeaBlockIdsFromRefreshRef.current.add(nextBlock.id);
+				setIdeaBlocks(prev => {
+					const baseBlocks = removePendingVoiceBlocks(prev);
+					const existingActiveBlockIds = new Set(baseBlocks.filter(block => !block.isDeleted).map(block => block.id));
+					const nextBlocks = mergeIdeaBlocks(baseBlocks, [{ ...nextBlock, isUnread: true }], { markNewUnread: true });
+					const isNewActiveBlock = !nextBlock.isDeleted && !existingActiveBlockIds.has(nextBlock.id);
+					if (isNewActiveBlock && visibleActiveTab !== "ideablock") {
+						setUnreadIdeaBlockCount(current => current + 1);
+					}
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
 				setIdeaBlockRefreshKey(current => current + 1);
 			}
 
 			if (lastMessage.type === "update_idea_block") {
+				const completionSegmentKeys = resolveActiveCompletionSegmentKeys(lastMessage);
+				const pendingVoiceBlockIds = completionSegmentKeys.length > 0 ? takeVoiceGeneratingBlockIds(completionSegmentKeys) : new Set<string>();
+				const updatedBlock = boardIdeaBlockUpdatePayloadToBlock(lastMessage.payload);
+				const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
+				if (completionSegmentKeys.length > 0) {
+					setWhisperTransient(current => (isCurrentWhisperSegmentComplete(current, completionSegmentKeys) ? { status: "idle", text: "" } : current));
+				}
+				if (pendingVoiceBlockIds.size > 0 || updatedBlock) {
+					setIdeaBlocks(prev => {
+						const baseBlocks = removePendingVoiceBlocks(prev);
+						const nextBlocks = updatedBlock ? mergeIdeaBlocks(baseBlocks, [updatedBlock]) : sortIdeaBlocks(baseBlocks);
+						ideaBlocksRef.current = nextBlocks;
+						return nextBlocks;
+					});
+				}
 				console.info("[private-board] update_idea_block received; refreshing idea blocks", {
 					sessionId,
 					participantId,
@@ -2176,7 +2219,19 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [canShowSimilarityCues, captureIdeaBlockPositions, hasActiveVoiceGeneratingBlocks, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
+	}, [
+		canShowSimilarityCues,
+		captureIdeaBlockPositions,
+		isCurrentWhisperSegmentComplete,
+		lastMessage,
+		participantId,
+		queueSimilarityCueFromBlock,
+		resolveActiveCompletionSegmentKeys,
+		sessionId,
+		takeVoiceGeneratingBlockIds,
+		visibleActiveTab,
+		visiblePhase
+	]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
@@ -2453,10 +2508,7 @@ export function PrivateBoard({
 				return;
 			}
 
-			const completionSegmentKeys = audioCompletionTargetKeys(lastAudioMessage, participantId);
-			const activeCompletionKey = audioActiveCompletionTargetKey(lastAudioMessage, participantId);
-			const hasMatchingCompletionKey = completionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
-			const segmentKeys = hasMatchingCompletionKey || !voiceGeneratingBlocksRef.current.has(activeCompletionKey) ? completionSegmentKeys : [...completionSegmentKeys, activeCompletionKey];
+			const segmentKeys = resolveActiveCompletionSegmentKeys(lastAudioMessage);
 			if (segmentKeys.length === 0) {
 				return;
 			}
@@ -2515,7 +2567,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, participantId, registerVoiceGeneratingBlockIds]);
+	}, [lastAudioMessage, registerVoiceGeneratingBlockIds, resolveActiveCompletionSegmentKeys]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
@@ -2531,13 +2583,7 @@ export function PrivateBoard({
 			const hasConfirmedIdeaBlockResult = ideaBlockResponses.length > 0 || duplicateIdeaBlockResponses.length > 0;
 			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasConfirmedIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
-			const baseCompletionSegmentKeys = shouldClearVoiceGeneratingBlocks ? audioCompletionTargetKeys(lastAudioMessage, participantId) : [];
-			const activeCompletionKey = shouldClearVoiceGeneratingBlocks ? audioActiveCompletionTargetKey(lastAudioMessage, participantId) : "";
-			const hasMatchingCompletionKey = baseCompletionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
-			const completionSegmentKeys =
-				shouldClearVoiceGeneratingBlocks && !hasMatchingCompletionKey && activeCompletionKey && voiceGeneratingBlocksRef.current.has(activeCompletionKey)
-					? [...baseCompletionSegmentKeys, activeCompletionKey]
-					: baseCompletionSegmentKeys;
+			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? resolveActiveCompletionSegmentKeys(lastAudioMessage) : [];
 			const pendingVoiceBlockIds = completionSegmentKeys.length > 0 ? takeVoiceGeneratingBlockIds(completionSegmentKeys) : new Set<string>();
 			const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length > 0) {
@@ -2610,7 +2656,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [isCurrentWhisperSegmentComplete, jumpToBlock, lastAudioMessage, participantId, queueSimilarityCueFromBlock, takeVoiceGeneratingBlockIds]);
+	}, [isCurrentWhisperSegmentComplete, jumpToBlock, lastAudioMessage, queueSimilarityCueFromBlock, resolveActiveCompletionSegmentKeys, takeVoiceGeneratingBlockIds]);
 
 	useEffect(() => {
 		if (!isAudioTerminalErrorMessage(lastAudioMessage) || !isPrivateAudioCompletionScope(lastAudioMessage)) {
@@ -2618,7 +2664,7 @@ export function PrivateBoard({
 		}
 
 		const timer = window.setTimeout(() => {
-			const completionSegmentKeys = audioCompletionTargetKeys(lastAudioMessage, participantId);
+			const completionSegmentKeys = resolveActiveCompletionSegmentKeys(lastAudioMessage);
 			if (completionSegmentKeys.length === 0) {
 				return;
 			}
@@ -2628,7 +2674,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [isCurrentWhisperSegmentComplete, lastAudioMessage, participantId, removeVoiceGeneratingBlocksByIds, takeVoiceGeneratingBlockIds]);
+	}, [isCurrentWhisperSegmentComplete, lastAudioMessage, removeVoiceGeneratingBlocksByIds, resolveActiveCompletionSegmentKeys, takeVoiceGeneratingBlockIds]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {

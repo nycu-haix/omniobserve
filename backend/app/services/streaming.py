@@ -244,7 +244,21 @@ async def send_board_idea_blocks_update(
     participant_id: str,
     idea_blocks: list[Any],
     duplicate_idea_blocks: list[Any],
+    scope: str,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str] | None = None,
+    client_segment_id: str | None = None,
+    client_segment_ids: list[str] | None = None,
 ) -> None:
+    completion_metadata = {
+        "scope": scope,
+        "participant_id": participant_id,
+        "transcript_segment_id": transcript_segment_id,
+        "transcript_segment_ids": transcript_segment_ids or [],
+        "client_segment_id": client_segment_id,
+        "client_segment_ids": client_segment_ids or [],
+        "generation_complete": True,
+    }
     sent_count = 0
     for idea_block in idea_blocks:
         if await board_manager.send_to(
@@ -253,6 +267,7 @@ async def send_board_idea_blocks_update(
             {
                 "type": "new_idea_block",
                 "payload": serialize_frontend_board_idea_block(idea_block),
+                **completion_metadata,
             },
         ):
             sent_count += 1
@@ -264,6 +279,7 @@ async def send_board_idea_blocks_update(
             {
                 "type": "update_idea_block",
                 "payload": serialize_frontend_board_idea_block_update(duplicate_idea_block),
+                **completion_metadata,
             },
         )
 
@@ -719,6 +735,11 @@ async def handle_audio_stream_websocket(
                             participant_id=participant_id,
                             idea_blocks=pipeline_result.idea_blocks,
                             duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                            scope=stream_context.scope.value,
+                            transcript_segment_id=last_segment_id,
+                            transcript_segment_ids=completed_transcript_segment_ids,
+                            client_segment_id=None,
+                            client_segment_ids=[],
                         )
                     await send_ws_json_safe(
                         websocket,
@@ -1266,6 +1287,11 @@ async def handle_transcript_segments_websocket(
                         participant_id=participant_id,
                         idea_blocks=pipeline_result.idea_blocks,
                         duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                        scope=visibility.value,
+                        transcript_segment_id=saved_segment.segment_id,
+                        transcript_segment_ids=[str(saved_segment.segment_id)],
+                        client_segment_id=client_segment_id or None,
+                        client_segment_ids=batch_client_segment_ids,
                     )
                 logger.info(
                     "pipeline_ws_send_task_items_update session_name=%s participant_id=%s task_items=%s",
