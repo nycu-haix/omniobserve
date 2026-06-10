@@ -16,8 +16,9 @@ from ..task_config import resolve_task_id
 from ..task_config.registry import normalize_task_name
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
+from .board_payloads import serialize_frontend_board_idea_block, serialize_frontend_board_idea_block_update
 from .participant_status import mark_audio_disconnected, update_audio_status
-from .realtime import broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
+from .realtime import board_manager, broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
@@ -196,12 +197,99 @@ async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_na
         {
             "type": "idea_blocks_update",
             "idea_blocks": serialized_idea_blocks,
+            "scope": "similarity",
+            "participant_id": participant_id,
         },
     )
     await broadcast_admin_idea_blocks_update(
         session_name,
         participant_id=participant_id,
         idea_blocks=serialized_idea_blocks,
+    )
+
+
+async def send_provisional_idea_blocks_update(
+    websocket: WebSocket,
+    *,
+    participant_id: str,
+    provisional_idea_blocks: list[dict[str, Any]],
+    scope: str,
+    transcript_segment_id: str | None = None,
+    transcript_segment_ids: list[str] | None = None,
+    client_segment_id: str | None = None,
+    client_segment_ids: list[str] | None = None,
+) -> None:
+    if not provisional_idea_blocks:
+        return
+
+    await send_ws_json_safe(
+        websocket,
+        {
+            "type": "idea_blocks_provisional_update",
+            "provisional_idea_blocks": provisional_idea_blocks,
+            "scope": scope,
+            "participant_id": participant_id,
+            "transcript_segment_id": transcript_segment_id,
+            "transcript_segment_ids": transcript_segment_ids or [],
+            "client_segment_id": client_segment_id,
+            "client_segment_ids": client_segment_ids or [],
+            "generation_complete": False,
+        },
+    )
+
+
+async def send_board_idea_blocks_update(
+    *,
+    session_name: str,
+    participant_id: str,
+    idea_blocks: list[Any],
+    duplicate_idea_blocks: list[Any],
+    scope: str,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str] | None = None,
+    client_segment_id: str | None = None,
+    client_segment_ids: list[str] | None = None,
+) -> None:
+    completion_metadata = {
+        "scope": scope,
+        "participant_id": participant_id,
+        "transcript_segment_id": transcript_segment_id,
+        "transcript_segment_ids": transcript_segment_ids or [],
+        "client_segment_id": client_segment_id,
+        "client_segment_ids": client_segment_ids or [],
+        "generation_complete": True,
+    }
+    sent_count = 0
+    for idea_block in idea_blocks:
+        if await board_manager.send_to(
+            session_name,
+            participant_id,
+            {
+                "type": "new_idea_block",
+                "payload": serialize_frontend_board_idea_block(idea_block),
+                **completion_metadata,
+            },
+        ):
+            sent_count += 1
+
+    for duplicate_idea_block in duplicate_idea_blocks:
+        await board_manager.send_to(
+            session_name,
+            participant_id,
+            {
+                "type": "update_idea_block",
+                "payload": serialize_frontend_board_idea_block_update(duplicate_idea_block),
+                **completion_metadata,
+            },
+        )
+
+    logger.info(
+        "pipeline_board_idea_blocks_update_sent session_name=%s participant_id=%s idea_blocks=%s duplicate_idea_blocks=%s sent=%s",
+        session_name,
+        participant_id,
+        len(idea_blocks),
+        len(duplicate_idea_blocks),
+        sent_count,
     )
 
 
@@ -533,6 +621,9 @@ async def handle_audio_stream_websocket(
                 if payload.get("type") == "stop":
                     stop_received = True
                     saved_final_segment = await finalize_stream_transcript()
+                    completed_transcript_segment_ids = _transcript_segment_ids(transcript_segments)
+                    pipeline_result = None
+                    serialized_result = {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                     idea_blocks_payload: list[dict[str, Any]] = []
                     task_items_payload: list[dict[str, Any]] = []
                     if transcript_segments and stream_context.scope == Visibility.PRIVATE:
@@ -551,6 +642,16 @@ async def handle_audio_stream_websocket(
                                     participant_id=participant_id,
                                     idea_blocks=idea_blocks,
                                 ),
+                                on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
+                                    websocket,
+                                    participant_id=participant_id,
+                                    provisional_idea_blocks=provisional_idea_blocks,
+                                    scope=stream_context.scope.value,
+                                    transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
+                                    transcript_segment_ids=completed_transcript_segment_ids,
+                                    client_segment_id=None,
+                                    client_segment_ids=[],
+                                ),
                             )
                         except Exception:
                             logger.exception(
@@ -563,6 +664,10 @@ async def handle_audio_stream_websocket(
                                 {
                                     "type": "pipeline_error",
                                     "reason": "idea_block_or_task_item_generation_failed",
+                                    "scope": stream_context.scope.value,
+                                    "participant_id": participant_id,
+                                    "transcript_segment_id": saved_final_segment.segment_id if saved_final_segment else None,
+                                    "transcript_segment_ids": completed_transcript_segment_ids,
                                 },
                             )
                             pipeline_result = None
@@ -585,6 +690,7 @@ async def handle_audio_stream_websocket(
                             "text": last_text,
                             "is_final": True,
                             "persisted": final_persisted,
+                            "client_segment_id": None,
                         },
                     )
                     if last_text:
@@ -609,7 +715,13 @@ async def handle_audio_stream_websocket(
                         {
                             "type": "idea_blocks_update",
                             "idea_blocks": idea_blocks_payload,
-                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"] if pipeline_result is not None else [],
+                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
+                            "scope": stream_context.scope.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": last_segment_id,
+                            "transcript_segment_ids": completed_transcript_segment_ids,
+                            "client_segment_id": None,
+                            "generation_complete": stream_context.scope == Visibility.PRIVATE and bool(transcript_segments),
                         },
                     )
                     await broadcast_admin_idea_blocks_update(
@@ -617,6 +729,18 @@ async def handle_audio_stream_websocket(
                         participant_id=participant_id,
                         idea_blocks=idea_blocks_payload,
                     )
+                    if pipeline_result is not None:
+                        await send_board_idea_blocks_update(
+                            session_name=session_name,
+                            participant_id=participant_id,
+                            idea_blocks=pipeline_result.idea_blocks,
+                            duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                            scope=stream_context.scope.value,
+                            transcript_segment_id=last_segment_id,
+                            transcript_segment_ids=completed_transcript_segment_ids,
+                            client_segment_id=None,
+                            client_segment_ids=[],
+                        )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -661,9 +785,28 @@ def _timestamp_from_seconds(value: Any) -> datetime:
 
 FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
 _pending_transcript_batch_texts: dict[tuple[str, str], list[str]] = defaultdict(list)
+_pending_transcript_batch_client_ids: dict[tuple[str, str], list[str]] = defaultdict(list)
 _pending_transcript_batch_locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
 _persisted_client_segments: dict[tuple[str, str, str, str], tuple[str, str]] = {}
 _MAX_PERSISTED_CLIENT_SEGMENTS = 10000
+
+
+def _dedupe_ids(values: list[str | None]) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value is None:
+            continue
+        normalized = str(value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ids.append(normalized)
+    return ids
+
+
+def _transcript_segment_ids(transcripts: list[StreamTranscript]) -> list[str]:
+    return _dedupe_ids([str(transcript.segment_id) for transcript in transcripts if transcript.segment_id is not None])
 
 
 def _client_segment_cache_key(
@@ -820,6 +963,9 @@ async def handle_transcript_segments_websocket(
                                 {
                                     "type": "transcript_error",
                                     "reason": "save_failed",
+                                    "scope": visibility.value,
+                                    "participant_id": participant_id,
+                                    "client_segment_id": client_segment_id or None,
                                 },
                             )
                             continue
@@ -834,6 +980,7 @@ async def handle_transcript_segments_websocket(
                                 "is_final": True,
                                 "reason": reason,
                                 "persisted": True,
+                                "client_segment_id": client_segment_id or None,
                             },
                         )
                     if reason in FINAL_TRANSCRIPT_REASONS:
@@ -844,7 +991,20 @@ async def handle_transcript_segments_websocket(
                                 text=text,
                                 transcript_segment_id=segment_id,
                             )
-                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "idea_blocks_update",
+                                "idea_blocks": [],
+                                "duplicate_idea_blocks": [],
+                                "scope": visibility.value,
+                                "participant_id": participant_id,
+                                "transcript_segment_id": segment_id,
+                                "transcript_segment_ids": [str(segment_id)],
+                                "client_segment_id": client_segment_id or None,
+                                "client_segment_ids": _dedupe_ids([client_segment_id]),
+                            },
+                        )
                         await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
@@ -879,17 +1039,35 @@ async def handle_transcript_segments_websocket(
                             "is_final": True,
                             "reason": reason,
                             "persisted": True,
+                            "client_segment_id": client_segment_id or None,
                         },
                     )
-                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "idea_blocks_update",
+                            "idea_blocks": [],
+                            "duplicate_idea_blocks": [],
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": cached_segment_id,
+                            "transcript_segment_ids": [str(cached_segment_id)],
+                            "client_segment_id": client_segment_id or None,
+                            "client_segment_ids": _dedupe_ids([client_segment_id]),
+                            "generation_complete": True,
+                        },
+                    )
                     await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
                 batch_texts: list[str] | None = None
+                batch_client_segment_ids: list[str] = []
                 batch_text = ""
                 async with _pending_transcript_batch_locks[batch_key]:
                     if reason == "max_speech_ms":
                         _pending_transcript_batch_texts[batch_key].append(text)
+                        if client_segment_id:
+                            _pending_transcript_batch_client_ids[batch_key].append(client_segment_id)
                         pending_segments = len(_pending_transcript_batch_texts[batch_key])
                         pending_chars = sum(len(item) for item in _pending_transcript_batch_texts[batch_key])
                         logger.info(
@@ -904,21 +1082,29 @@ async def handle_transcript_segments_websocket(
                             websocket,
                             {
                                 "type": "transcript",
+                                "participant_id": participant_id,
+                                "scope": visibility.value,
+                                "segment_id": client_segment_id or None,
                                 "text": text,
                                 "is_final": False,
                                 "reason": reason,
                                 "persisted": False,
+                                "client_segment_id": client_segment_id or None,
+                                "client_segment_ids": _dedupe_ids([client_segment_id]),
                             },
                         )
                         continue
 
                     if reason in FINAL_TRANSCRIPT_REASONS:
+                        pending_client_segment_ids = list(_pending_transcript_batch_client_ids.pop(batch_key, []))
                         if retranscribed_final:
                             batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
                             batch_text = text
+                            batch_client_segment_ids = _dedupe_ids([*pending_client_segment_ids, client_segment_id])
                         else:
                             _pending_transcript_batch_texts[batch_key].append(text)
                             batch_texts = list(_pending_transcript_batch_texts.pop(batch_key, []))
+                            batch_client_segment_ids = _dedupe_ids([*pending_client_segment_ids, client_segment_id])
                             batch_text = merge_transcript_segments(batch_texts)
                         logger.info(
                             "pipeline_ws_batch_final session_name=%s participant_id=%s reason=%s retranscribed_final=%s batch_segments=%s batch_chars=%s",
@@ -953,6 +1139,7 @@ async def handle_transcript_segments_websocket(
                 if saved_segment is None:
                     async with _pending_transcript_batch_locks[batch_key]:
                         _pending_transcript_batch_texts[batch_key] = batch_texts or []
+                        _pending_transcript_batch_client_ids[batch_key] = batch_client_segment_ids
                     logger.info(
                         "pipeline_ws_batch_save_failed session_name=%s participant_id=%s reason=%s",
                         session_name,
@@ -964,6 +1151,10 @@ async def handle_transcript_segments_websocket(
                         {
                             "type": "transcript_error",
                             "reason": "save_failed",
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "client_segment_id": client_segment_id or None,
+                            "client_segment_ids": batch_client_segment_ids,
                         },
                     )
                     continue
@@ -993,6 +1184,8 @@ async def handle_transcript_segments_websocket(
                         "is_final": True,
                         "reason": reason,
                         "persisted": True,
+                        "client_segment_id": client_segment_id or None,
+                        "client_segment_ids": batch_client_segment_ids,
                     },
                 )
 
@@ -1017,6 +1210,16 @@ async def handle_transcript_segments_websocket(
                             participant_id=participant_id,
                             idea_blocks=idea_blocks,
                         ),
+                        on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
+                            websocket,
+                            participant_id=participant_id,
+                            provisional_idea_blocks=provisional_idea_blocks,
+                            scope=visibility.value,
+                            transcript_segment_id=saved_segment.segment_id,
+                            transcript_segment_ids=[str(saved_segment.segment_id)],
+                            client_segment_id=client_segment_id or None,
+                            client_segment_ids=batch_client_segment_ids,
+                        ),
                     )
                 except Exception:
                     logger.exception(
@@ -1030,6 +1233,12 @@ async def handle_transcript_segments_websocket(
                         {
                             "type": "pipeline_error",
                             "reason": "idea_block_or_task_item_generation_failed",
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": saved_segment.segment_id,
+                            "transcript_segment_ids": [str(saved_segment.segment_id)],
+                            "client_segment_id": client_segment_id or None,
+                            "client_segment_ids": batch_client_segment_ids,
                         },
                     )
                     continue
@@ -1058,6 +1267,13 @@ async def handle_transcript_segments_websocket(
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
                         "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
+                        "scope": visibility.value,
+                        "participant_id": participant_id,
+                        "transcript_segment_id": saved_segment.segment_id,
+                        "transcript_segment_ids": [str(saved_segment.segment_id)],
+                        "client_segment_id": client_segment_id or None,
+                        "client_segment_ids": batch_client_segment_ids,
+                        "generation_complete": True,
                     },
                 )
                 await broadcast_admin_idea_blocks_update(
@@ -1065,6 +1281,18 @@ async def handle_transcript_segments_websocket(
                     participant_id=participant_id,
                     idea_blocks=serialized_result["idea_blocks"],
                 )
+                if pipeline_result is not None:
+                    await send_board_idea_blocks_update(
+                        session_name=session_name,
+                        participant_id=participant_id,
+                        idea_blocks=pipeline_result.idea_blocks,
+                        duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                        scope=visibility.value,
+                        transcript_segment_id=saved_segment.segment_id,
+                        transcript_segment_ids=[str(saved_segment.segment_id)],
+                        client_segment_id=client_segment_id or None,
+                        client_segment_ids=batch_client_segment_ids,
+                    )
                 logger.info(
                     "pipeline_ws_send_task_items_update session_name=%s participant_id=%s task_items=%s",
                     session_name,
