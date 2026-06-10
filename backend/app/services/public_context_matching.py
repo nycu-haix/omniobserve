@@ -119,6 +119,32 @@ async def find_public_context_component_matches(
     )
 
 
+async def find_public_context_task_item_matches(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_item_ids: list[int],
+) -> list[PublicContextMatch]:
+    normalized_task_item_ids = []
+    seen_task_item_ids: set[int] = set()
+    for task_item_id in task_item_ids:
+        try:
+            normalized_task_item_id = int(task_item_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_task_item_id <= 0 or normalized_task_item_id in seen_task_item_ids:
+            continue
+        seen_task_item_ids.add(normalized_task_item_id)
+        normalized_task_item_ids.append(normalized_task_item_id)
+    if not normalized_task_item_ids:
+        return []
+    return await _find_same_task_item_matches(
+        db,
+        session_name=session_name,
+        task_item_ids=normalized_task_item_ids,
+    )
+
+
 async def _find_same_component_matches(
     db: AsyncSession,
     *,

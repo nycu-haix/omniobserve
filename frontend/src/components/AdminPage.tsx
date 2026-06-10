@@ -120,6 +120,21 @@ interface PublicContextComponentStateMessage extends RealtimeMessage {
 	delivered_count?: unknown;
 }
 
+type PublicNowTarget =
+	| {
+			kind: "component";
+			id: string;
+			label: string;
+			title: string;
+	  }
+	| {
+			kind: "task_item";
+			id: string;
+			taskItemId: number;
+			label: string;
+			title: string;
+	  };
+
 interface LatestParticipantTranscript {
 	scope: string;
 	text: string;
@@ -343,6 +358,23 @@ function normalizeStringList(value: unknown): string[] {
 	value.forEach(item => {
 		const id = String(item ?? "").trim();
 		if (!id || seen.has(id)) {
+			return;
+		}
+		seen.add(id);
+		normalized.push(id);
+	});
+	return normalized;
+}
+
+function normalizeNumberList(value: unknown): number[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<number>();
+	const normalized: number[] = [];
+	value.forEach(item => {
+		const id = Number(item);
+		if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
 			return;
 		}
 		seen.add(id);
@@ -761,6 +793,7 @@ export function AdminPage() {
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
 	const [publicNowComponentIds, setPublicNowComponentIds] = useState<string[]>([]);
+	const [publicNowTaskItemIds, setPublicNowTaskItemIds] = useState<number[]>([]);
 	const [publicNowSource, setPublicNowSource] = useState<PublicNowSource | null>(null);
 	const [publicNowMatchCount, setPublicNowMatchCount] = useState(0);
 	const [publicNowDeliveredCount, setPublicNowDeliveredCount] = useState(0);
@@ -788,6 +821,39 @@ export function AdminPage() {
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const phase1ComponentById = useMemo(() => new Map(phase1Components.map(component => [component.id, component])), [phase1Components]);
+	const publicNowTaskItemTargets = useMemo<PublicNowTarget[]>(
+		() =>
+			taskItems.map((item, index) => {
+				const label = item.label_zh || item.label || item.label_en || item.id;
+				return {
+					kind: "task_item",
+					id: item.id,
+					taskItemId: index + 1,
+					label,
+					title: item.label_en ? `${label} / ${item.label_en}` : label
+				};
+			}),
+		[taskItems]
+	);
+	const publicNowTaskItemTargetById = useMemo(
+		() => new Map(publicNowTaskItemTargets.filter((target): target is Extract<PublicNowTarget, { kind: "task_item" }> => target.kind === "task_item").map(target => [target.taskItemId, target])),
+		[publicNowTaskItemTargets]
+	);
+	const publicNowTargets = useMemo<PublicNowTarget[]>(
+		() =>
+			phase1Components.length > 0
+				? phase1Components.map(component => {
+						const label = component.label_zh || component.label_en || component.id;
+						return {
+							kind: "component",
+							id: component.id,
+							label,
+							title: component.label_en ? `${label} / ${component.label_en}` : label
+						};
+					})
+				: publicNowTaskItemTargets,
+		[phase1Components, publicNowTaskItemTargets]
+	);
 	const participantNameById = useMemo(() => {
 		const nextParticipantNameById = new Map<string, string>();
 		participants.forEach(participant => {
@@ -885,6 +951,7 @@ export function AdminPage() {
 		}
 		if (isPublicContextComponentStateMessage(message)) {
 			setPublicNowComponentIds(normalizeStringList(message.componentIds ?? message.component_ids));
+			setPublicNowTaskItemIds(normalizeNumberList(message.taskItemIds ?? message.task_item_ids));
 			setPublicNowSource(typeof message.source === "string" ? message.source : null);
 			setPublicNowMatchCount(normalizeNumberValue(message.matchCount ?? message.match_count, 0));
 			setPublicNowDeliveredCount(normalizeNumberValue(message.deliveredCount ?? message.delivered_count, 0));
@@ -1144,7 +1211,7 @@ export function AdminPage() {
 		sendAdminMessage({ type: "set_cue_condition", condition });
 		setCueCondition(condition);
 	};
-	const setPublicNowComponents = (componentIds: string[]) => {
+	const setPublicNowTargets = ({ componentIds = [], taskItemIds = [] }: { componentIds?: string[]; taskItemIds?: number[] }) => {
 		if (isSettingPublicNow) {
 			return;
 		}
@@ -1153,20 +1220,25 @@ export function AdminPage() {
 		sendAdminMessage({
 			type: "set_public_context_components",
 			componentIds,
-			clear: componentIds.length === 0
+			taskItemIds,
+			clear: componentIds.length === 0 && taskItemIds.length === 0
 		});
 		window.setTimeout(() => {
 			setIsSettingPublicNow(false);
 		}, 5000);
 	};
-	const selectPublicNowComponent = (componentId: string) => {
-		setPublicNowComponents([componentId]);
-	};
-	const clearPublicNowComponents = () => {
-		if (publicNowComponentIds.length === 0) {
+	const selectPublicNowTarget = (target: PublicNowTarget) => {
+		if (target.kind === "component") {
+			setPublicNowTargets({ componentIds: [target.id] });
 			return;
 		}
-		setPublicNowComponents([]);
+		setPublicNowTargets({ taskItemIds: [target.taskItemId] });
+	};
+	const clearPublicNowTargets = () => {
+		if (publicNowComponentIds.length === 0 && publicNowTaskItemIds.length === 0) {
+			return;
+		}
+		setPublicNowTargets({});
 	};
 	const toggleCueBlockSelection = (blockId: number) => {
 		setManualCueError(null);
@@ -1241,12 +1313,13 @@ export function AdminPage() {
 	const isExperimentalCondition = cueCondition === "experimental";
 	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
 	const activePublicNowComponents = publicNowComponentIds.map(componentId => phase1ComponentById.get(componentId)).filter((component): component is Phase1BuilderOption => !!component);
+	const activePublicNowTaskItems = publicNowTaskItemIds
+		.map(taskItemId => publicNowTaskItemTargetById.get(taskItemId))
+		.filter((target): target is Extract<PublicNowTarget, { kind: "task_item" }> => !!target);
+	const activePublicNowLabels = [...activePublicNowComponents.map(component => component.label_zh || component.label_en || component.id), ...activePublicNowTaskItems.map(target => target.label)];
+	const publicNowTargetCount = publicNowComponentIds.length + publicNowTaskItemIds.length;
 	const publicNowLabel =
-		activePublicNowComponents.length > 0
-			? activePublicNowComponents.map(component => component.label_zh || component.label_en || component.id).join(" + ")
-			: publicNowComponentIds.length > 0
-				? publicNowComponentIds.join(" + ")
-				: "尚未指定";
+		activePublicNowLabels.length > 0 ? activePublicNowLabels.join(" + ") : publicNowTargetCount > 0 ? [...publicNowComponentIds, ...publicNowTaskItemIds.map(String)].join(" + ") : "尚未指定";
 	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
@@ -1640,33 +1713,33 @@ export function AdminPage() {
 										{publicNowSourceLabel} · {publicNowMatchCount} blocks · {publicNowDeliveredCount} boards
 									</div>
 								</div>
-								<Badge variant={publicNowComponentIds.length > 0 ? "secondary" : "outline"}>{publicNowComponentIds.length > 0 ? "NOW" : "none"}</Badge>
+								<Badge variant={publicNowTargetCount > 0 ? "secondary" : "outline"}>{publicNowTargetCount > 0 ? "NOW" : "none"}</Badge>
 							</div>
-							{phase1Components.length > 0 ? (
+							{publicNowTargets.length > 0 ? (
 								<div className="flex flex-wrap gap-2">
-									{phase1Components.map(component => {
-										const isSelected = publicNowComponentIds.includes(component.id);
+									{publicNowTargets.map(target => {
+										const isSelected = target.kind === "component" ? publicNowComponentIds.includes(target.id) : publicNowTaskItemIds.includes(target.taskItemId);
 										return (
 											<Button
-												key={component.id}
+												key={`${target.kind}-${target.id}`}
 												type="button"
 												size="sm"
 												variant={isSelected ? "default" : "outline"}
 												className="h-8 max-w-full px-2 text-xs"
-												onClick={() => selectPublicNowComponent(component.id)}
+												onClick={() => selectPublicNowTarget(target)}
 												disabled={isSettingPublicNow || !adminConnected}
-												title={component.label_en ? `${component.label_zh} / ${component.label_en}` : component.label_zh}
+												title={target.title}
 											>
-												<span className="truncate">{component.label_zh || component.label_en || component.id}</span>
+												<span className="truncate">{target.label}</span>
 											</Button>
 										);
 									})}
 								</div>
 							) : (
-								<p className="rounded-md border border-dashed bg-background p-3 text-xs leading-5 text-muted-foreground">這個 task 沒有可手動指定的 poster component。</p>
+								<p className="rounded-md border border-dashed bg-background p-3 text-xs leading-5 text-muted-foreground">這個 task 沒有可手動指定的 NOW target。</p>
 							)}
 							<div className="flex items-center justify-between gap-2">
-								<Button type="button" size="sm" variant="secondary" onClick={clearPublicNowComponents} disabled={isSettingPublicNow || !adminConnected || publicNowComponentIds.length === 0}>
+								<Button type="button" size="sm" variant="secondary" onClick={clearPublicNowTargets} disabled={isSettingPublicNow || !adminConnected || publicNowTargetCount === 0}>
 									Clear NOW
 								</Button>
 								{isSettingPublicNow && <span className="text-xs text-muted-foreground">Updating...</span>}

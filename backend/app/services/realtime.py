@@ -37,6 +37,7 @@ from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
     find_public_context_matches,
+    find_public_context_task_item_matches,
 )
 from .phase_task_item_snapshot_service import initialize_phase_rankings
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
@@ -633,6 +634,37 @@ def _normalize_public_context_component_ids(session_id: str, value: Any) -> list
     builder = task_config.get("phase1_builder") or {}
     valid_component_ids = {str(item["id"]) for item in builder.get("components", []) if item.get("id")}
     return [component_id for component_id in _unique_strings(raw_component_ids) if component_id in valid_component_ids]
+
+
+def _normalize_public_context_task_item_ids(session_id: str, value: Any) -> list[int]:
+    if isinstance(value, (int, str)):
+        raw_task_item_ids = [value]
+    elif isinstance(value, list):
+        raw_task_item_ids = value
+    else:
+        raw_task_item_ids = []
+
+    ranking_items = get_ranking_items_for_session(session_name=session_id)
+    task_item_id_by_config_id = {str(item_id): index for index, item_id in enumerate(ranking_items, start=1)}
+    normalized_task_item_ids: list[int] = []
+    seen_task_item_ids: set[int] = set()
+    for raw_task_item_id in raw_task_item_ids:
+        parsed_task_item_id: int | None = None
+        if isinstance(raw_task_item_id, int):
+            parsed_task_item_id = raw_task_item_id
+        else:
+            raw_text = str(raw_task_item_id or "").strip()
+            if raw_text.isdigit():
+                parsed_task_item_id = int(raw_text)
+            else:
+                parsed_task_item_id = task_item_id_by_config_id.get(raw_text)
+        if parsed_task_item_id is None or parsed_task_item_id < 1 or parsed_task_item_id > len(ranking_items):
+            continue
+        if parsed_task_item_id in seen_task_item_ids:
+            continue
+        seen_task_item_ids.add(parsed_task_item_id)
+        normalized_task_item_ids.append(parsed_task_item_id)
+    return normalized_task_item_ids
 
 
 def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
@@ -1541,54 +1573,77 @@ async def handle_admin_websocket(
                     if "componentIds" in payload
                     else payload.get("component_ids", payload.get("componentId", payload.get("component_id")))
                 )
+                raw_task_item_ids = (
+                    payload.get("taskItemIds")
+                    if "taskItemIds" in payload
+                    else payload.get("task_item_ids", payload.get("taskItemId", payload.get("task_item_id")))
+                )
                 should_clear = payload.get("clear") is True
                 component_ids = [] if should_clear else _normalize_public_context_component_ids(session_id, raw_component_ids)
-                if not should_clear and raw_component_ids and not component_ids:
+                task_item_ids = [] if should_clear else _normalize_public_context_task_item_ids(session_id, raw_task_item_ids)
+                has_raw_now_targets = bool(raw_component_ids) or bool(raw_task_item_ids)
+                if not should_clear and has_raw_now_targets and not component_ids and not task_item_ids:
                     await admin_manager.send_to(
                         session_id,
                         admin_id,
                         {
                             "type": "public_context_component_error",
-                            "reason": "no valid component ids",
+                            "reason": "no valid NOW targets",
                             "componentIds": [],
+                            "taskItemIds": [],
                         },
                     )
                     continue
 
-                async with SessionLocal() as db:
-                    try:
-                        matches = await find_public_context_component_matches(
-                            db,
-                            session_name=session_id,
-                            component_ids=component_ids,
-                        )
-                    except Exception as exc:
-                        await db.rollback()
-                        logger.warning(
-                            "admin_public_context_component_failed session_id=%s admin_id=%s component_ids=%s error_type=%s error=%s",
-                            session_id,
-                            admin_id,
-                            component_ids,
-                            exc.__class__.__name__,
-                            exc,
-                        )
-                        await admin_manager.send_to(
-                            session_id,
-                            admin_id,
-                            {
-                                "type": "public_context_component_error",
-                                "reason": "failed to set NOW component",
-                                "componentIds": component_ids,
-                            },
-                        )
-                        continue
-
+                matches: list[PublicContextMatch] = []
+                if component_ids or task_item_ids:
+                    async with SessionLocal() as db:
+                        try:
+                            if component_ids:
+                                matches.extend(
+                                    await find_public_context_component_matches(
+                                        db,
+                                        session_name=session_id,
+                                        component_ids=component_ids,
+                                    )
+                                )
+                            if task_item_ids:
+                                matches.extend(
+                                    await find_public_context_task_item_matches(
+                                        db,
+                                        session_name=session_id,
+                                        task_item_ids=task_item_ids,
+                                    )
+                                )
+                        except Exception as exc:
+                            await db.rollback()
+                            logger.warning(
+                                "admin_public_context_component_failed session_id=%s admin_id=%s component_ids=%s task_item_ids=%s error_type=%s error=%s",
+                                session_id,
+                                admin_id,
+                                component_ids,
+                                task_item_ids,
+                                exc.__class__.__name__,
+                                exc,
+                            )
+                            await admin_manager.send_to(
+                                session_id,
+                                admin_id,
+                                {
+                                    "type": "public_context_component_error",
+                                    "reason": "failed to set NOW target",
+                                    "componentIds": component_ids,
+                                    "taskItemIds": task_item_ids,
+                                },
+                            )
+                            continue
                 await _publish_public_context_matches(
                     session_id,
                     matches=matches,
-                    source="manual_clear" if not component_ids else "manual",
+                    source="manual_clear" if not component_ids and not task_item_ids else "manual",
                     participant_id=admin_id,
                     component_ids=component_ids,
+                    task_item_ids=task_item_ids,
                 )
             elif message_type == "public_chat_send":
                 message_text = str(payload.get("message") or "").strip()
