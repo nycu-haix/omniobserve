@@ -443,26 +443,10 @@ export function IdeaBlockItem({
 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
 
-			{shouldShowSimilarityReasonShareAction && (
-				<div className="ml-7 mr-7 flex flex-wrap items-center justify-between gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm text-yellow-950">
-					<span className="min-w-0 leading-5">AI：你想不想讓別人知道你的理由？</span>
-					<Button
-						className="shrink-0 gap-1.5 border-yellow-700/30 bg-background text-yellow-950 hover:bg-yellow-100"
-						size="sm"
-						variant="outline"
-						onClick={shareSimilarityReason}
-						disabled={!canShareSimilarityReason}
-					>
-						<Send className="h-3.5 w-3.5" />
-						分享我的理由
-					</Button>
-				</div>
-			)}
-
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
 					{shouldShowCue && (
-						<div className="flex flex-wrap gap-1.5">
+						<div className="flex flex-wrap items-center gap-1.5">
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
@@ -470,6 +454,18 @@ export function IdeaBlockItem({
 								<Badge className={cn("w-fit", similarityReasonTag.className)} variant="outline">
 									{similarityReasonTag.label}
 								</Badge>
+							)}
+							{shouldShowSimilarityReasonShareAction && (
+								<Button
+									className="h-6 gap-1.5 border-yellow-700/30 px-2 text-xs text-yellow-950 hover:bg-yellow-100"
+									size="sm"
+									variant="outline"
+									onClick={shareSimilarityReason}
+									disabled={!canShareSimilarityReason}
+								>
+									<Send className="h-3.5 w-3.5" />
+									分享我的理由
+								</Button>
 							)}
 						</div>
 					)}
