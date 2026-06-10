@@ -52,6 +52,8 @@ export interface SimilarityPairCueData {
 	blockId: string;
 	blockSummary: string;
 	isSameReason?: boolean;
+	hasSameReason?: boolean;
+	hasDifferentReason?: boolean;
 }
 
 export interface SimilaritySummaryCueData {

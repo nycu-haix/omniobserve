@@ -612,16 +612,15 @@ function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | nul
 		return null;
 	}
 
+	const hasSameReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
+	const hasDifferentReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
 	return {
 		id: `block-cue-${block.id}`,
 		blockId: block.id,
 		blockSummary,
-		isSameReason:
-			block.similarityHasDifferentReason && !block.similarityHasSameReason
-				? false
-				: block.similarityHasSameReason && !block.similarityHasDifferentReason
-					? true
-					: (block.similarityIsSameReason ?? undefined)
+		hasSameReason: hasSameReason || hasDifferentReason ? hasSameReason : undefined,
+		hasDifferentReason: hasSameReason || hasDifferentReason ? hasDifferentReason : undefined,
+		isSameReason: hasDifferentReason && !hasSameReason ? false : hasSameReason && !hasDifferentReason ? true : (block.similarityIsSameReason ?? undefined)
 	};
 }
 
@@ -1066,8 +1065,8 @@ function createPhaseTransitionSummaryCue(cues: SimilarityPairCueData[]): Similar
 	}
 
 	const uniqueCues = Array.from(new Map(cues.map(cue => [cue.id, cue])).values());
-	const differentReasonCount = uniqueCues.filter(cue => cue.isSameReason === false).length;
-	const sameReasonCount = uniqueCues.length - differentReasonCount;
+	const sameReasonCount = uniqueCues.filter(cue => getSimilarityCueReasonFlags(cue).hasSameReason).length;
+	const differentReasonCount = uniqueCues.filter(cue => getSimilarityCueReasonFlags(cue).hasDifferentReason).length;
 	return {
 		kind: "phase-transition-summary",
 		id: `phase-transition-summary-${Date.now()}`,
@@ -1078,6 +1077,46 @@ function createPhaseTransitionSummaryCue(cues: SimilarityPairCueData[]): Similar
 
 function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueData {
 	return cue.kind !== "phase-transition-summary";
+}
+
+function getSimilarityCueReasonFlags(cue: SimilarityPairCueData): { hasSameReason: boolean; hasDifferentReason: boolean } {
+	return {
+		hasSameReason: cue.hasSameReason ?? cue.isSameReason !== false,
+		hasDifferentReason: cue.hasDifferentReason ?? cue.isSameReason === false
+	};
+}
+
+function resolveSimilarityCueReasonType(hasSameReason: boolean, hasDifferentReason: boolean, fallback?: boolean): boolean | undefined {
+	if (hasDifferentReason && !hasSameReason) {
+		return false;
+	}
+	if (hasSameReason && !hasDifferentReason) {
+		return true;
+	}
+	return fallback;
+}
+
+function mergeSimilarityPairCue(existingCue: SimilarityPairCueData, incomingCue: SimilarityPairCueData): SimilarityPairCueData {
+	const existingFlags = getSimilarityCueReasonFlags(existingCue);
+	const incomingFlags = getSimilarityCueReasonFlags(incomingCue);
+	const hasSameReason = existingFlags.hasSameReason || incomingFlags.hasSameReason;
+	const hasDifferentReason = existingFlags.hasDifferentReason || incomingFlags.hasDifferentReason;
+	return {
+		...existingCue,
+		...incomingCue,
+		id: existingCue.id,
+		hasSameReason,
+		hasDifferentReason,
+		isSameReason: resolveSimilarityCueReasonType(hasSameReason, hasDifferentReason, incomingCue.isSameReason ?? existingCue.isSameReason)
+	};
+}
+
+function upsertSimilarityPairCue(cues: SimilarityPairCueData[], incomingCue: SimilarityPairCueData): SimilarityPairCueData[] {
+	const existingIndex = cues.findIndex(cue => cue.id === incomingCue.id || cue.blockId === incomingCue.blockId);
+	if (existingIndex < 0) {
+		return [...cues, incomingCue];
+	}
+	return cues.map((cue, index) => (index === existingIndex ? mergeSimilarityPairCue(cue, incomingCue) : cue));
 }
 
 function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
@@ -1436,10 +1475,14 @@ export function PrivateBoard({
 
 			setCues(prev => {
 				const alreadyQueued = prev.some(item => item.id === cue.id || (isSimilarityPairCue(item) && item.blockId === cue.blockId));
-				const nextCues = alreadyQueued ? prev : [...prev, cue];
+				const nextCues = alreadyQueued
+					? prev.map(item => (isSimilarityPairCue(item) && (item.id === cue.id || item.blockId === cue.blockId) ? mergeSimilarityPairCue(item, cue) : item))
+					: [...prev, cue];
 				console.info("[private-board] similarity cue fallback detected", {
 					blockId: cue.blockId,
 					isSameReason: cue.isSameReason,
+					hasSameReason: cue.hasSameReason,
+					hasDifferentReason: cue.hasDifferentReason,
 					alreadyQueued,
 					currentBlockExpanded: !!currentBlock?.expanded
 				});
@@ -2107,17 +2150,23 @@ export function PrivateBoard({
 					isSameReason: lastMessage.payload.isSameReason
 				});
 				const cueTargetBlock = ideaBlocksRef.current.find(block => block.id === lastMessage.payload.blockId);
+				const hasSameReason = cueTargetBlock?.similarityHasSameReason || lastMessage.payload.isSameReason === true;
+				const hasDifferentReason = cueTargetBlock?.similarityHasDifferentReason || lastMessage.payload.isSameReason === false;
+				const incomingCue: SimilarityPairCueData = {
+					...lastMessage.payload,
+					hasSameReason,
+					hasDifferentReason,
+					isSameReason: resolveSimilarityCueReasonType(hasSameReason, hasDifferentReason, lastMessage.payload.isSameReason)
+				};
 				if (!cueTargetBlock?.expanded) {
 					unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.blockId);
 				}
 				if (phaseTransitionCueBatchRef.current) {
-					if (!phaseTransitionCueBatchRef.current.cues.some(cue => cue.id === lastMessage.payload.id)) {
-						phaseTransitionCueBatchRef.current.cues.push(lastMessage.payload);
-					}
+					phaseTransitionCueBatchRef.current.cues = upsertSimilarityPairCue(phaseTransitionCueBatchRef.current.cues, incomingCue);
 				} else {
-					const nextCues = cuesRef.current.some(cue => cue.id === lastMessage.payload.id || (isSimilarityPairCue(cue) && cue.blockId === lastMessage.payload.blockId))
-						? cuesRef.current
-						: [...cuesRef.current, lastMessage.payload];
+					const nextCues = cuesRef.current.some(cue => cue.id === incomingCue.id || (isSimilarityPairCue(cue) && cue.blockId === incomingCue.blockId))
+						? cuesRef.current.map(cue => (isSimilarityPairCue(cue) && (cue.id === incomingCue.id || cue.blockId === incomingCue.blockId) ? mergeSimilarityPairCue(cue, incomingCue) : cue))
+						: [...cuesRef.current, incomingCue];
 					cuesRef.current = nextCues;
 					setCues(nextCues);
 				}
