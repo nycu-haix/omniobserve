@@ -21,6 +21,7 @@ from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
 IdeaBlockUpdateCallback = Callable[[list[IdeaBlock]], Awaitable[None]]
+ProvisionalIdeaBlockUpdateCallback = Callable[[list[dict[str, Any]]], Awaitable[None]]
 
 
 @dataclass
@@ -44,6 +45,7 @@ async def handle_transcript_segment(
     visibility: Visibility,
     task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
+    on_provisional_idea_blocks_update: ProvisionalIdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult | None:
     key = (session_name, user_id)
     logger.info(
@@ -100,6 +102,7 @@ async def handle_transcript_segment(
         transcripts=transcripts,
         task_name=task_name,
         on_similarity_update=on_similarity_update,
+        on_provisional_idea_blocks_update=on_provisional_idea_blocks_update,
     )
 
 
@@ -112,6 +115,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     transcripts: list[StreamTranscript],
     task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
+    on_provisional_idea_blocks_update: ProvisionalIdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
@@ -153,6 +157,27 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(generated_blocks),
         )
+        if generated_blocks and on_provisional_idea_blocks_update is not None:
+            provisional_idea_blocks = serialize_provisional_idea_blocks(
+                generated_blocks,
+                transcript_text=transcript_text,
+                transcript_id=main_transcript_id,
+            )
+            try:
+                await on_provisional_idea_blocks_update(provisional_idea_blocks)
+                logger.info(
+                    "pipeline_provisional_idea_blocks_sent session_name=%s user_id=%s count=%s",
+                    session_name,
+                    user_id,
+                    len(provisional_idea_blocks),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "pipeline_provisional_idea_blocks_send_failed session_name=%s user_id=%s error=%s",
+                    session_name,
+                    user_id,
+                    exc,
+                )
         idea_blocks: list[IdeaBlock] = []
         task_items: list[TaskItem] = []
         duplicate_idea_blocks: list[IdeaBlock] = []
@@ -328,6 +353,7 @@ async def generate_idea_blocks_with_task_items_from_text(
     transcript_text: str,
     task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
+    on_provisional_idea_blocks_update: ProvisionalIdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     transcript = StreamTranscript(segment_id="manual", text=transcript_text)
     return await generate_idea_blocks_with_task_items_from_transcripts(
@@ -338,6 +364,7 @@ async def generate_idea_blocks_with_task_items_from_text(
         transcripts=[transcript],
         task_name=task_name,
         on_similarity_update=on_similarity_update,
+        on_provisional_idea_blocks_update=on_provisional_idea_blocks_update,
     )
 
 
@@ -350,6 +377,7 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
     transcript_ids: list[int],
     task_name: str | None = None,
     on_similarity_update: IdeaBlockUpdateCallback | None = None,
+    on_provisional_idea_blocks_update: ProvisionalIdeaBlockUpdateCallback | None = None,
 ) -> PipelineResult:
     if not transcript_ids:
         raise ApiError(400, "INVALID_PAYLOAD", "transcript_ids cannot be empty")
@@ -379,6 +407,7 @@ async def generate_idea_blocks_with_task_items_from_transcript_ids(
         transcripts=stream_transcripts,
         task_name=task_name,
         on_similarity_update=on_similarity_update,
+        on_provisional_idea_blocks_update=on_provisional_idea_blocks_update,
     )
 
 
@@ -395,6 +424,28 @@ def serialize_pipeline_result(result: PipelineResult) -> dict[str, list[dict[str
             for task_item in result.task_items
         ],
     }
+
+
+def serialize_provisional_idea_blocks(
+    generated_blocks: list[dict[str, str]],
+    *,
+    transcript_text: str,
+    transcript_id: int | None,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": f"provisional-{index}",
+            "provisional_id": f"provisional-{index}",
+            "index": index,
+            "title": _title_from_content(str(block.get("content", ""))),
+            "summary": str(block.get("summary", "")).strip(),
+            "transcript_id": transcript_id,
+            "transcript": transcript_text,
+            "is_provisional": True,
+        }
+        for index, block in enumerate(generated_blocks, start=1)
+        if str(block.get("summary", "")).strip()
+    ]
 
 
 def serialize_idea_blocks(idea_blocks: list[IdeaBlock]) -> list[dict[str, Any]]:

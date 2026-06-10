@@ -57,6 +57,7 @@ export function IdeaBlockItem({
 	const titleTooLong = draftTitle.trim().length > 20;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
+	const generatingLabel = rowLabel.trim() || "正在生成...";
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const canShareCurrentBlock = !!onShareToChat && canShareToChat && isGroupPhase(currentPhase) && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shareButtonTitle = isGroupPhase(currentPhase) ? "送到聊天室" : "Public Phase 才能送到聊天室";
@@ -310,7 +311,7 @@ export function IdeaBlockItem({
 					autoFocus
 				/>
 			) : (
-				<span className="block w-fit min-w-0 max-w-full justify-self-start whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? "正在生成..." : rowLabel}</span>
+				<span className="block w-fit min-w-0 max-w-full justify-self-start whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? generatingLabel : rowLabel}</span>
 			)}
 			{!isGenerating && (
 				<div className="relative flex flex-shrink-0 items-center gap-2">

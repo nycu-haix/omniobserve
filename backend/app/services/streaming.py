@@ -207,6 +207,36 @@ async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_na
     )
 
 
+async def send_provisional_idea_blocks_update(
+    websocket: WebSocket,
+    *,
+    participant_id: str,
+    provisional_idea_blocks: list[dict[str, Any]],
+    scope: str,
+    transcript_segment_id: str | None = None,
+    transcript_segment_ids: list[str] | None = None,
+    client_segment_id: str | None = None,
+    client_segment_ids: list[str] | None = None,
+) -> None:
+    if not provisional_idea_blocks:
+        return
+
+    await send_ws_json_safe(
+        websocket,
+        {
+            "type": "idea_blocks_provisional_update",
+            "provisional_idea_blocks": provisional_idea_blocks,
+            "scope": scope,
+            "participant_id": participant_id,
+            "transcript_segment_id": transcript_segment_id,
+            "transcript_segment_ids": transcript_segment_ids or [],
+            "client_segment_id": client_segment_id,
+            "client_segment_ids": client_segment_ids or [],
+            "generation_complete": False,
+        },
+    )
+
+
 async def handle_audio_stream_websocket(
     websocket: WebSocket,
     *,
@@ -555,6 +585,16 @@ async def handle_audio_stream_websocket(
                                     session_name=session_name,
                                     participant_id=participant_id,
                                     idea_blocks=idea_blocks,
+                                ),
+                                on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
+                                    websocket,
+                                    participant_id=participant_id,
+                                    provisional_idea_blocks=provisional_idea_blocks,
+                                    scope=stream_context.scope.value,
+                                    transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
+                                    transcript_segment_ids=completed_transcript_segment_ids,
+                                    client_segment_id=None,
+                                    client_segment_ids=[],
                                 ),
                             )
                         except Exception:
@@ -1096,6 +1136,16 @@ async def handle_transcript_segments_websocket(
                             session_name=session_name,
                             participant_id=participant_id,
                             idea_blocks=idea_blocks,
+                        ),
+                        on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
+                            websocket,
+                            participant_id=participant_id,
+                            provisional_idea_blocks=provisional_idea_blocks,
+                            scope=visibility.value,
+                            transcript_segment_id=saved_segment.segment_id,
+                            transcript_segment_ids=[str(saved_segment.segment_id)],
+                            client_segment_id=client_segment_id or None,
+                            client_segment_ids=batch_client_segment_ids,
                         ),
                     )
                 except Exception:

@@ -75,6 +75,17 @@ interface IdeaBlockResponse {
 	duplicate_similarity?: number | null;
 }
 
+interface ProvisionalIdeaBlockResponse {
+	id?: string | number | null;
+	provisional_id?: string | number | null;
+	index?: number | null;
+	title?: string | null;
+	summary?: string | null;
+	transcript_id?: string | number | null;
+	transcript?: string | null;
+	time_stamp?: string | null;
+}
+
 interface ChatMessageResponse {
 	id: number;
 	session_name: string;
@@ -135,6 +146,26 @@ interface AudioIdeaBlocksUpdateMessage {
 	type: "idea_blocks_update";
 	idea_blocks?: IdeaBlockResponse[];
 	duplicate_idea_blocks?: IdeaBlockResponse[];
+	transcript_segment_id?: string | number | null;
+	transcript_segment_ids?: Array<string | number | null> | null;
+	segment_id?: string | number | null;
+	segment_ids?: Array<string | number | null> | null;
+	participant_id?: string | number | null;
+	userId?: string | number | null;
+	user_id?: string | number | null;
+	client_segment_id?: string | number | null;
+	client_segment_ids?: Array<string | number | null> | null;
+	replace_segment_id?: string | number | null;
+	replace_segment_ids?: Array<string | number | null> | null;
+	generation_complete?: boolean | null;
+	scope?: string | null;
+	mic_mode?: string | null;
+	local_mic_mode?: string | null;
+}
+
+interface AudioProvisionalIdeaBlocksUpdateMessage {
+	type: "idea_blocks_provisional_update";
+	provisional_idea_blocks?: ProvisionalIdeaBlockResponse[];
 	transcript_segment_id?: string | number | null;
 	transcript_segment_ids?: Array<string | number | null> | null;
 	segment_id?: string | number | null;
@@ -310,6 +341,10 @@ function isAudioIdeaBlocksUpdateMessage(message: object | null): message is Audi
 	return !!message && "type" in message && message.type === "idea_blocks_update";
 }
 
+function isAudioProvisionalIdeaBlocksUpdateMessage(message: object | null): message is AudioProvisionalIdeaBlocksUpdateMessage {
+	return !!message && "type" in message && message.type === "idea_blocks_provisional_update";
+}
+
 function isAudioTerminalErrorMessage(message: object | null): message is AudioTerminalErrorMessage {
 	return !!message && "type" in message && (message.type === "transcript_error" || message.type === "pipeline_error" || message.type === "asr_error");
 }
@@ -344,6 +379,7 @@ function createGeneratingIdeaBlock(
 	options: {
 		id?: string;
 		idPrefix?: string;
+		summary?: string;
 		transcript?: string;
 		transcriptLineId?: string;
 		createdAtMs?: number;
@@ -351,7 +387,7 @@ function createGeneratingIdeaBlock(
 ): IdeaBlock {
 	const block: IdeaBlock = {
 		id: options.id ?? `${options.idPrefix ?? "manual-generating"}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		summary: "正在生成...",
+		summary: options.summary ?? "正在生成...",
 		aiSummary: content,
 		transcript: options.transcript ?? "",
 		expanded: false,
@@ -514,6 +550,37 @@ function ideaBlockResponseToBlock(item: IdeaBlockResponse): IdeaBlock {
 		createdAtMs,
 		status: "ready"
 	};
+}
+
+function provisionalIdeaBlockResponseToGeneratingBlock(
+	item: ProvisionalIdeaBlockResponse,
+	{
+		id,
+		fallbackTranscriptLineId,
+		fallbackCreatedAtMs
+	}: {
+		id: string;
+		fallbackTranscriptLineId?: string;
+		fallbackCreatedAtMs?: number;
+	}
+): IdeaBlock | null {
+	const title = String(item.title ?? "").trim();
+	const summary = String(item.summary ?? "").trim();
+	const transcript = typeof item.transcript === "string" ? item.transcript.trim() : "";
+	const visibleTitle = title || summary || "正在生成...";
+	const content = summary || title || transcript;
+	if (!content.trim() && visibleTitle === "正在生成...") {
+		return null;
+	}
+
+	const transcriptLineId = item.transcript_id == null ? fallbackTranscriptLineId : String(item.transcript_id);
+	return createGeneratingIdeaBlock(content, {
+		id,
+		summary: visibleTitle,
+		transcript,
+		transcriptLineId,
+		createdAtMs: parseIdeaBlockCreatedAt(item.time_stamp) ?? fallbackCreatedAtMs
+	});
 }
 
 function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | null {
@@ -815,7 +882,7 @@ function addAudioCompletionSegmentId(segmentIds: Set<string>, value: string | nu
 	}
 }
 
-function audioCompletionTargetKeys(message: AudioIdeaBlocksUpdateMessage | AudioTerminalErrorMessage, participantId: string): string[] {
+function audioCompletionTargetKeys(message: AudioIdeaBlocksUpdateMessage | AudioProvisionalIdeaBlocksUpdateMessage | AudioTerminalErrorMessage, participantId: string): string[] {
 	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
 	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
 	const segmentIds = new Set<string>();
@@ -1292,7 +1359,7 @@ export function PrivateBoard({
 	const activeTranscriptDraftsRef = useRef<Map<string, { id: string; text: string; source?: TranscriptLineType["source"]; userId?: string; timestampMs?: number; isFinal?: boolean }>>(new Map());
 	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
 	const pendingIdeaBlockChatSharesRef = useRef<PendingIdeaBlockChatShare[]>([]);
-	const voiceGeneratingBlocksRef = useRef<Map<string, string>>(new Map());
+	const voiceGeneratingBlocksRef = useRef<Map<string, Set<string>>>(new Map());
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
@@ -1306,6 +1373,7 @@ export function PrivateBoard({
 	const lastProcessedAudioMessageRef = useRef<object | null>(null);
 	const lastProcessedAudioBoundaryRef = useRef<object | null>(null);
 	const lastProcessedIdeaBlocksUpdateMessageRef = useRef<object | null>(null);
+	const lastProcessedProvisionalIdeaBlocksUpdateMessageRef = useRef<object | null>(null);
 	const lastDisplayedAudioTranscriptRef = useRef<{ signature: string; displayedAt: number } | null>(null);
 	const unreadIdeaBlockIdsFromRefreshRef = useRef<Set<string>>(new Set());
 	const lastVisibleActiveTabRef = useRef<BoardTab>(visibleActiveTab);
@@ -1499,15 +1567,27 @@ export function PrivateBoard({
 	const takeVoiceGeneratingBlockIds = useCallback((segmentKeys: string[]) => {
 		const blockIds = new Set<string>();
 		segmentKeys.forEach(segmentKey => {
-			const blockId = voiceGeneratingBlocksRef.current.get(segmentKey);
-			if (!blockId) {
+			const segmentBlockIds = voiceGeneratingBlocksRef.current.get(segmentKey);
+			if (!segmentBlockIds) {
 				return;
 			}
 
 			voiceGeneratingBlocksRef.current.delete(segmentKey);
-			blockIds.add(blockId);
+			segmentBlockIds.forEach(blockId => blockIds.add(blockId));
 		});
 		return blockIds;
+	}, []);
+
+	const registerVoiceGeneratingBlockIds = useCallback((segmentKeys: string[], blockIds: string[]) => {
+		if (segmentKeys.length === 0 || blockIds.length === 0) {
+			return;
+		}
+
+		segmentKeys.forEach(segmentKey => {
+			const nextIds = new Set(voiceGeneratingBlocksRef.current.get(segmentKey) ?? []);
+			blockIds.forEach(blockId => nextIds.add(blockId));
+			voiceGeneratingBlocksRef.current.set(segmentKey, nextIds);
+		});
 	}, []);
 
 	const isCurrentWhisperSegmentComplete = useCallback((current: WhisperTransient, segmentKeys: string[]) => {
@@ -1540,9 +1620,10 @@ export function PrivateBoard({
 			return;
 		}
 
-		const existingBlockId = voiceGeneratingBlocksRef.current.get(segmentKey);
+		const existingBlockIds = voiceGeneratingBlocksRef.current.get(segmentKey);
+		const existingBlockId = existingBlockIds ? Array.from(existingBlockIds)[0] : undefined;
 		const blockId = existingBlockId ?? `${VOICE_GENERATING_ID_PREFIX}-${normalizeClientIdPart(segmentKey)}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-		voiceGeneratingBlocksRef.current.set(segmentKey, blockId);
+		voiceGeneratingBlocksRef.current.set(segmentKey, new Set([...(existingBlockIds ?? []), blockId]));
 		const generatingBlock = createGeneratingIdeaBlock(normalizedText, {
 			id: blockId,
 			transcript: normalizedText,
@@ -2324,6 +2405,83 @@ export function PrivateBoard({
 
 		return () => window.clearTimeout(timer);
 	}, [displayName, ideaBlocks, lastAudioMessage, participantId, queueVoiceGeneratingIdeaBlock]);
+
+	useEffect(() => {
+		if (!isAudioProvisionalIdeaBlocksUpdateMessage(lastAudioMessage) || !isPrivateAudioCompletionScope(lastAudioMessage)) {
+			return;
+		}
+
+		const timer = window.setTimeout(() => {
+			if (lastProcessedProvisionalIdeaBlocksUpdateMessageRef.current === lastAudioMessage) {
+				return;
+			}
+			lastProcessedProvisionalIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
+
+			const provisionalIdeaBlockResponses = Array.isArray(lastAudioMessage.provisional_idea_blocks) ? lastAudioMessage.provisional_idea_blocks : [];
+			if (provisionalIdeaBlockResponses.length === 0) {
+				return;
+			}
+
+			const segmentKeys = audioCompletionTargetKeys(lastAudioMessage, participantId);
+			if (segmentKeys.length === 0) {
+				return;
+			}
+
+			const primarySegmentKey = segmentKeys.find(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey)) ?? segmentKeys[0];
+			const existingBlockIds = voiceGeneratingBlocksRef.current.get(primarySegmentKey);
+			const existingPrimaryBlockId = existingBlockIds ? Array.from(existingBlockIds)[0] : undefined;
+			const firstTranscriptSegmentId =
+				lastAudioMessage.transcript_segment_id ??
+				lastAudioMessage.segment_id ??
+				lastAudioMessage.transcript_segment_ids?.find(value => value != null) ??
+				lastAudioMessage.segment_ids?.find(value => value != null);
+			const fallbackTranscriptLineId = firstTranscriptSegmentId == null ? undefined : String(firstTranscriptSegmentId);
+			const fallbackCreatedAtMs = ideaBlocksRef.current.find(block => block.id === existingPrimaryBlockId)?.createdAtMs ?? Date.now();
+			const provisionalBlocks: IdeaBlock[] = [];
+			const provisionalBlockIds: string[] = [];
+
+			provisionalIdeaBlockResponses.forEach((item, index) => {
+				const stableIdPart = String(item.provisional_id ?? item.id ?? item.index ?? index + 1);
+				const blockId =
+					index === 0 && existingPrimaryBlockId ? existingPrimaryBlockId : `${VOICE_GENERATING_ID_PREFIX}-${normalizeClientIdPart(primarySegmentKey)}-${normalizeClientIdPart(stableIdPart)}`;
+				const block = provisionalIdeaBlockResponseToGeneratingBlock(item, {
+					id: blockId,
+					fallbackTranscriptLineId,
+					fallbackCreatedAtMs: fallbackCreatedAtMs + index
+				});
+				if (!block) {
+					return;
+				}
+				provisionalBlocks.push(block);
+				provisionalBlockIds.push(block.id);
+			});
+
+			if (provisionalBlocks.length === 0) {
+				return;
+			}
+
+			registerVoiceGeneratingBlockIds(segmentKeys, provisionalBlockIds);
+			setIdeaBlocks(prev => {
+				const previousBlocksById = new Map(prev.map(block => [block.id, block]));
+				const provisionalBlockIdsSet = new Set(provisionalBlockIds);
+				const nextBlocks = sortIdeaBlocks([
+					...prev.filter(block => !provisionalBlockIdsSet.has(block.id)),
+					...provisionalBlocks.map(block => {
+						const previousBlock = previousBlocksById.get(block.id);
+						return {
+							...block,
+							isUnread: previousBlock?.isUnread,
+							createdAtMs: previousBlock?.createdAtMs ?? block.createdAtMs
+						};
+					})
+				]);
+				ideaBlocksRef.current = nextBlocks;
+				return nextBlocks;
+			});
+		}, 0);
+
+		return () => window.clearTimeout(timer);
+	}, [lastAudioMessage, participantId, registerVoiceGeneratingBlockIds]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
