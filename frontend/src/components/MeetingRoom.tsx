@@ -337,7 +337,7 @@ function getNextRankingChangeCount({
 	if (oldIndex < currentChangeCount && boundedTargetIndex >= currentChangeCount) {
 		return Math.max(0, currentChangeCount - 1);
 	}
-	if (oldIndex >= currentChangeCount && boundedTargetIndex < currentChangeCount) {
+	if (oldIndex >= currentChangeCount && boundedTargetIndex <= currentChangeCount) {
 		return normalizeRankingChangeCount(currentChangeCount + 1, rankingLimit, itemCount);
 	}
 	return currentChangeCount;

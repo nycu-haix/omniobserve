@@ -908,7 +908,7 @@ def _apply_ranking_move(items: list[str], item_id: str, to_index: int, *, rankin
         next_change_count = current_change_count
         if old_index < current_change_count and target_index >= current_change_count:
             next_change_count = max(0, current_change_count - 1)
-        elif old_index >= current_change_count and target_index < current_change_count:
+        elif old_index >= current_change_count and target_index <= current_change_count:
             next_change_count = normalize_ranking_change_count(
                 current_change_count + 1,
                 ranking_limit=ranking_limit,
