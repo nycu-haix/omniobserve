@@ -2257,19 +2257,21 @@ export function PrivateBoard({
 				return;
 			}
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
-			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage);
+			const ideaBlockResponses = Array.isArray(lastAudioMessage.idea_blocks) ? lastAudioMessage.idea_blocks : [];
+			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
+			const hasConfirmedIdeaBlockResult = ideaBlockResponses.length > 0 || duplicateIdeaBlockResponses.length > 0;
+			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasConfirmedIdeaBlockResult;
 			const pendingVoiceBlockIds = shouldClearVoiceGeneratingBlocks ? takeVoiceGeneratingBlockIds() : new Set<string>();
 			const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
 			if (shouldClearVoiceGeneratingBlocks) {
 				setWhisperTransient({ status: "idle", text: "" });
 			}
-			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
 			let shouldRefreshIdeaBlocks = false;
 
-			if (Array.isArray(lastAudioMessage.idea_blocks) && lastAudioMessage.idea_blocks.length > 0) {
+			if (ideaBlockResponses.length > 0) {
 				const previousBlocksById = new Map(ideaBlocksRef.current.map(block => [block.id, block]));
 				const existingBlockIds = new Set(previousBlocksById.keys());
-				const updatedBlocks = lastAudioMessage.idea_blocks.map(item => {
+				const updatedBlocks = ideaBlockResponses.map(item => {
 					const block = ideaBlockResponseToBlock(item);
 					return existingBlockIds.has(block.id) ? block : { ...block, isUnread: true };
 				});
@@ -2816,7 +2818,7 @@ export function PrivateBoard({
 	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
 	const whisperStatusLabel = whisperTransient.status === "listening" ? "正在聽悄悄話" : whisperTransient.status === "generating" ? "正在生成" : null;
 	const whisperTransientText = whisperTransient.text.trim();
-	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status !== "idle" && (whisperTransient.status === "generating" || !!whisperTransientText);
+	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status === "listening" && !!whisperTransientText;
 	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
@@ -2970,15 +2972,8 @@ export function PrivateBoard({
 									))}
 									{showWhisperTransient && (
 										<div className="rounded-lg border border-dashed bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
-											<div className="mb-1 text-xs font-semibold text-muted-foreground">{whisperTransient.status === "generating" ? "正在生成 Idea Block..." : "你的悄悄話"}</div>
-											{whisperTransientText ? (
-												<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
-											) : (
-												<div className="flex items-center gap-2 leading-6 text-muted-foreground">
-													<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-													<span>等待 Idea Block 生成</span>
-												</div>
-											)}
+											<div className="mb-1 text-xs font-semibold text-muted-foreground">你的悄悄話</div>
+											<p className="overflow-hidden leading-6 text-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">{whisperTransientText}</p>
 										</div>
 									)}
 								</div>
