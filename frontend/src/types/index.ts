@@ -80,6 +80,8 @@ export interface PublicChatMessage {
 	timestampMs?: number;
 	isOwn?: boolean;
 	isDeleted?: boolean;
+	isPending?: boolean;
+	clientMessageId?: string;
 }
 
 export type MicMode = "public" | "private";

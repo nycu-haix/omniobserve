@@ -33,4 +33,30 @@
 	body {
 		@apply bg-background text-foreground;
 	}
+
+	* {
+		scrollbar-color: hsl(var(--border)) transparent;
+		scrollbar-width: thin;
+	}
+
+	*::-webkit-scrollbar {
+		height: 10px;
+		width: 10px;
+	}
+
+	*::-webkit-scrollbar-track,
+	*::-webkit-scrollbar-corner {
+		background: transparent;
+	}
+
+	*::-webkit-scrollbar-thumb {
+		background-clip: content-box;
+		background-color: hsl(var(--border));
+		border: 2px solid transparent;
+		border-radius: 9999px;
+	}
+
+	*::-webkit-scrollbar-thumb:hover {
+		background-color: hsl(var(--muted-foreground) / 0.28);
+	}
 }

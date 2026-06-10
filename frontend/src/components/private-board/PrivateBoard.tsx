@@ -41,7 +41,7 @@ type BoardMessage =
 	| { type: "similarity_reason_share_sent"; payload: SimilarityReasonShareSentData }
 	| SimilarityReasonShareErrorMessage
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
-	| { type: "public_chat_error"; reason?: string }
+	| { type: "public_chat_error"; reason?: string; clientMessageId?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
 	| { type: "countdown_changed"; current_phase?: unknown; timer_end_time_ms?: number; end_time_ms?: number; duration_s: number }
 	| { type: "board_state"; current_phase?: unknown; timer_end_time_ms?: number; cue_condition?: CueCondition }
@@ -106,6 +106,7 @@ interface PublicChatMessagePayload {
 	message: string;
 	timestampMs?: number;
 	isDeleted?: boolean;
+	clientMessageId?: string;
 }
 
 interface PublicContextMatchPayload {
@@ -266,6 +267,7 @@ const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_sw
 const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
+const PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS = 5000;
 const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
 const IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS = 12000;
 const VOICE_GENERATING_ID_PREFIX = "voice-generating";
@@ -501,7 +503,8 @@ function publicChatPayloadToMessage(payload: PublicChatMessagePayload, participa
 		time: formatTranscriptTime(timestampMs),
 		timestampMs,
 		isOwn: isOwnTranscriptUser(payload.userId, participantId),
-		isDeleted: payload.isDeleted ?? false
+		isDeleted: payload.isDeleted ?? false,
+		clientMessageId: payload.clientMessageId
 	};
 }
 
@@ -957,6 +960,34 @@ function sortTranscriptLines(lines: TranscriptLineType[]): TranscriptLineType[] 
 	});
 }
 
+function isMatchingPendingPublicChatMessage(pendingMessage: PublicChatMessage, confirmedMessage: PublicChatMessage): boolean {
+	if (!pendingMessage.isPending || confirmedMessage.isPending) {
+		return false;
+	}
+
+	if (pendingMessage.clientMessageId && confirmedMessage.clientMessageId) {
+		return pendingMessage.clientMessageId === confirmedMessage.clientMessageId;
+	}
+
+	if (!pendingMessage.isOwn || !confirmedMessage.isOwn || pendingMessage.message.trim() !== confirmedMessage.message.trim()) {
+		return false;
+	}
+
+	if (pendingMessage.userId && confirmedMessage.userId && pendingMessage.userId !== confirmedMessage.userId) {
+		return false;
+	}
+
+	if (pendingMessage.timestampMs && confirmedMessage.timestampMs) {
+		return Math.abs(confirmedMessage.timestampMs - pendingMessage.timestampMs) <= PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS * 3;
+	}
+
+	return true;
+}
+
+function removePendingPublicChatMessage(messages: PublicChatMessage[], clientMessageId: string): PublicChatMessage[] {
+	return messages.filter(message => message.clientMessageId !== clientMessageId || !message.isPending);
+}
+
 function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicChatMessage): PublicChatMessage[] {
 	const normalizedMessage = message.message.trim();
 	if (!normalizedMessage) {
@@ -965,6 +996,23 @@ function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicC
 
 	const existingMessage = messages.find(item => item.id === message.id);
 	if (!existingMessage) {
+		const pendingMessage = messages.find(item => isMatchingPendingPublicChatMessage(item, { ...message, message: normalizedMessage }));
+		if (pendingMessage) {
+			return sortPublicChatMessages(
+				messages.map(item =>
+					item.id === pendingMessage.id
+						? {
+								...message,
+								clientMessageId: message.clientMessageId ?? item.clientMessageId,
+								isPending: false,
+								message: normalizedMessage,
+								timestampMs: message.timestampMs ?? item.timestampMs
+							}
+						: item
+				)
+			);
+		}
+
 		return sortPublicChatMessages([...messages, { ...message, message: normalizedMessage }]);
 	}
 
@@ -974,6 +1022,7 @@ function appendPublicChatMessage(messages: PublicChatMessage[], message: PublicC
 				? {
 						...item,
 						...message,
+						isPending: message.isPending ?? item.isPending,
 						message: normalizedMessage,
 						timestampMs: message.timestampMs ?? item.timestampMs
 					}
@@ -2079,7 +2128,21 @@ export function PrivateBoard({
 
 		const timer = window.setTimeout(() => {
 			if (lastMessage.type === "public_chat_error") {
-				setIsSendingPublicChat(false);
+				const failedPendingMessage = lastMessage.clientMessageId
+					? publicChatMessagesRef.current.find(message => message.clientMessageId === lastMessage.clientMessageId && message.isPending)
+					: publicChatMessagesRef.current.find(message => message.isOwn && message.isPending);
+				if (failedPendingMessage?.clientMessageId) {
+					setPublicChatMessages(prev => {
+						const nextMessages = removePendingPublicChatMessage(prev, failedPendingMessage.clientMessageId || "");
+						setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
+						return nextMessages;
+					});
+					if (!parseIdeaBlockChatMessage(failedPendingMessage.message)) {
+						setPublicChatText(current => current || failedPendingMessage.message);
+					}
+				} else {
+					setIsSendingPublicChat(publicChatMessagesRef.current.some(message => message.isOwn && message.isPending));
+				}
 				setPublicChatError(lastMessage.reason || "公開訊息傳送失敗");
 				const failedShare = pendingIdeaBlockChatSharesRef.current[0];
 				if (failedShare) {
@@ -2276,8 +2339,11 @@ export function PrivateBoard({
 			if (lastMessage.type === "public_chat_message") {
 				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
 				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
-				setIsSendingPublicChat(false);
-				setPublicChatMessages(prev => appendPublicChatMessage(prev, nextMessage));
+				setPublicChatMessages(prev => {
+					const nextMessages = appendPublicChatMessage(prev, nextMessage);
+					setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
+					return nextMessages;
+				});
 				if (nextMessage.isOwn && !nextMessage.isDeleted) {
 					const nextMessageText = nextMessage.message.trim();
 					const pendingShareIndex = pendingIdeaBlockChatSharesRef.current.findIndex(item => item.message === nextMessageText);
@@ -3138,7 +3204,7 @@ export function PrivateBoard({
 	};
 
 	const sendPublicChatPayload = useCallback(
-		(message: string) => {
+		(message: string, options?: { restoreTextOnFailure?: boolean }) => {
 			const normalizedMessage = message.trim();
 			if (!normalizedMessage) {
 				return null;
@@ -3150,23 +3216,52 @@ export function PrivateBoard({
 			}
 
 			const sentMessage = normalizedMessage.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
+			const clientMessageId = createClientNoticeId("public-chat");
+			const timestampMs = Date.now();
 			setIsSendingPublicChat(true);
 			setPublicChatError(null);
+			setPublicChatMessages(prev =>
+				appendPublicChatMessage(prev, {
+					id: clientMessageId,
+					sessionName: sessionId,
+					userId: String(getTranscriptUserId(participantId)),
+					displayName,
+					message: sentMessage,
+					time: formatTranscriptTime(timestampMs),
+					timestampMs,
+					isOwn: true,
+					isPending: true,
+					clientMessageId
+				})
+			);
 			onSendBoardMessage({
 				type: "public_chat_send",
 				message: sentMessage,
-				displayName
+				displayName,
+				clientMessageId
 			});
 			window.setTimeout(() => {
-				setIsSendingPublicChat(false);
-			}, 5000);
+				const stillPending = publicChatMessagesRef.current.some(message => message.clientMessageId === clientMessageId && message.isPending);
+				if (!stillPending) {
+					return;
+				}
+				setPublicChatMessages(prev => {
+					const nextMessages = removePendingPublicChatMessage(prev, clientMessageId);
+					setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
+					return nextMessages;
+				});
+				if (options?.restoreTextOnFailure) {
+					setPublicChatError("公開訊息傳送逾時，請再試一次");
+					setPublicChatText(current => current || sentMessage);
+				}
+			}, PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS);
 			return sentMessage;
 		},
-		[displayName, isConnected, onSendBoardMessage]
+		[displayName, isConnected, onSendBoardMessage, participantId, sessionId]
 	);
 
 	const sendPublicChatMessage = () => {
-		if (sendPublicChatPayload(publicChatText)) {
+		if (sendPublicChatPayload(publicChatText, { restoreTextOnFailure: true })) {
 			setPublicChatText("");
 		}
 	};
