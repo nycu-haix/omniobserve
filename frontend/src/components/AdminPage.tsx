@@ -1593,13 +1593,7 @@ export function AdminPage() {
 			if (!stillPending) {
 				return;
 			}
-			setPublicChatMessages(prev => {
-				const nextMessages = removePendingPublicChatMessage(prev, clientMessageId);
-				setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
-				return nextMessages;
-			});
-			setPublicChatError("公開訊息傳送逾時，請再試一次");
-			setPublicChatText(current => current || normalizedMessage);
+			setIsSendingPublicChat(publicChatMessagesRef.current.some(message => message.isOwn && message.isPending && message.clientMessageId !== clientMessageId));
 		}, PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS);
 	};
 
