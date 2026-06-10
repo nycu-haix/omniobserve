@@ -1604,6 +1604,15 @@ export function PrivateBoard({
 		});
 	}, []);
 
+	const hasActiveVoiceGeneratingBlocks = useCallback(() => {
+		for (const blockIds of voiceGeneratingBlocksRef.current.values()) {
+			if (blockIds.size > 0) {
+				return true;
+			}
+		}
+		return false;
+	}, []);
+
 	const isCurrentWhisperSegmentComplete = useCallback((current: WhisperTransient, segmentKeys: string[]) => {
 		if (current.status !== "generating") {
 			return false;
@@ -1986,6 +1995,14 @@ export function PrivateBoard({
 			}
 
 			if (lastMessage.type === "new_idea_block") {
+				if (hasActiveVoiceGeneratingBlocks()) {
+					console.info("[private-board] new_idea_block left to audio completion while voice placeholder is active", {
+						sessionId,
+						participantId,
+						ideaBlockId: lastMessage.payload.id
+					});
+					return;
+				}
 				unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.id);
 				setIdeaBlocks(prev => mergeIdeaBlocks(prev, [{ ...lastMessage.payload, isUnread: true }], { markNewUnread: true }));
 				const isNewActiveBlock = !lastMessage.payload.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === lastMessage.payload.id);
@@ -2159,7 +2176,7 @@ export function PrivateBoard({
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [canShowSimilarityCues, captureIdeaBlockPositions, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
+	}, [canShowSimilarityCues, captureIdeaBlockPositions, hasActiveVoiceGeneratingBlocks, lastMessage, participantId, queueSimilarityCueFromBlock, sessionId, visibleActiveTab, visiblePhase]);
 
 	useEffect(() => {
 		if (!isAudioTranscriptBoundaryMessage(lastAudioMessage)) {
