@@ -35,6 +35,11 @@ from .participant_status import (
 from .public_context_matching import find_public_context_matches
 from .phase_task_item_snapshot_service import initialize_phase_rankings
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
+from .ranking_cutoff import (
+    build_ranking_items_with_cutoff,
+    normalize_ranking_change_count,
+    split_ranking_items,
+)
 from .ranking_state_query_service import get_effective_ranking_state
 from .transcripts import save_ws_transcript_segment
 
@@ -705,10 +710,35 @@ def _get_current_ranking_items(session_id: str) -> list[str]:
 
 
 def _get_active_ranking_limit(session_id: str) -> int | None:
+    return _get_ranking_limit_for_item_count(
+        session_id,
+        len(_get_current_ranking_items(session_id)),
+    )
+
+
+def _get_ranking_limit_for_item_count(session_id: str, item_count: int) -> int | None:
     ranking_limit = get_ranking_limit_for_session(session_name=session_id)
     if ranking_limit is None:
         return None
-    return ranking_limit if len(_get_current_ranking_items(session_id)) > ranking_limit else None
+    return ranking_limit if item_count > 0 else None
+
+
+def _build_internal_ranking_items_for_session(
+    session_id: str,
+    items: list[str],
+    change_count: int | None = None,
+) -> list[str]:
+    ranking_limit = _get_ranking_limit_for_item_count(session_id, len(items))
+    if ranking_limit is None:
+        return list(items)
+    return build_ranking_items_with_cutoff(
+        items,
+        normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(items),
+        ),
+    )
 
 
 def _get_current_ranking_item_catalog(session_id: str) -> list[dict[str, Any]] | None:
@@ -722,27 +752,53 @@ def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str
     current_items = state.get("items")
     if not isinstance(current_items, list):
         current_items = []
-    normalized_items = [
-        item
-        for index, item in enumerate(current_items)
-        if isinstance(item, str)
-        and item in default_ranking_item_set
-        and current_items.index(item) == index
-    ]
+    current_real_items, current_change_count = split_ranking_items(current_items)
+    seen_items: set[str] = set()
+    normalized_real_items: list[str] = []
+    for item in current_real_items:
+        if item in default_ranking_item_set and item not in seen_items:
+            normalized_real_items.append(item)
+            seen_items.add(item)
+    normalized_items = normalized_real_items
     normalized_items.extend(
         item for item in default_ranking_items if item not in normalized_items
     )
+    ranking_limit = _get_ranking_limit_for_item_count(session_id, len(normalized_items))
+    if ranking_limit is not None:
+        normalized_change_count = normalize_ranking_change_count(
+            current_change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(normalized_items),
+        )
+        normalized_items = build_ranking_items_with_cutoff(
+            normalized_items,
+            normalized_change_count,
+        )
     if normalized_items != current_items:
         state["items"] = normalized_items
         state["revision"] = _normalize_int(state.get("revision"), 0) + 1
     return state
 
 
-def _create_ranking_state(session_id: str) -> dict[str, Any]:
+def _create_ranking_state_from_items(
+    session_id: str,
+    items: list[str],
+    *,
+    revision: int = 0,
+    change_count: int | None = None,
+) -> dict[str, Any]:
     return {
-        "revision": 0,
-        "items": _get_current_ranking_items(session_id),
+        "revision": revision,
+        "items": _build_internal_ranking_items_for_session(
+            session_id,
+            items,
+            change_count=change_count,
+        ),
     }
+
+
+def _create_ranking_state(session_id: str) -> dict[str, Any]:
+    return _create_ranking_state_from_items(session_id, _get_current_ranking_items(session_id))
 
 
 def _get_public_ranking_state(session_id: str) -> dict[str, Any]:
@@ -769,11 +825,20 @@ def _get_ranking_state(
     return _get_public_ranking_state(session_id)
 
 
-def _ranking_payload(state: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _ranking_payload(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    items, change_count = split_ranking_items(state["items"])
+    payload: dict[str, Any] = {
         "revision": state["revision"],
-        "items": list(state["items"]),
+        "items": items,
     }
+    ranking_limit = _get_active_ranking_limit(session_id)
+    if ranking_limit is not None:
+        payload["change_count"] = normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(items),
+        )
+    return payload
 
 
 def _normalize_ranking_scope(value: Any) -> str:
@@ -793,9 +858,9 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "type": "board_state",
         "session_name": session_id,
         "revision": public_state["revision"],
-        "ranking": {"items": list(public_state["items"])},
-        "public_ranking": _ranking_payload(public_state),
-        "private_ranking": _ranking_payload(private_state),
+        "ranking": {"items": split_ranking_items(public_state["items"])[0]},
+        "public_ranking": _ranking_payload(session_id, public_state),
+        "private_ranking": _ranking_payload(session_id, private_state),
         "ranking_items": _get_current_ranking_item_catalog(session_id),
         "public_blocks": list(blocks["public_blocks"]),
         "private_blocks": private_blocks,
@@ -809,7 +874,7 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
 def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     public_state = _get_public_ranking_state(session_id)
     private_rankings = {
-        participant_id: _ranking_payload(state)
+        participant_id: _ranking_payload(session_id, state)
         for participant_id, state in sorted(private_ranking_state[session_id].items())
         if not _is_admin_participant_id(participant_id)
     }
@@ -817,21 +882,40 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
         "type": "admin_ranking_state",
         "session_name": session_id,
         "revision": public_state["revision"],
-        "public_ranking": _ranking_payload(public_state),
+        "public_ranking": _ranking_payload(session_id, public_state),
         "private_rankings": private_rankings,
         "ranking_items": _get_current_ranking_item_catalog(session_id),
     }
 
 
 def _apply_ranking_move(items: list[str], item_id: str, to_index: int, *, ranking_limit: int | None = None) -> list[str]:
-    if item_id not in items:
+    real_items, change_count = split_ranking_items(items)
+    if item_id not in real_items:
         raise ValueError("ranking item does not exist")
-    if ranking_limit is not None and to_index >= ranking_limit:
-        raise ValueError(f"only the first {ranking_limit} ranking positions can be changed")
-    next_items = [item for item in items if item != item_id]
-    bounded_index = max(0, min(to_index, len(next_items)))
-    next_items.insert(bounded_index, item_id)
-    return next_items
+    old_index = real_items.index(item_id)
+    target_index = max(0, min(to_index, len(real_items)))
+    next_real_items = [item for item in real_items if item != item_id]
+    insert_index = max(0, min(to_index, len(next_real_items)))
+    next_real_items.insert(insert_index, item_id)
+
+    next_change_count: int | None = None
+    if ranking_limit is not None:
+        current_change_count = normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(real_items),
+        )
+        next_change_count = current_change_count
+        if old_index < current_change_count and target_index >= current_change_count:
+            next_change_count = max(0, current_change_count - 1)
+        elif old_index >= current_change_count and target_index < current_change_count:
+            next_change_count = normalize_ranking_change_count(
+                current_change_count + 1,
+                ranking_limit=ranking_limit,
+                item_count=len(real_items),
+            )
+
+    return build_ranking_items_with_cutoff(next_real_items, next_change_count)
 
 
 async def handle_board_websocket(
@@ -934,9 +1018,10 @@ async def handle_board_websocket(
                 async with session_locks[session_id]:
                     state = _get_ranking_state(session_id, participant_id, scope)
                     previous_items = list(state["items"])
+                    previous_real_items, _ = split_ranking_items(previous_items)
                     from_index = (
-                        previous_items.index(item_id)
-                        if item_id in previous_items
+                        previous_real_items.index(item_id)
+                        if item_id in previous_real_items
                         else None
                     )
                     try:
@@ -962,12 +1047,13 @@ async def handle_board_websocket(
                                 "type": "ranking_error",
                                 "scope": scope,
                                 "reason": str(exc),
-                                "current": _ranking_payload(state),
+                                "current": _ranking_payload(session_id, state),
                             },
                         )
                         continue
                     next_revision = state["revision"] + 1
-                    final_to_index = next_items.index(item_id)
+                    next_real_items, _ = split_ranking_items(next_items)
+                    final_to_index = next_real_items.index(item_id)
                     async with SessionLocal() as db:
                         try:
                             await create_ranking_move(
@@ -1002,7 +1088,7 @@ async def handle_board_websocket(
                                     "type": "ranking_error",
                                     "scope": scope,
                                     "reason": "failed to save ranking move",
-                                    "current": _ranking_payload(state),
+                                    "current": _ranking_payload(session_id, state),
                                 },
                             )
                             continue
@@ -1017,12 +1103,12 @@ async def handle_board_websocket(
                         state["items"],
                         board_manager.get_participants(session_id),
                     )
+                    ranking_payload = _ranking_payload(session_id, state)
                     message = {
                         "type": "ranking_state",
                         "scope": scope,
-                        "revision": state["revision"],
-                        "items": list(state["items"]),
                         "updatedBy": participant_id,
+                        **ranking_payload,
                     }
                     if scope == "private":
                         await board_manager.send_to(session_id, participant_id, message)
@@ -1216,7 +1302,12 @@ async def handle_admin_websocket(
                                                 exc,
                                             )
                                             continue
-                                        checkpoint_items = list(effective_state.get("items") or [])
+                                        checkpoint_real_items = list(effective_state.get("items") or [])
+                                        checkpoint_items = _build_internal_ranking_items_for_session(
+                                            session_id,
+                                            checkpoint_real_items,
+                                            change_count=_normalize_optional_int(effective_state.get("change_count")),
+                                        )
                                         checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
                                     else:
                                         checkpoint_items = list(state.get("items") or [])
@@ -1260,15 +1351,15 @@ async def handle_admin_websocket(
                         session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
                         if ranking_initialization.private_items_by_participant_id is not None:
                             for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
-                                private_ranking_state[session_id][participant_id] = {
-                                    "revision": 0,
-                                    "items": list(item_ids),
-                                }
+                                private_ranking_state[session_id][participant_id] = _create_ranking_state_from_items(
+                                    session_id,
+                                    list(item_ids),
+                                )
                         if ranking_initialization.public_items is not None:
-                            public_ranking_state[session_id] = {
-                                "revision": 0,
-                                "items": list(ranking_initialization.public_items),
-                            }
+                            public_ranking_state[session_id] = _create_ranking_state_from_items(
+                                session_id,
+                                list(ranking_initialization.public_items),
+                            )
                     elif new_phase == get_default_phase_for_session(session_name=session_id):
                         session_ranking_item_catalog.pop(session_id, None)
 

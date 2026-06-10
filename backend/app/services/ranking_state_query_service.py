@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import RankingMove
 from ..schemas import ApiError
-from ..task_config import resolve_task_id
+from ..task_config import get_ranking_limit_for_session, resolve_task_id
 from .phase_task_item_snapshot_service import (
     GROUP_PHASE,
     PRIVATE_PHASE_2,
@@ -12,6 +12,28 @@ from .phase_task_item_snapshot_service import (
     snapshot_item_id,
     stable_shuffle,
 )
+from .ranking_cutoff import normalize_ranking_change_count, split_ranking_items
+
+
+def _ranking_items_response(
+    *,
+    session_name: str,
+    task_id: str,
+    items: list[str],
+) -> dict:
+    real_items, change_count = split_ranking_items(items)
+    payload: dict = {"items": real_items}
+    ranking_limit = get_ranking_limit_for_session(
+        session_name=session_name,
+        task_id=task_id,
+    )
+    if ranking_limit is not None:
+        payload["change_count"] = normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(real_items),
+        )
+    return payload
 
 
 async def get_effective_ranking_state(
@@ -51,6 +73,11 @@ async def get_effective_ranking_state(
         )
 
     if latest_move is not None:
+        ranking_payload = _ranking_items_response(
+            session_name=session_name,
+            task_id=resolved_task_id,
+            items=list(latest_move.items or []),
+        )
         return {
             "session_name": session_name,
             "scope": normalized_scope,
@@ -60,7 +87,7 @@ async def get_effective_ranking_state(
             "phase": latest_move.phase,
             "source": latest_move.move_type,
             "revision": latest_move.revision,
-            "items": list(latest_move.items or []),
+            **ranking_payload,
             "ranking_move_id": latest_move.id,
             "updated_at": latest_move.time_stamp,
         }
@@ -76,6 +103,11 @@ async def get_effective_ranking_state(
             move_type="checkpoint",
         )
     if fallback_checkpoint is not None:
+        ranking_payload = _ranking_items_response(
+            session_name=session_name,
+            task_id=resolved_task_id,
+            items=list(fallback_checkpoint.items or []),
+        )
         return {
             "session_name": session_name,
             "scope": normalized_scope,
@@ -85,7 +117,7 @@ async def get_effective_ranking_state(
             "phase": fallback_checkpoint.phase,
             "source": "private_phase_2_checkpoint",
             "revision": fallback_checkpoint.revision,
-            "items": list(fallback_checkpoint.items or []),
+            **ranking_payload,
             "ranking_move_id": fallback_checkpoint.id,
             "updated_at": fallback_checkpoint.time_stamp,
         }
@@ -98,6 +130,11 @@ async def get_effective_ranking_state(
             f"{session_name}:{resolved_task_id}:{GROUP_PHASE}:{snapshot.id}",
         )
 
+    ranking_payload = _ranking_items_response(
+        session_name=session_name,
+        task_id=resolved_task_id,
+        items=items,
+    )
     return {
         "session_name": session_name,
         "scope": normalized_scope,
@@ -107,7 +144,7 @@ async def get_effective_ranking_state(
         "phase": phase,
         "source": "snapshot_initial",
         "revision": 0,
-        "items": items,
+        **ranking_payload,
         "ranking_move_id": None,
         "updated_at": snapshot.created_at,
     }
@@ -139,4 +176,3 @@ async def _get_latest_ranking_move(
         stmt = stmt.where(RankingMove.move_type == move_type)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
-
