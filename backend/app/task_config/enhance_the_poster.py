@@ -286,25 +286,25 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "qr_code_group",
         "label_zh": "QR 碼+說明",
         "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
     {
         "id": "title_group",
         "label_zh": "主標題+副標題+說明文字",
         "label_en": "Title group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
     {
         "id": "info_group2",
         "label_zh": "日期時間+地點+行動呼籲",
         "label_en": "Info group2",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
     {
         "id": "info_group",
         "label_zh": "下方資訊",
         "label_en": "Info group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
 ]
 
@@ -370,7 +370,7 @@ PHASE1_ACTION_ITEMS = [
         "template_zh": "將「{component}」分散",
     },
     {
-        "id": "asemble",
+        "id": "assemble",
         "label_zh": "集合",
         "label_en": "Assemble",
         "template_zh": "將「{component}」集合",

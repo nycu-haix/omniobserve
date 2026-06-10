@@ -298,7 +298,7 @@ export function useAudioStream(
 		[waitForAudioStopAck]
 	);
 
-	const drainActiveAudioSocket = useCallback(async (waitForCompletion = true): Promise<void> => {
+	const releaseActiveAudioSocketForDrain = useCallback(async (): Promise<{ drainPromise: Promise<void> }> => {
 		const socket = socketRef.current;
 		const meta = activeMetaRef.current;
 
@@ -316,21 +316,28 @@ export function useAudioStream(
 		pendingSamplesRef.current = new Float32Array(0);
 
 		if (!socket) {
-			return;
+			return { drainPromise: Promise.resolve() };
 		}
 
-		const drainPromise = drainAudioSocket(socket, meta, pendingSamples);
-		if (waitForCompletion) {
-			await drainPromise;
-		} else {
-			void drainPromise;
-		}
+		return { drainPromise: drainAudioSocket(socket, meta, pendingSamples) };
 	}, [drainAudioSocket]);
+
+	const drainActiveAudioSocket = useCallback(
+		async (waitForCompletion = true): Promise<void> => {
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
+			if (waitForCompletion) {
+				await drainPromise;
+			} else {
+				void drainPromise;
+			}
+		},
+		[releaseActiveAudioSocketForDrain]
+	);
 
 	const stopAudioStream = useCallback(
 		async (keepAudioResources = false) => {
 			stoppingRef.current = true;
-			await drainActiveAudioSocket(false);
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
 
 			if (!keepAudioResources) {
 				cleanupAudioResources();
@@ -340,8 +347,9 @@ export function useAudioStream(
 			setIsAudioStreaming(false);
 			clearLocalSpeakingReleaseTimer();
 			setLocalSpeakingState(false);
+			await drainPromise;
 		},
-		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, drainActiveAudioSocket, setLocalSpeakingState]
+		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, releaseActiveAudioSocketForDrain, setLocalSpeakingState]
 	);
 
 	const sendAudioSamples = useCallback(
