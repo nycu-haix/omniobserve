@@ -533,17 +533,33 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
     }
 
 
+async def _send_similarity_reason_share_error(
+    session_id: str,
+    participant_id: str,
+    *,
+    reason: str,
+    block_id: int | None = None,
+) -> None:
+    message: dict[str, Any] = {
+        "type": "similarity_reason_share_error",
+        "reason": reason,
+    }
+    if block_id is not None and block_id >= 0:
+        message["blockId"] = str(block_id)
+
+    await board_manager.send_to(session_id, participant_id, message)
+
+
 async def _handle_similarity_reason_share(
     session_id: str, participant_id: str, payload: dict[str, Any]
 ) -> None:
+    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
     if not is_similarity_cue_enabled(session_id):
-        await board_manager.send_to(
+        await _send_similarity_reason_share_error(
             session_id,
             participant_id,
-            {
-                "type": "similarity_reason_share_error",
-                "reason": "similarity cues are disabled",
-            },
+            reason="similarity cues are disabled",
+            block_id=block_id,
         )
         logger.info(
             "similarity_reason_share_suppressed session_id=%s participant_id=%s cue_condition=%s",
@@ -553,16 +569,13 @@ async def _handle_similarity_reason_share(
         )
         return
 
-    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
     participant_user_id = _normalize_int(participant_id, -1)
     if block_id < 0 or participant_user_id < 0:
-        await board_manager.send_to(
+        await _send_similarity_reason_share_error(
             session_id,
             participant_id,
-            {
-                "type": "similarity_reason_share_error",
-                "reason": "invalid idea block",
-            },
+            reason="invalid idea block",
+            block_id=block_id,
         )
         return
 
@@ -574,13 +587,11 @@ async def _handle_similarity_reason_share(
             or own_block.session_name != session_id
             or own_block.user_id != participant_user_id
         ):
-            await board_manager.send_to(
+            await _send_similarity_reason_share_error(
                 session_id,
                 participant_id,
-                {
-                    "type": "similarity_reason_share_error",
-                    "reason": "similar idea block not found",
-                },
+                reason="similar idea block not found",
+                block_id=block_id,
             )
             return
 
@@ -635,13 +646,11 @@ async def _handle_similarity_reason_share(
             )
 
         if not targets:
-            await board_manager.send_to(
+            await _send_similarity_reason_share_error(
                 session_id,
                 participant_id,
-                {
-                    "type": "similarity_reason_share_error",
-                    "reason": "recipient idea blocks not found",
-                },
+                reason="recipient idea blocks not found",
+                block_id=own_block.id,
             )
             return
 

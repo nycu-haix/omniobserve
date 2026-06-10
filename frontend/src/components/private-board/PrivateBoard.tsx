@@ -39,6 +39,7 @@ type BoardMessage =
 	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
 	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
 	| { type: "similarity_reason_share_sent"; payload: SimilarityReasonShareSentData }
+	| SimilarityReasonShareErrorMessage
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
@@ -128,9 +129,16 @@ interface SimilarityReasonShareSentData {
 	deliveredCount?: number;
 }
 
+interface SimilarityReasonShareErrorMessage {
+	type: "similarity_reason_share_error";
+	reason?: string;
+	blockId?: string | number | null;
+	block_id?: string | number | null;
+}
+
 interface IdeaBlockNotice {
 	id: string;
-	blockId: string;
+	blockId?: string;
 	title: string;
 	message: string;
 }
@@ -309,6 +317,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "public_context_matches" ||
 		message.type === "similarity_reason_shared" ||
 		message.type === "similarity_reason_share_sent" ||
+		message.type === "similarity_reason_share_error" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
@@ -1149,6 +1158,31 @@ function buildSimilarityReasonShareNotice(payload: SimilarityReasonShareSentData
 		blockId: payload.blockId,
 		title: "已分享我的理由",
 		message
+	};
+}
+
+function formatSimilarityReasonShareError(reason: string | undefined): string {
+	switch (reason) {
+		case "similarity cues are disabled":
+			return "目前相似提示已關閉，不能分享理由";
+		case "invalid idea block":
+			return "找不到可分享的 idea block";
+		case "similar idea block not found":
+			return "這個 idea block 已不存在或不屬於目前參與者";
+		case "recipient idea blocks not found":
+			return "沒有可接收分享的相似想法對象";
+		default:
+			return reason || "分享理由失敗";
+	}
+}
+
+function buildSimilarityReasonShareErrorNotice(message: SimilarityReasonShareErrorMessage): IdeaBlockNotice {
+	const blockId = message.blockId ?? message.block_id;
+	return {
+		id: `similarity-reason-share-error-${blockId ?? "unknown"}-${Date.now()}`,
+		blockId: blockId == null ? undefined : String(blockId),
+		title: "無法分享理由",
+		message: formatSimilarityReasonShareError(message.reason)
 	};
 }
 
@@ -2265,6 +2299,10 @@ export function PrivateBoard({
 				setIdeaBlockNotice(buildSimilarityReasonShareNotice(lastMessage.payload));
 			}
 
+			if (lastMessage.type === "similarity_reason_share_error") {
+				setIdeaBlockNotice(buildSimilarityReasonShareErrorNotice(lastMessage));
+			}
+
 			if (lastMessage.type === "public_chat_message") {
 				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
 				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
@@ -3241,13 +3279,21 @@ export function PrivateBoard({
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
 		) : undefined;
+	const ideaBlockNoticeBlockId = ideaBlockNotice?.blockId;
 	const ideaBlockNoticeContent = ideaBlockNotice ? (
 		<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-md border bg-card p-3 text-card-foreground shadow-lg" role="status" aria-live="polite">
 			<div className="flex items-start gap-3">
-				<button type="button" className="min-w-0 flex-1 text-left" onClick={() => jumpToBlock(ideaBlockNotice.blockId)}>
-					<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
-					<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
-				</button>
+				{ideaBlockNoticeBlockId ? (
+					<button type="button" className="min-w-0 flex-1 text-left" onClick={() => jumpToBlock(ideaBlockNoticeBlockId)}>
+						<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
+						<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
+					</button>
+				) : (
+					<div className="min-w-0 flex-1">
+						<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
+						<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
+					</div>
+				)}
 				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="關閉通知" onClick={() => setIdeaBlockNotice(null)}>
 					<X className="h-4 w-4" />
 				</Button>
