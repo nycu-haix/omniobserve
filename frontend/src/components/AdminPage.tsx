@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -138,6 +138,15 @@ interface PublicChatMessagePayload {
 type CueCondition = "experimental" | "control";
 type AdminTab = "ranking" | "transcript" | "chat";
 type ManualCueReasonType = "same" | "different";
+type SimilarityReasonKind = "same" | "different" | "mixed";
+
+interface SimilarityLink {
+	id: number;
+	relatedBlockId: number;
+	relatedSummary: string;
+	isSameReason: boolean;
+	reason: string;
+}
 
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
@@ -154,6 +163,16 @@ const MANUAL_CUE_REASON_PREFIX = "Manual cue from admin:";
 const MANUAL_CUE_REASON_LABELS: Record<ManualCueReasonType, string> = {
 	same: "Same reason",
 	different: "Different reason"
+};
+const SIMILARITY_REASON_LABELS: Record<SimilarityReasonKind, string> = {
+	same: "Same reason",
+	different: "Different reason",
+	mixed: "Same + Different"
+};
+const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
+	same: "border-green-700/30 bg-green-100 text-green-900 hover:bg-green-100/80",
+	different: "border-yellow-700/30 bg-yellow-100 text-yellow-950 hover:bg-yellow-100/80",
+	mixed: "border-lime-700/40 bg-lime-100 text-lime-950 hover:bg-lime-100/80"
 };
 
 function getAdminAvailableLayoutWidth() {
@@ -245,6 +264,31 @@ function formatApiTime(value: string | number | null | undefined) {
 
 function matchesQuery(value: string | null | undefined, query: string) {
 	return !query || (value || "").toLowerCase().includes(query);
+}
+
+function getSimilarityReasonKind(hasSameReason: boolean, hasDifferentReason: boolean): SimilarityReasonKind | null {
+	if (hasSameReason && hasDifferentReason) {
+		return "mixed";
+	}
+	if (hasSameReason) {
+		return "same";
+	}
+	if (hasDifferentReason) {
+		return "different";
+	}
+	return null;
+}
+
+function getSimilarityReasonTagLabel(kind: SimilarityReasonKind, count?: number) {
+	const countText = count && count > 1 ? ` ${count}` : "";
+	return `${SIMILARITY_REASON_LABELS[kind]}${countText}`;
+}
+
+function getSimilarityPeerSummary(similarity: SimilarityRecord, currentBlockId: number) {
+	if (similarity.idea_block_id_1 === currentBlockId) {
+		return similarity.idea_block_2.summary || "Idea block";
+	}
+	return similarity.idea_block_1.summary || "Idea block";
 }
 
 function isBoardStateMessage(message: RealtimeMessage | null): message is BoardStateMessage {
@@ -687,6 +731,10 @@ export function AdminPage() {
 	});
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | null>(null);
 	const [rankingsCopied, setRankingsCopied] = useState(false);
+	const [highlightedIdeaBlockIds, setHighlightedIdeaBlockIds] = useState<number[]>([]);
+	const [pendingJumpBlockIds, setPendingJumpBlockIds] = useState<number[]>([]);
+	const ideaBlockRefs = useRef(new Map<number, HTMLElement>());
+	const jumpHighlightTimerRef = useRef<number | null>(null);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const participantNameById = useMemo(() => {
@@ -1118,6 +1166,43 @@ export function AdminPage() {
 		ideaBlocks.forEach(item => ids.add(item.user_id));
 		return [...ids].sort((a, b) => a - b);
 	}, [ideaBlocks, participants, transcripts]);
+	const ideaBlockById = useMemo(() => new Map(ideaBlocks.map(block => [block.id, block])), [ideaBlocks]);
+	const similarityLinksByBlockId = useMemo(() => {
+		const linksByBlockId = new Map<number, SimilarityLink[]>();
+		const addLink = (blockId: number, link: SimilarityLink) => {
+			const nextLinks = linksByBlockId.get(blockId) ?? [];
+			nextLinks.push(link);
+			linksByBlockId.set(blockId, nextLinks);
+		};
+
+		similarities.forEach(similarity => {
+			const firstBlock = ideaBlockById.get(similarity.idea_block_id_1);
+			const secondBlock = ideaBlockById.get(similarity.idea_block_id_2);
+			if (!firstBlock || !secondBlock) {
+				return;
+			}
+
+			addLink(similarity.idea_block_id_1, {
+				id: similarity.id,
+				relatedBlockId: similarity.idea_block_id_2,
+				relatedSummary: getSimilarityPeerSummary(similarity, similarity.idea_block_id_1),
+				isSameReason: similarity.is_same_reason,
+				reason: similarity.reason
+			});
+			addLink(similarity.idea_block_id_2, {
+				id: similarity.id,
+				relatedBlockId: similarity.idea_block_id_1,
+				relatedSummary: getSimilarityPeerSummary(similarity, similarity.idea_block_id_2),
+				isSameReason: similarity.is_same_reason,
+				reason: similarity.reason
+			});
+		});
+
+		linksByBlockId.forEach(links => {
+			links.sort((a, b) => b.id - a.id || b.relatedBlockId - a.relatedBlockId);
+		});
+		return linksByBlockId;
+	}, [ideaBlockById, similarities]);
 	const filteredTranscripts = transcripts
 		.filter(item => selectedUserId === "all" || item.user_id === selectedUserId)
 		.filter(item => matchesQuery(item.transcript, normalizedQuery))
@@ -1131,6 +1216,56 @@ export function AdminPage() {
 		.filter(similarity => similarity.reason.includes(MANUAL_CUE_REASON_PREFIX))
 		.sort((a, b) => b.id - a.id)
 		.slice(0, 6);
+	const registerIdeaBlockRef = useCallback((blockId: number, node: HTMLElement | null) => {
+		if (node) {
+			ideaBlockRefs.current.set(blockId, node);
+		} else {
+			ideaBlockRefs.current.delete(blockId);
+		}
+	}, []);
+	const jumpToIdeaBlocks = useCallback(
+		(blockIds: number[]) => {
+			const uniqueBlockIds = [...new Set(blockIds)].filter(blockId => ideaBlockById.has(blockId));
+			if (uniqueBlockIds.length === 0) {
+				return;
+			}
+
+			setSelectedUserId("all");
+			setQuery("");
+			setHighlightedIdeaBlockIds(uniqueBlockIds);
+			setPendingJumpBlockIds(uniqueBlockIds);
+			if (jumpHighlightTimerRef.current !== null) {
+				window.clearTimeout(jumpHighlightTimerRef.current);
+			}
+			jumpHighlightTimerRef.current = window.setTimeout(() => {
+				setHighlightedIdeaBlockIds([]);
+				jumpHighlightTimerRef.current = null;
+			}, 4500);
+		},
+		[ideaBlockById]
+	);
+
+	useEffect(() => {
+		return () => {
+			if (jumpHighlightTimerRef.current !== null) {
+				window.clearTimeout(jumpHighlightTimerRef.current);
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		if (pendingJumpBlockIds.length === 0) {
+			return;
+		}
+
+		const frame = window.requestAnimationFrame(() => {
+			const target = pendingJumpBlockIds.map(blockId => ideaBlockRefs.current.get(blockId)).find((node): node is HTMLElement => !!node);
+			target?.scrollIntoView({ block: "center", behavior: "smooth" });
+			setPendingJumpBlockIds([]);
+		});
+
+		return () => window.cancelAnimationFrame(frame);
+	}, [filteredIdeaBlocks, pendingJumpBlockIds]);
 	const createManualCue = async () => {
 		if (selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition) {
 			return;
@@ -1548,13 +1683,7 @@ export function AdminPage() {
 												<span className="min-w-0 truncate">
 													#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
 												</span>
-												<Badge
-													variant="outline"
-													className={cn(
-														"shrink-0 px-1.5 py-0 text-[10px]",
-														similarity.is_same_reason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
-													)}
-												>
+												<Badge variant="outline" className={cn("shrink-0 px-1.5 py-0 text-[10px]", SIMILARITY_REASON_TAG_CLASSES[similarity.is_same_reason ? "same" : "different"])}>
 													{similarity.is_same_reason ? MANUAL_CUE_REASON_LABELS.same : MANUAL_CUE_REASON_LABELS.different}
 												</Badge>
 											</div>
@@ -1580,8 +1709,22 @@ export function AdminPage() {
 						<div className="grid gap-3">
 							{filteredIdeaBlocks.map(block => {
 								const isSelectedForCue = selectedCueBlockIds.includes(block.id);
+								const similarityLinks = similarityLinksByBlockId.get(block.id) ?? [];
+								const sameReasonLinks = similarityLinks.filter(link => link.isSameReason);
+								const differentReasonLinks = similarityLinks.filter(link => !link.isSameReason);
+								const similarityReasonKind = getSimilarityReasonKind(sameReasonLinks.length > 0, differentReasonLinks.length > 0);
+								const relatedBlockIds = similarityLinks.map(link => link.relatedBlockId);
+								const isHighlightedAsJumpTarget = highlightedIdeaBlockIds.includes(block.id);
 								return (
-									<article key={block.id} className={cn("rounded-lg border bg-background p-3 transition-colors", isSelectedForCue && "border-primary bg-primary/5")}>
+									<article
+										key={block.id}
+										ref={node => registerIdeaBlockRef(block.id, node)}
+										className={cn(
+											"scroll-mt-4 rounded-lg border bg-background p-3 transition-colors transition-shadow",
+											isSelectedForCue && "border-primary bg-primary/5",
+											isHighlightedAsJumpTarget && "ring-2 ring-lime-500 ring-offset-2 ring-offset-background"
+										)}
+									>
 										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 											<div className="flex min-w-0 items-center gap-2">
 												<Badge variant="outline" title={`Participant ID ${block.user_id}`}>
@@ -1590,7 +1733,22 @@ export function AdminPage() {
 												<span className="truncate text-sm font-medium">idea block #{block.id}</span>
 											</div>
 											<div className="flex items-center gap-2">
-												{block.similarity_id && <Badge variant="secondary">similarity</Badge>}
+												{similarityReasonKind ? (
+													<button
+														type="button"
+														className={cn(
+															"inline-flex h-7 max-w-full shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+															SIMILARITY_REASON_TAG_CLASSES[similarityReasonKind]
+														)}
+														title={`Jump to ${relatedBlockIds.length} related idea block${relatedBlockIds.length > 1 ? "s" : ""}`}
+														onClick={() => jumpToIdeaBlocks(relatedBlockIds)}
+													>
+														<Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+														<span className="truncate">{getSimilarityReasonTagLabel(similarityReasonKind, similarityLinks.length)}</span>
+													</button>
+												) : (
+													block.similarity_id && <Badge variant="secondary">similarity</Badge>
+												)}
 												<Button
 													type="button"
 													size="sm"
@@ -1606,6 +1764,32 @@ export function AdminPage() {
 										</div>
 										<p className="text-sm font-semibold leading-6">{block.title || block.summary || "-"}</p>
 										{block.summary && block.summary !== block.title && <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{block.summary}</p>}
+										{similarityLinks.length > 0 && (
+											<div className="mt-3 flex flex-wrap gap-1.5" aria-label={`Similarity cue links for idea block ${block.id}`}>
+												{similarityLinks.map(link => {
+													const linkKind: SimilarityReasonKind = link.isSameReason ? "same" : "different";
+													const relatedBlock = ideaBlockById.get(link.relatedBlockId);
+													const relatedParticipantLabel = relatedBlock ? getParticipantLabel(relatedBlock.user_id) : "Unknown participant";
+													return (
+														<button
+															key={link.id}
+															type="button"
+															className={cn(
+																"inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+																SIMILARITY_REASON_TAG_CLASSES[linkKind]
+															)}
+															title={`${SIMILARITY_REASON_LABELS[linkKind]} cue to idea block #${link.relatedBlockId}: ${link.relatedSummary}`}
+															onClick={() => jumpToIdeaBlocks([link.relatedBlockId])}
+														>
+															<span className="shrink-0">{SIMILARITY_REASON_LABELS[linkKind]}</span>
+															<ArrowRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+															<span className="shrink-0 font-mono">#{link.relatedBlockId}</span>
+															<span className="min-w-0 max-w-36 truncate font-medium">{relatedParticipantLabel}</span>
+														</button>
+													);
+												})}
+											</div>
+										)}
 										{block.transcript && <p className="mt-3 whitespace-pre-wrap border-t pt-3 text-xs leading-5 text-muted-foreground">{block.transcript}</p>}
 									</article>
 								);
