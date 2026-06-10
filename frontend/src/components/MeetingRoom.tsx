@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, Columns2, GripVertical, Info, Keyboard, Lock, Maximize, Mic, Minimize, Radio, Rows2, X } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -474,87 +474,8 @@ function createDefaultTaskPaneLayout(phase: SessionPhase, phase1BuilderEnabled =
 	return createTaskPaneLeaf("private-ranking");
 }
 
-function getTaskPaneContentOptions(phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent[] {
-	if (isGroupPhase(phase)) {
-		return ["public-ranking", "private-ranking", "task-instructions"];
-	}
-
-	if (isPrivatePhase1(phase)) {
-		return phase1BuilderEnabled ? ["phase-task-items", "task-instructions"] : ["private-ranking", "task-instructions"];
-	}
-
-	return ["private-ranking", "task-instructions"];
-}
-
 function countTaskPaneLeaves(node: TaskPaneNode): number {
 	return node.type === "leaf" ? 1 : countTaskPaneLeaves(node.first) + countTaskPaneLeaves(node.second);
-}
-
-function getFirstTaskPaneLeafId(node: TaskPaneNode): string {
-	return node.type === "leaf" ? node.id : getFirstTaskPaneLeafId(node.first);
-}
-
-function hasTaskPaneContent(node: TaskPaneNode, content: TaskPaneContent): boolean {
-	return node.type === "leaf" ? node.content === content : hasTaskPaneContent(node.first, content) || hasTaskPaneContent(node.second, content);
-}
-
-function chooseNewTaskPaneContent(node: TaskPaneNode, phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent {
-	const preferredContents = getTaskPaneContentOptions(phase, phase1BuilderEnabled);
-	return preferredContents.find(content => !hasTaskPaneContent(node, content)) ?? "task-instructions";
-}
-
-function updateTaskPaneNode(node: TaskPaneNode, paneId: string, updater: (leaf: TaskPaneLeaf) => TaskPaneNode): TaskPaneNode {
-	if (node.type === "leaf") {
-		return node.id === paneId ? updater(node) : node;
-	}
-
-	return {
-		...node,
-		first: updateTaskPaneNode(node.first, paneId, updater),
-		second: updateTaskPaneNode(node.second, paneId, updater)
-	};
-}
-
-function updateTaskPaneSplit(node: TaskPaneNode, splitId: string, ratio: number): TaskPaneNode {
-	if (node.type === "leaf") {
-		return node;
-	}
-
-	if (node.id === splitId) {
-		return {
-			...node,
-			ratio: Math.min(100 - MIN_TASK_PANE_RATIO, Math.max(MIN_TASK_PANE_RATIO, ratio))
-		};
-	}
-
-	return {
-		...node,
-		first: updateTaskPaneSplit(node.first, splitId, ratio),
-		second: updateTaskPaneSplit(node.second, splitId, ratio)
-	};
-}
-
-function removeTaskPaneNode(node: TaskPaneNode, paneId: string): TaskPaneNode | null {
-	if (node.type === "leaf") {
-		return node.id === paneId ? null : node;
-	}
-
-	const nextFirst = removeTaskPaneNode(node.first, paneId);
-	const nextSecond = removeTaskPaneNode(node.second, paneId);
-
-	if (!nextFirst) {
-		return nextSecond;
-	}
-
-	if (!nextSecond) {
-		return nextFirst;
-	}
-
-	return {
-		...node,
-		first: nextFirst,
-		second: nextSecond
-	};
 }
 
 function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase, phase1BuilderEnabled = false): boolean {
@@ -824,13 +745,8 @@ function TaskWorkspace({
 	renderPublicRanking: () => React.ReactNode;
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
-	const [layout, setLayout] = useState<TaskPaneNode>(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig));
-	const [hasUserCustomizedLayout, setHasUserCustomizedLayout] = useState(false);
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
-	const defaultLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
-	const visibleLayout = hasUserCustomizedLayout ? layout : defaultLayout;
-	const paneCount = countTaskPaneLeaves(visibleLayout);
-	const contentOptions = useMemo(() => getTaskPaneContentOptions(currentPhase, phase1BuilderEnabled), [currentPhase, phase1BuilderEnabled]);
+	const visibleLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
 
 	useEffect(() => {
 		const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -839,87 +755,6 @@ function TaskWorkspace({
 		mediaQuery.addEventListener("change", handleChange);
 		return () => mediaQuery.removeEventListener("change", handleChange);
 	}, []);
-
-	useEffect(() => {
-		const timer = window.setTimeout(() => {
-			setLayout(defaultLayout);
-			setHasUserCustomizedLayout(false);
-		}, 0);
-		return () => window.clearTimeout(timer);
-	}, [defaultLayout]);
-
-	const markCustomized = () => setHasUserCustomizedLayout(true);
-
-	const splitPane = (paneId: string, direction: TaskSplitDirection) => {
-		if (paneCount >= MAX_TASK_PANES) {
-			return;
-		}
-
-		markCustomized();
-		setLayout(
-			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-				type: "split",
-				id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-				direction,
-				ratio: 50,
-				first: leaf,
-				second: createTaskPaneLeaf(chooseNewTaskPaneContent(visibleLayout, currentPhase, phase1BuilderEnabled))
-			}))
-		);
-	};
-
-	const changePaneContent = (paneId: string, content: TaskPaneContent) => {
-		markCustomized();
-		setLayout(
-			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-				...leaf,
-				content
-			}))
-		);
-	};
-
-	const resizeSplit = (splitId: string, ratio: number) => {
-		markCustomized();
-		setLayout(updateTaskPaneSplit(visibleLayout, splitId, ratio));
-	};
-
-	const closePane = (paneId: string) => {
-		if (paneCount <= 1) {
-			return;
-		}
-
-		markCustomized();
-		const nextLayout = removeTaskPaneNode(visibleLayout, paneId);
-		if (!nextLayout) {
-			return;
-		}
-		setLayout(nextLayout);
-	};
-
-	const showTaskInstructions = () => {
-		markCustomized();
-		if (hasTaskPaneContent(visibleLayout, "task-instructions")) {
-			return;
-		}
-
-		if (paneCount < MAX_TASK_PANES) {
-			const paneId = getFirstTaskPaneLeafId(visibleLayout);
-			setLayout(
-				updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-					type: "split",
-					id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-					direction: "horizontal",
-					ratio: 60,
-					first: leaf,
-					second: createTaskPaneLeaf("task-instructions")
-				}))
-			);
-			return;
-		}
-
-		const paneId = getFirstTaskPaneLeafId(visibleLayout);
-		changePaneContent(paneId, "task-instructions");
-	};
 
 	const renderPaneContent = (content: TaskPaneContent) => {
 		if (!getTaskPaneContentAvailability(content, currentPhase, phase1BuilderEnabled)) {
@@ -958,255 +793,47 @@ function TaskWorkspace({
 
 	return (
 		<section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Task workspace">
-			<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
+			<header className="mb-3 flex shrink-0 items-center">
 				<div className="grid min-w-0 gap-1">
 					<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
 				</div>
-				<Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={showTaskInstructions}>
-					<Info className="h-4 w-4" />
-					任務說明
-				</Button>
 			</header>
 			<div className="min-h-0 overflow-hidden">
-				<TaskPaneRenderer
-					node={visibleLayout}
-					currentPhase={currentPhase}
-					paneCount={paneCount}
-					isNarrowLayout={isNarrowLayout}
-					onSplitPane={splitPane}
-					onClosePane={closePane}
-					onChangePaneContent={changePaneContent}
-					onResizeSplit={resizeSplit}
-					contentOptions={contentOptions}
-					phase1BuilderEnabled={phase1BuilderEnabled}
-					renderPaneContent={renderPaneContent}
-				/>
+				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>
 		</section>
 	);
 }
 
-function TaskPaneRenderer({
-	node,
-	currentPhase,
-	paneCount,
-	isNarrowLayout,
-	onSplitPane,
-	onClosePane,
-	onChangePaneContent,
-	onResizeSplit,
-	contentOptions,
-	phase1BuilderEnabled,
-	renderPaneContent
-}: {
-	node: TaskPaneNode;
-	currentPhase: SessionPhase;
-	paneCount: number;
-	isNarrowLayout: boolean;
-	onSplitPane: (paneId: string, direction: TaskSplitDirection) => void;
-	onClosePane: (paneId: string) => void;
-	onChangePaneContent: (paneId: string, content: TaskPaneContent) => void;
-	onResizeSplit: (splitId: string, ratio: number) => void;
-	contentOptions: TaskPaneContent[];
-	phase1BuilderEnabled: boolean;
-	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
-}) {
+function TaskPaneRenderer({ node, isNarrowLayout, renderPaneContent }: { node: TaskPaneNode; isNarrowLayout: boolean; renderPaneContent: (content: TaskPaneContent) => React.ReactNode }) {
 	if (node.type === "leaf") {
-		return (
-			<TaskPane
-				pane={node}
-				currentPhase={currentPhase}
-				canSplit={paneCount < MAX_TASK_PANES}
-				canClose={paneCount > 1}
-				onSplit={direction => onSplitPane(node.id, direction)}
-				onClose={() => onClosePane(node.id)}
-				onChangeContent={content => onChangePaneContent(node.id, content)}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-			>
-				{renderPaneContent(node.content)}
-			</TaskPane>
-		);
+		return <TaskPane pane={node}>{renderPaneContent(node.content)}</TaskPane>;
 	}
 
 	const effectiveDirection = isNarrowLayout ? "vertical" : node.direction;
 	const gridStyle =
 		effectiveDirection === "horizontal"
-			? ({ gridTemplateColumns: `minmax(280px, ${node.ratio}fr) 1rem minmax(280px, ${100 - node.ratio}fr)` } as CSSProperties)
-			: ({ gridTemplateRows: `minmax(180px, ${node.ratio}fr) 1rem minmax(180px, ${100 - node.ratio}fr)` } as CSSProperties);
+			? ({ gridTemplateColumns: `minmax(280px, ${node.ratio}fr) minmax(280px, ${100 - node.ratio}fr)` } as CSSProperties)
+			: ({ gridTemplateRows: `minmax(180px, ${node.ratio}fr) minmax(180px, ${100 - node.ratio}fr)` } as CSSProperties);
 
 	return (
-		<div className="grid h-full min-h-0 min-w-0 gap-0" style={gridStyle}>
-			<TaskPaneRenderer
-				node={node.first}
-				currentPhase={currentPhase}
-				paneCount={paneCount}
-				isNarrowLayout={isNarrowLayout}
-				onSplitPane={onSplitPane}
-				onClosePane={onClosePane}
-				onChangePaneContent={onChangePaneContent}
-				onResizeSplit={onResizeSplit}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-				renderPaneContent={renderPaneContent}
-			/>
-			<PaneSeparator split={node} direction={effectiveDirection} onResize={onResizeSplit} />
-			<TaskPaneRenderer
-				node={node.second}
-				currentPhase={currentPhase}
-				paneCount={paneCount}
-				isNarrowLayout={isNarrowLayout}
-				onSplitPane={onSplitPane}
-				onClosePane={onClosePane}
-				onChangePaneContent={onChangePaneContent}
-				onResizeSplit={onResizeSplit}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-				renderPaneContent={renderPaneContent}
-			/>
+		<div className="grid h-full min-h-0 min-w-0 gap-3" style={gridStyle}>
+			<TaskPaneRenderer node={node.first} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
+			<TaskPaneRenderer node={node.second} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 		</div>
 	);
 }
 
-function TaskPane({
-	pane,
-	currentPhase,
-	canSplit,
-	canClose,
-	onSplit,
-	onClose,
-	onChangeContent,
-	contentOptions,
-	phase1BuilderEnabled,
-	children
-}: {
-	pane: TaskPaneLeaf;
-	currentPhase: SessionPhase;
-	canSplit: boolean;
-	canClose: boolean;
-	onSplit: (direction: TaskSplitDirection) => void;
-	onClose: () => void;
-	onChangeContent: (content: TaskPaneContent) => void;
-	contentOptions: TaskPaneContent[];
-	phase1BuilderEnabled: boolean;
-	children: React.ReactNode;
-}) {
-	const isLocked = !getTaskPaneContentAvailability(pane.content, currentPhase, phase1BuilderEnabled);
-
+function TaskPane({ pane, children }: { pane: TaskPaneLeaf; children: React.ReactNode }) {
 	return (
 		<section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border bg-card" aria-label={TASK_PANE_CONTENT_LABELS[pane.content]}>
 			<header className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5">
 				<div className="flex min-w-0 items-center gap-2">
-					{canClose && (
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							className="h-8 w-8 shrink-0"
-							title="Close pane"
-							aria-label={`Close ${TASK_PANE_CONTENT_LABELS[pane.content]} pane`}
-							onClick={event => {
-								event.stopPropagation();
-								onClose();
-							}}
-						>
-							<X className="h-4 w-4" />
-						</Button>
-					)}
-					<select
-						className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm font-medium outline-none focus:ring-1 focus:ring-ring"
-						value={pane.content}
-						aria-label="選擇 pane 內容"
-						onChange={event => onChangeContent(event.target.value as TaskPaneContent)}
-						onPointerDown={event => event.stopPropagation()}
-					>
-						{contentOptions.map(content => (
-							<option key={content} value={content}>
-								{TASK_PANE_CONTENT_LABELS[content]}
-							</option>
-						))}
-					</select>
-					{isLocked && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="目前階段鎖定" />}
-				</div>
-				<div className="flex shrink-0 items-center gap-1">
-					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Right" aria-label="Split Right" disabled={!canSplit} onClick={() => onSplit("horizontal")}>
-						<Columns2 className="h-4 w-4" />
-					</Button>
-					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Down" aria-label="Split Down" disabled={!canSplit} onClick={() => onSplit("vertical")}>
-						<Rows2 className="h-4 w-4" />
-					</Button>
+					<div className="truncate text-sm font-medium">{TASK_PANE_CONTENT_LABELS[pane.content]}</div>
 				</div>
 			</header>
 			<div className="min-h-0 overflow-hidden p-2">{children}</div>
 		</section>
-	);
-}
-
-function PaneSeparator({ split, direction, onResize }: { split: TaskPaneSplit; direction: TaskSplitDirection; onResize: (splitId: string, ratio: number) => void }) {
-	const handleResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
-		event.preventDefault();
-		const separator = event.currentTarget;
-		const container = separator.parentElement;
-		if (!container) {
-			return;
-		}
-
-		separator.setPointerCapture(event.pointerId);
-		const containerRect = container.getBoundingClientRect();
-
-		const handlePointerMove = (moveEvent: PointerEvent) => {
-			const nextRatio = direction === "horizontal" ? ((moveEvent.clientX - containerRect.left) / containerRect.width) * 100 : ((moveEvent.clientY - containerRect.top) / containerRect.height) * 100;
-			onResize(split.id, nextRatio);
-		};
-
-		const handlePointerUp = () => {
-			if (separator.hasPointerCapture(event.pointerId)) {
-				separator.releasePointerCapture(event.pointerId);
-			}
-			document.body.style.cursor = "";
-			document.body.style.userSelect = "";
-			window.removeEventListener("pointermove", handlePointerMove);
-			window.removeEventListener("pointerup", handlePointerUp);
-			window.removeEventListener("pointercancel", handlePointerUp);
-		};
-
-		document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
-		document.body.style.userSelect = "none";
-		window.addEventListener("pointermove", handlePointerMove);
-		window.addEventListener("pointerup", handlePointerUp);
-		window.addEventListener("pointercancel", handlePointerUp);
-	};
-
-	const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-		const isHorizontalKey = event.key === "ArrowLeft" || event.key === "ArrowRight";
-		const isVerticalKey = event.key === "ArrowUp" || event.key === "ArrowDown";
-		if ((direction === "horizontal" && !isHorizontalKey) || (direction === "vertical" && !isVerticalKey)) {
-			return;
-		}
-
-		event.preventDefault();
-		const directionMultiplier = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
-		onResize(split.id, split.ratio + directionMultiplier * 4);
-	};
-
-	return (
-		<button
-			type="button"
-			className={cn(
-				"group grid place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-				direction === "horizontal" ? "h-full w-4 cursor-col-resize" : "h-4 w-full cursor-row-resize"
-			)}
-			aria-label={direction === "horizontal" ? "調整左右 pane 大小" : "調整上下 pane 大小"}
-			aria-orientation={direction === "horizontal" ? "vertical" : "horizontal"}
-			aria-valuemin={MIN_TASK_PANE_RATIO}
-			aria-valuemax={100 - MIN_TASK_PANE_RATIO}
-			aria-valuenow={Math.round(split.ratio)}
-			role="separator"
-			onPointerDown={handleResizeStart}
-			onKeyDown={handleResizeKeyDown}
-		>
-			<span className={cn("rounded-full bg-border transition-colors group-hover:bg-primary/30", direction === "horizontal" ? "h-20 w-0.5" : "h-0.5 w-20")} aria-hidden="true" />
-		</button>
 	);
 }
 
