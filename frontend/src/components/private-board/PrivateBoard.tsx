@@ -38,6 +38,7 @@ type BoardMessage =
 	| { type: "similarity_cue"; payload: SimilarityPairCueData }
 	| { type: "public_context_matches"; payload: PublicContextMatchesPayload }
 	| { type: "similarity_reason_shared"; payload: SimilarityReasonSharedData }
+	| { type: "similarity_reason_share_sent"; payload: SimilarityReasonShareSentData }
 	| { type: "public_chat_message"; payload: PublicChatMessagePayload }
 	| { type: "public_chat_error"; reason?: string }
 	| { type: "phase_changed"; phase: unknown; end_time_ms: number; duration_s: number }
@@ -119,6 +120,12 @@ interface PublicContextMatchesPayload {
 	participantId?: string | number | null;
 	textChars?: number;
 	matches?: PublicContextMatchPayload[];
+}
+
+interface SimilarityReasonShareSentData {
+	blockId: string;
+	recipientCount?: number;
+	deliveredCount?: number;
 }
 
 interface IdeaBlockNotice {
@@ -301,6 +308,7 @@ function isBoardMessage(message: object | null): message is BoardMessage {
 		message.type === "similarity_cue" ||
 		message.type === "public_context_matches" ||
 		message.type === "similarity_reason_shared" ||
+		message.type === "similarity_reason_share_sent" ||
 		message.type === "public_chat_message" ||
 		message.type === "public_chat_error" ||
 		message.type === "phase_changed" ||
@@ -1127,6 +1135,19 @@ function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
 		id: `duplicate-${block.id}-${Date.now()}`,
 		blockId: block.id,
 		title: "這個 idea block 已存在",
+		message
+	};
+}
+
+function buildSimilarityReasonShareNotice(payload: SimilarityReasonShareSentData): IdeaBlockNotice {
+	const deliveredCount = typeof payload.deliveredCount === "number" ? payload.deliveredCount : payload.recipientCount;
+	const message =
+		deliveredCount == null || deliveredCount === 1 ? "已分享我的理由給另一個人" : deliveredCount > 1 ? `已分享我的理由給 ${deliveredCount} 個人` : "已送出分享，但目前沒有送達在線上的對象";
+
+	return {
+		id: `similarity-reason-share-${payload.blockId}-${Date.now()}`,
+		blockId: payload.blockId,
+		title: "已分享我的理由",
 		message
 	};
 }
@@ -2238,6 +2259,10 @@ export function PrivateBoard({
 				if (visibleActiveTab !== "ideablock") {
 					setUnreadIdeaBlockCount(current => current + 1);
 				}
+			}
+
+			if (lastMessage.type === "similarity_reason_share_sent") {
+				setIdeaBlockNotice(buildSimilarityReasonShareNotice(lastMessage.payload));
 			}
 
 			if (lastMessage.type === "public_chat_message") {
