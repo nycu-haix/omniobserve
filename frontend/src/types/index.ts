@@ -29,6 +29,7 @@ export interface SharedSimilarityReason {
 	id: string;
 	title: string;
 	summary: string;
+	isSameReason?: boolean;
 	receivedAtMs?: number;
 }
 

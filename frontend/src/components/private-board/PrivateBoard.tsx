@@ -2212,10 +2212,12 @@ export function PrivateBoard({
 					return;
 				}
 				const sharedReason = lastMessage.payload;
+				const sharedIsSameReason = sharedReason.isSameReason === true;
 				console.info("[private-board] similarity_reason_shared received", {
 					sessionId,
 					participantId,
-					blockId: sharedReason.blockId
+					blockId: sharedReason.blockId,
+					isSameReason: sharedReason.isSameReason
 				});
 				setIdeaBlocks(prev =>
 					prev.map(block =>
@@ -2224,8 +2226,9 @@ export function PrivateBoard({
 									...block,
 									expanded: true,
 									hasCue: true,
-									similarityIsSameReason: false,
-									similarityHasDifferentReason: true,
+									similarityIsSameReason: sharedIsSameReason,
+									similarityHasSameReason: block.similarityHasSameReason || sharedIsSameReason,
+									similarityHasDifferentReason: block.similarityHasDifferentReason || !sharedIsSameReason,
 									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
 								}
 							: block
@@ -3167,16 +3170,13 @@ export function PrivateBoard({
 		if (cue.kind === "phase-transition-summary") {
 			return;
 		}
-		if (cue.isSameReason !== false) {
-			return;
-		}
 		onSendBoardMessage({
 			type: "share_similarity_reason",
 			blockId: cue.blockId,
 			cueId: cue.id
 		});
 		setCues(prev => {
-			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId || item.isSameReason !== false);
+			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId);
 			cuesRef.current = nextCues;
 			return nextCues;
 		});
@@ -3184,8 +3184,7 @@ export function PrivateBoard({
 
 	const shareSimilarityReasonFromBlock = useCallback(
 		(block: IdeaBlock) => {
-			const hasDifferentReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
-			if (!canShowSimilarityCues || !isGroupPhase(visiblePhase) || !hasDifferentReason || block.status === "generating" || block.isDeleted) {
+			if (!canShowSimilarityCues || !isGroupPhase(visiblePhase) || !block.hasCue || block.status === "generating" || block.isDeleted) {
 				return;
 			}
 			onSendBoardMessage({

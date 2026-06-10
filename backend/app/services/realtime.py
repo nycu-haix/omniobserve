@@ -589,8 +589,7 @@ async def _handle_similarity_reason_share(
                 or_(
                     Similarity.idea_block_id_1 == own_block.id,
                     Similarity.idea_block_id_2 == own_block.id,
-                ),
-                Similarity.is_same_reason.is_(False),
+                )
             )
         )
         similarities = result.scalars().all()
@@ -626,6 +625,7 @@ async def _handle_similarity_reason_share(
                             "blockId": str(other_block.id),
                             "title": own_block.title,
                             "summary": own_block.summary,
+                            "isSameReason": similarity.is_same_reason,
                             "receivedAtMs": received_at_ms,
                         },
                     },
@@ -640,7 +640,7 @@ async def _handle_similarity_reason_share(
                 participant_id,
                 {
                     "type": "similarity_reason_share_error",
-                    "reason": "different-reason recipient idea blocks not found",
+                    "reason": "recipient idea blocks not found",
                 },
             )
             return
