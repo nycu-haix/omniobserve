@@ -291,6 +291,10 @@ function getSimilarityPeerSummary(similarity: SimilarityRecord, currentBlockId: 
 	return similarity.idea_block_1.summary || "Idea block";
 }
 
+function getManualCuePairCount(selectedBlockCount: number) {
+	return Math.max(0, selectedBlockCount - 1);
+}
+
 function isBoardStateMessage(message: RealtimeMessage | null): message is BoardStateMessage {
 	return message?.type === "board_state";
 }
@@ -1086,7 +1090,7 @@ export function AdminPage() {
 			if (current.includes(blockId)) {
 				return current.filter(id => id !== blockId);
 			}
-			return [...current, blockId].slice(-2);
+			return [...current, blockId];
 		});
 	};
 	const publicRankingSnapshot =
@@ -1212,6 +1216,9 @@ export function AdminPage() {
 		.filter(item => matchesQuery(`${item.title || ""}\n${item.summary || ""}\n${item.transcript || ""}`, normalizedQuery))
 		.sort((a, b) => b.id - a.id);
 	const selectedCueBlocks = selectedCueBlockIds.map(blockId => ideaBlocks.find(block => block.id === blockId)).filter((block): block is IdeaBlockRecord => !!block);
+	const selectedCueSourceBlock = selectedCueBlocks[0] ?? null;
+	const selectedCueTargetBlocks = selectedCueBlocks.slice(1);
+	const manualCuePairCount = getManualCuePairCount(selectedCueBlocks.length);
 	const manualCueHistory = similarities
 		.filter(similarity => similarity.reason.includes(MANUAL_CUE_REASON_PREFIX))
 		.sort((a, b) => b.id - a.id)
@@ -1267,36 +1274,51 @@ export function AdminPage() {
 		return () => window.cancelAnimationFrame(frame);
 	}, [filteredIdeaBlocks, pendingJumpBlockIds]);
 	const createManualCue = async () => {
-		if (selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition) {
+		if (!selectedCueSourceBlock || selectedCueTargetBlocks.length === 0 || isCreatingManualCue || !isExperimentalCondition) {
 			return;
 		}
 
 		setIsCreatingManualCue(true);
 		setManualCueError(null);
 		try {
-			const [firstBlock, secondBlock] = selectedCueBlocks;
 			const isSameReason = manualCueReasonType === "same";
-			const response = await fetch(buildSessionApiUrl(roomName, "/similarities"), {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					idea_block_id_1: firstBlock.id,
-					idea_block_id_2: secondBlock.id,
-					reason: `${MANUAL_CUE_REASON_PREFIX} ${MANUAL_CUE_REASON_LABELS[manualCueReasonType].toLowerCase()} idea block #${firstBlock.id} and #${secondBlock.id}`,
-					is_same_reason: isSameReason
-				})
+			const batchBlockIds = selectedCueBlocks.map(block => block.id);
+			const cueRequests = selectedCueTargetBlocks.map(async targetBlock => {
+				const response = await fetch(buildSessionApiUrl(roomName, "/similarities"), {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						idea_block_id_1: selectedCueSourceBlock.id,
+						idea_block_id_2: targetBlock.id,
+						reason: [
+							`${MANUAL_CUE_REASON_PREFIX} ${MANUAL_CUE_REASON_LABELS[manualCueReasonType].toLowerCase()} source idea block #${selectedCueSourceBlock.id} and related idea block #${targetBlock.id}`,
+							batchBlockIds.length > 2 ? `batch ${batchBlockIds.map(id => `#${id}`).join(", ")}` : null
+						]
+							.filter(Boolean)
+							.join("; "),
+						is_same_reason: isSameReason
+					})
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to create manual cue #${selectedCueSourceBlock.id} ↔ #${targetBlock.id} (${response.status})`);
+				}
+
+				return (await response.json()) as SimilarityRecord;
 			});
-
-			if (!response.ok) {
-				throw new Error(`Failed to create manual cue (${response.status})`);
+			const results = await Promise.allSettled(cueRequests);
+			const createdSimilarities = results.flatMap(result => (result.status === "fulfilled" ? [result.value] : []));
+			const failedResults = results.filter(result => result.status === "rejected");
+			if (createdSimilarities.length > 0) {
+				setSimilarities(current => upsertById(current, createdSimilarities));
 			}
-
-			await response.json();
-			setIdeaBlocks(current =>
-				current.map(block => (block.id === firstBlock.id ? { ...block, similarity_id: secondBlock.id } : block.id === secondBlock.id ? { ...block, similarity_id: firstBlock.id } : block))
-			);
-			// Removed recordEvent call for local state since events are not tracked anymore
-			setSelectedCueBlockIds([]);
+			if (failedResults.length > 0) {
+				const firstFailure = failedResults[0];
+				const detail = firstFailure.status === "rejected" && firstFailure.reason instanceof Error ? firstFailure.reason.message : "Unknown error";
+				setManualCueError(`Created ${createdSimilarities.length}/${cueRequests.length} cues. ${detail}`);
+			} else {
+				setSelectedCueBlockIds([]);
+			}
 			void loadAdminApiData();
 		} catch (error) {
 			setManualCueError(error instanceof Error ? error.message : String(error));
@@ -1627,8 +1649,8 @@ export function AdminPage() {
 								{!isExperimentalCondition
 									? "Control condition: similarity cues are disabled"
 									: selectedCueBlocks.length > 0
-										? selectedCueBlocks.map(block => `#${block.id} ${getParticipantLabel(block.user_id)}`).join(" + ")
-										: "Select 2 idea blocks to cue together"}
+										? `${selectedCueSourceBlock ? `Source #${selectedCueSourceBlock.id} ${getParticipantLabel(selectedCueSourceBlock.user_id)}` : ""}${selectedCueTargetBlocks.length > 0 ? ` → ${selectedCueTargetBlocks.map(block => `#${block.id} ${getParticipantLabel(block.user_id)}`).join(" + ")}` : " → select related blocks"}`
+										: "Select a source block, then one or more related blocks"}
 							</p>
 						</div>
 						<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -1659,9 +1681,9 @@ export function AdminPage() {
 									Clear
 								</Button>
 							)}
-							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition}>
+							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={manualCuePairCount === 0 || isCreatingManualCue || !isExperimentalCondition}>
 								<Link2 className="h-3.5 w-3.5" aria-hidden="true" />
-								{isCreatingManualCue ? "Sending" : "Send cue"}
+								{isCreatingManualCue ? "Sending" : manualCuePairCount > 1 ? `Send ${manualCuePairCount} cues` : "Send cue"}
 							</Button>
 						</div>
 						{manualCueError && <p className="basis-full text-xs text-destructive">{manualCueError}</p>}
@@ -1709,6 +1731,8 @@ export function AdminPage() {
 						<div className="grid gap-3">
 							{filteredIdeaBlocks.map(block => {
 								const isSelectedForCue = selectedCueBlockIds.includes(block.id);
+								const cueSelectionIndex = selectedCueBlockIds.indexOf(block.id);
+								const isCueSourceBlock = cueSelectionIndex === 0;
 								const similarityLinks = similarityLinksByBlockId.get(block.id) ?? [];
 								const sameReasonLinks = similarityLinks.filter(link => link.isSameReason);
 								const differentReasonLinks = similarityLinks.filter(link => !link.isSameReason);
@@ -1752,13 +1776,13 @@ export function AdminPage() {
 												<Button
 													type="button"
 													size="sm"
-													variant={isSelectedForCue ? "secondary" : "outline"}
+													variant={isCueSourceBlock ? "default" : isSelectedForCue ? "secondary" : "outline"}
 													className="gap-1"
 													onClick={() => toggleCueBlockSelection(block.id)}
 													disabled={isCreatingManualCue || !isExperimentalCondition}
 												>
 													{isSelectedForCue && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-													{isSelectedForCue ? "Selected" : "Select"}
+													{isCueSourceBlock ? "Source" : isSelectedForCue ? "Selected" : "Select"}
 												</Button>
 											</div>
 										</div>
