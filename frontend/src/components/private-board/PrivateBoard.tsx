@@ -3204,7 +3204,7 @@ export function PrivateBoard({
 	};
 
 	const sendPublicChatPayload = useCallback(
-		(message: string, options?: { restoreTextOnFailure?: boolean }) => {
+		(message: string) => {
 			const normalizedMessage = message.trim();
 			if (!normalizedMessage) {
 				return null;
@@ -3245,15 +3245,7 @@ export function PrivateBoard({
 				if (!stillPending) {
 					return;
 				}
-				setPublicChatMessages(prev => {
-					const nextMessages = removePendingPublicChatMessage(prev, clientMessageId);
-					setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
-					return nextMessages;
-				});
-				if (options?.restoreTextOnFailure) {
-					setPublicChatError("公開訊息傳送逾時，請再試一次");
-					setPublicChatText(current => current || sentMessage);
-				}
+				setIsSendingPublicChat(publicChatMessagesRef.current.some(message => message.isOwn && message.isPending && message.clientMessageId !== clientMessageId));
 			}, PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS);
 			return sentMessage;
 		},
@@ -3261,7 +3253,7 @@ export function PrivateBoard({
 	);
 
 	const sendPublicChatMessage = () => {
-		if (sendPublicChatPayload(publicChatText, { restoreTextOnFailure: true })) {
+		if (sendPublicChatPayload(publicChatText)) {
 			setPublicChatText("");
 		}
 	};
