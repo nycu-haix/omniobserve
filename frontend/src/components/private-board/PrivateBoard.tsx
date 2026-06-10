@@ -10,7 +10,7 @@ import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData
 import { Button } from "../ui/Button";
 import { ScrollArea } from "../ui/ScrollArea";
 import { IdeaBlockItem } from "./IdeaBlockItem";
-import { IdeaBlockChatCard, PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
+import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
 
@@ -1092,6 +1092,7 @@ function IdeaBlockChatShareCueContent({
 			{notices.map(notice => {
 				const title = notice.status === "sending" ? "正在送到聊天室" : notice.status === "failed" ? "傳送失敗" : "已送到聊天室";
 				const ideaBlockMessage = parseIdeaBlockChatMessage(notice.message);
+				const preview = ideaBlockMessage ? `Idea block：${ideaBlockMessage.title}` : notice.message.trim();
 				return (
 					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={notice.id} role="status" aria-live="polite">
 						<div className="mb-3 flex items-start gap-2 text-sm">
@@ -1104,11 +1105,9 @@ function IdeaBlockChatShareCueContent({
 							)}
 							<div className="grid min-w-0 gap-2">
 								<span className="font-medium">{title}</span>
-								{ideaBlockMessage ? (
-									<IdeaBlockChatCard parsedMessage={ideaBlockMessage} compact className="max-h-56 shadow-none" />
-								) : (
-									<div className="max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-muted-foreground">{notice.message}</div>
-								)}
+								<div className="truncate rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-muted-foreground" title={preview}>
+									{preview}
+								</div>
 							</div>
 						</div>
 						<div className="flex flex-wrap justify-end gap-2">
