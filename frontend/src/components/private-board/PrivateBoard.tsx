@@ -1202,7 +1202,21 @@ function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMa
 		matchesByBlockId.set(String(match.ideaBlockId), match);
 	}
 	if (matchesByBlockId.size === 0) {
-		return blocks;
+		if (!replaceExisting) {
+			return blocks;
+		}
+		return blocks.map(block => {
+			if (!block.publicContextRelevant) {
+				return block;
+			}
+			return {
+				...block,
+				publicContextRelevant: false,
+				publicContextScore: null,
+				publicContextReason: undefined,
+				publicContextExpiresAtMs: undefined
+			};
+		});
 	}
 
 	return blocks.map(block => {
@@ -1237,18 +1251,6 @@ function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 	return [...blocks].sort((left, right) => {
 		if (!!left.isDeleted !== !!right.isDeleted) {
 			return left.isDeleted ? 1 : -1;
-		}
-
-		if (!!left.publicContextRelevant !== !!right.publicContextRelevant) {
-			return left.publicContextRelevant ? -1 : 1;
-		}
-
-		if (left.publicContextRelevant && right.publicContextRelevant) {
-			const leftScore = left.publicContextScore ?? 0;
-			const rightScore = right.publicContextScore ?? 0;
-			if (leftScore !== rightScore) {
-				return rightScore - leftScore;
-			}
 		}
 
 		if ((left.status === "generating") !== (right.status === "generating")) {
@@ -2219,16 +2221,12 @@ export function PrivateBoard({
 				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
 				if (matchedIds.size > 0 || lastMessage.payload.replaceExisting === true) {
 					const visibleMatchedIds = [...matchedIds].filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
-					captureIdeaBlockPositions();
 					setIdeaBlocks(prev => {
-						const nextBlocks = sortIdeaBlocks(applyPublicContextMatches(prev, lastMessage.payload));
+						const nextBlocks = applyPublicContextMatches(prev, lastMessage.payload);
 						ideaBlocksRef.current = nextBlocks;
 						return nextBlocks;
 					});
-					const firstVisibleMatchId = visibleMatchedIds[0];
-					if (firstVisibleMatchId && visibleActiveTab === "ideablock") {
-						setHighlightedBlockId(firstVisibleMatchId);
-					} else if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
+					if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
 						setUnreadIdeaBlockCount(current => current + visibleMatchedIds.length);
 					}
 				}
