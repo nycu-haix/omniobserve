@@ -1,4 +1,4 @@
-import { Eye, Lightbulb, Send, X } from "lucide-react";
+import { Eye, Lightbulb, UserRound, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
@@ -80,12 +80,10 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 							</div>
 						</div>
 						<div className="flex flex-wrap justify-end gap-2">
-							{isDifferentReason && (
-								<Button className="gap-1.5" size="sm" onClick={() => onShareReason(cue)}>
-									<Send className="h-3.5 w-3.5" />
-									分享我的理由
-								</Button>
-							)}
+							<Button className="gap-1.5" size="sm" title="分享給相似想法對象" onClick={() => onShareReason(cue)}>
+								<UserRound className="h-3.5 w-3.5" />
+								分享我的理由
+							</Button>
 							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue.blockId)}>
 								<Eye className="h-3.5 w-3.5" />
 								查看想法

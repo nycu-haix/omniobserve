@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
@@ -15,6 +15,7 @@ interface IdeaBlockItemProps {
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	onShareToChat?: (block: IdeaBlock) => void;
+	onShareSimilarityReason?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
 	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
@@ -29,6 +30,7 @@ export function IdeaBlockItem({
 	onDelete,
 	onJumpToTranscript,
 	onShareToChat,
+	onShareSimilarityReason,
 	canJumpToTranscript = false,
 	canShareToChat = false,
 	currentPhase = DEFAULT_SESSION_PHASE,
@@ -61,10 +63,13 @@ export function IdeaBlockItem({
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
 	const canShareCurrentBlock = !!onShareToChat && canShareToChat && isGroupPhase(currentPhase) && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shareButtonTitle = isGroupPhase(currentPhase) ? "送到聊天室" : "Public Phase 才能送到聊天室";
+	const shareSimilarityReasonTitle = "分享給相似想法對象";
 	const shouldShowCue = showSimilarityCue && block.hasCue && isGroupPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
 	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+	const shouldShowSimilarityReasonShareAction = shouldShowCue && !isGenerating && !isDeleted;
+	const canShareSimilarityReason = shouldShowSimilarityReasonShareAction && !!onShareSimilarityReason && !!(block.aiSummary?.trim() || block.summary.trim());
 	const hasMixedSimilarityReasons = hasSameSimilarityReason && hasDifferentSimilarityReason;
 	const similarityReasonTag =
 		!hasSameSimilarityReason && !hasDifferentSimilarityReason
@@ -176,6 +181,15 @@ export function IdeaBlockItem({
 		}
 		setShowDeleteConfirm(false);
 		onShareToChat?.(block);
+	};
+
+	const shareSimilarityReason = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!canShareSimilarityReason) {
+			return;
+		}
+		setShowDeleteConfirm(false);
+		onShareSimilarityReason?.(block);
 	};
 
 	const confirmDelete = async () => {
@@ -433,7 +447,7 @@ export function IdeaBlockItem({
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
 					{shouldShowCue && (
-						<div className="flex flex-wrap gap-1.5">
+						<div className="flex flex-wrap items-center gap-1.5">
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
@@ -442,6 +456,20 @@ export function IdeaBlockItem({
 									{similarityReasonTag.label}
 								</Badge>
 							)}
+							{shouldShowSimilarityReasonShareAction && (
+								<Button
+									aria-label="分享我的理由給相似想法對象"
+									className="h-6 gap-1.5 border-yellow-700/30 px-2 text-xs text-yellow-950 hover:bg-yellow-100"
+									size="sm"
+									title={shareSimilarityReasonTitle}
+									variant="outline"
+									onClick={shareSimilarityReason}
+									disabled={!canShareSimilarityReason}
+								>
+									<UserRound className="h-3.5 w-3.5" />
+									分享我的理由
+								</Button>
+							)}
 						</div>
 					)}
 
@@ -449,13 +477,19 @@ export function IdeaBlockItem({
 						<div className="grid gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge className="w-fit border-yellow-700/30 bg-yellow-100 text-yellow-900" variant="outline">
-									匿名分享的不同理由
+									匿名分享的理由
 								</Badge>
 							</div>
 							{sharedReasons.map(reason => (
 								<div className="grid gap-1 border-t border-yellow-700/20 pt-2 first:border-t-0 first:pt-0" key={reason.id}>
 									<div className="flex flex-wrap items-center gap-2 text-xs text-yellow-900">
 										<span className="font-semibold text-yellow-900/70">相似想法</span>
+										<Badge
+											className={cn("w-fit px-1.5 py-0 text-[10px]", reason.isSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900")}
+											variant="outline"
+										>
+											{reason.isSameReason ? "same reason" : "different reason"}
+										</Badge>
 										<span>{reason.title}</span>
 									</div>
 									<p className="whitespace-pre-wrap break-words leading-5 text-yellow-950">{reason.summary}</p>

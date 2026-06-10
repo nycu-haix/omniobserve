@@ -1,31 +1,27 @@
-import json
-import os
-import re
-from dataclasses import dataclass
-from typing import Any
+from collections import OrderedDict
+from dataclasses import dataclass, field
 
-from sqlalchemy import distinct, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..clients import openai_client
-from ..config import OPENAI_MODEL, logger
-from ..models import IdeaBlock, TaskItem
-from .embedding_service import create_text_embedding
-from .task_item_generation import build_task_item_ids_with_llm
-
-PUBLIC_CONTEXT_SIMILARITY_THRESHOLD = 0.74
-PUBLIC_CONTEXT_DISTANCE_THRESHOLD = 1 - PUBLIC_CONTEXT_SIMILARITY_THRESHOLD
-PUBLIC_CONTEXT_MAX_MATCHES = 3
-PUBLIC_CONTEXT_LLM_CANDIDATE_LIMIT = 12
+from ..config import logger
+from ..models import IdeaBlock, PosterIdeaBlockTaskItem, TaskItem
+from ..task_config import get_task_config_for_session
+from .task_item_generation import (
+    build_poster_component_ids_with_llm,
+    build_task_item_ids_by_keyword,
+    build_task_item_ids_with_llm,
+)
 
 
 @dataclass(frozen=True)
 class PublicContextMatch:
     idea_block_id: int
     user_id: int
-    score: float | None
     reason: str
-    task_item_ids: list[int]
+    score: float | None = None
+    task_item_ids: list[int] = field(default_factory=list)
+    component_ids: list[str] = field(default_factory=list)
 
 
 async def find_public_context_matches(
@@ -38,307 +34,197 @@ async def find_public_context_matches(
     if not normalized_text:
         return []
 
-    task_item_ids = await build_task_item_ids_with_llm(normalized_text, session_name=session_name)
+    task_config = get_task_config_for_session(session_name=session_name)
+    if task_config.get("task_id") == "enhance-the-poster":
+        try:
+            component_ids = await build_poster_component_ids_with_llm(normalized_text, session_name=session_name)
+        except Exception as exc:
+            logger.warning(
+                "public_context_component_match_failed session_name=%s error_type=%s error=%s",
+                session_name,
+                exc.__class__.__name__,
+                exc,
+            )
+            component_ids = []
+        if component_ids:
+            component_matches = await _find_same_component_matches(
+                db,
+                session_name=session_name,
+                component_ids=component_ids,
+            )
+            logger.info(
+                "public_context_component_match_done session_name=%s component_ids=%s match_count=%s",
+                session_name,
+                component_ids,
+                len(component_matches),
+            )
+            if component_matches:
+                return component_matches
+
+    task_item_ids = build_task_item_ids_by_keyword(normalized_text, session_name=session_name)
+    if not task_item_ids:
+        try:
+            task_item_ids = await build_task_item_ids_with_llm(normalized_text, session_name=session_name)
+        except Exception as exc:
+            logger.warning(
+                "public_context_task_item_match_failed session_name=%s error_type=%s error=%s",
+                session_name,
+                exc.__class__.__name__,
+                exc,
+            )
+            task_item_ids = []
     if not task_item_ids:
         logger.info(
             "public_context_match_skipped session_name=%s reason=%s text_chars=%s",
             session_name,
-            "no_task_items",
+            "no_component_or_task_items",
             len(normalized_text),
         )
         return []
 
-    candidate_ids = await _find_same_task_item_candidate_ids(
+    task_item_matches = await _find_same_task_item_matches(
         db,
         session_name=session_name,
         task_item_ids=task_item_ids,
     )
-    if not candidate_ids:
-        logger.info(
-            "public_context_match_skipped session_name=%s reason=%s task_item_ids=%s",
-            session_name,
-            "no_same_item_candidates",
-            task_item_ids,
-        )
-        return []
-
-    try:
-        embedding_vector = await create_text_embedding(
-            normalized_text,
-            log_failures=False,
-            retry_attempts=1,
-        )
-    except Exception as exc:
-        logger.info(
-            "public_context_match_embedding_failed session_name=%s fallback=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
-            session_name,
-            "llm_verifier",
-            task_item_ids,
-            len(candidate_ids),
-            exc.__class__.__name__,
-            exc,
-        )
-        return await _find_llm_verified_matches(
-            db,
-            session_name=session_name,
-            public_text=normalized_text,
-            candidate_idea_block_ids=candidate_ids,
-            task_item_ids=task_item_ids,
-        )
-
-    semantic_matches = await _find_semantic_matches(
-        db,
-        session_name=session_name,
-        embedding_vector=embedding_vector,
-        candidate_idea_block_ids=candidate_ids,
-        task_item_ids=task_item_ids,
-    )
-    matches = semantic_matches[:PUBLIC_CONTEXT_MAX_MATCHES]
     logger.info(
-        "public_context_match_done session_name=%s task_item_ids=%s candidate_count=%s semantic_match_count=%s match_count=%s threshold=%s max_matches=%s",
+        "public_context_task_item_match_done session_name=%s task_item_ids=%s match_count=%s",
         session_name,
         task_item_ids,
-        len(candidate_ids),
-        len(semantic_matches),
-        len(matches),
-        PUBLIC_CONTEXT_SIMILARITY_THRESHOLD,
-        PUBLIC_CONTEXT_MAX_MATCHES,
+        len(task_item_matches),
     )
-    return matches
+    return task_item_matches
 
 
-async def _find_same_task_item_candidate_ids(
+async def find_public_context_component_matches(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    component_ids: list[str],
+) -> list[PublicContextMatch]:
+    normalized_component_ids = []
+    seen_component_ids: set[str] = set()
+    for component_id in component_ids:
+        normalized_component_id = str(component_id or "").strip()
+        if not normalized_component_id or normalized_component_id in seen_component_ids:
+            continue
+        seen_component_ids.add(normalized_component_id)
+        normalized_component_ids.append(normalized_component_id)
+    if not normalized_component_ids:
+        return []
+    return await _find_same_component_matches(
+        db,
+        session_name=session_name,
+        component_ids=normalized_component_ids,
+    )
+
+
+async def find_public_context_task_item_matches(
     db: AsyncSession,
     *,
     session_name: str,
     task_item_ids: list[int],
-) -> list[int]:
+) -> list[PublicContextMatch]:
+    normalized_task_item_ids = []
+    seen_task_item_ids: set[int] = set()
+    for task_item_id in task_item_ids:
+        try:
+            normalized_task_item_id = int(task_item_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized_task_item_id <= 0 or normalized_task_item_id in seen_task_item_ids:
+            continue
+        seen_task_item_ids.add(normalized_task_item_id)
+        normalized_task_item_ids.append(normalized_task_item_id)
+    if not normalized_task_item_ids:
+        return []
+    return await _find_same_task_item_matches(
+        db,
+        session_name=session_name,
+        task_item_ids=normalized_task_item_ids,
+    )
+
+
+async def _find_same_component_matches(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    component_ids: list[str],
+) -> list[PublicContextMatch]:
     result = await db.execute(
-        select(distinct(IdeaBlock.id))
+        select(
+            IdeaBlock.id,
+            IdeaBlock.user_id,
+            PosterIdeaBlockTaskItem.component_id,
+        )
+        .join(PosterIdeaBlockTaskItem, PosterIdeaBlockTaskItem.idea_block_id == IdeaBlock.id)
+        .where(
+            IdeaBlock.session_name == session_name,
+            IdeaBlock.is_deleted.is_(False),
+            PosterIdeaBlockTaskItem.component_id.in_(component_ids),
+        )
+        .order_by(IdeaBlock.id.desc(), PosterIdeaBlockTaskItem.component_id.asc())
+    )
+
+    matches_by_block_id: OrderedDict[int, tuple[int, list[str]]] = OrderedDict()
+    for idea_block_id, user_id, component_id in result.all():
+        block_user_id, block_component_ids = matches_by_block_id.setdefault(
+            int(idea_block_id),
+            (int(user_id), []),
+        )
+        if component_id not in block_component_ids:
+            block_component_ids.append(str(component_id))
+        matches_by_block_id[int(idea_block_id)] = (block_user_id, block_component_ids)
+
+    return [
+        PublicContextMatch(
+            idea_block_id=idea_block_id,
+            user_id=user_id,
+            reason="same poster component",
+            component_ids=block_component_ids,
+        )
+        for idea_block_id, (user_id, block_component_ids) in matches_by_block_id.items()
+    ]
+
+
+async def _find_same_task_item_matches(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_item_ids: list[int],
+) -> list[PublicContextMatch]:
+    result = await db.execute(
+        select(
+            IdeaBlock.id,
+            IdeaBlock.user_id,
+            TaskItem.task_item_id,
+        )
         .join(TaskItem, TaskItem.idea_block_id == IdeaBlock.id)
         .where(
             IdeaBlock.session_name == session_name,
             IdeaBlock.is_deleted.is_(False),
             TaskItem.task_item_id.in_(task_item_ids),
         )
-        .order_by(IdeaBlock.id.desc())
+        .order_by(IdeaBlock.id.desc(), TaskItem.task_item_id.asc())
     )
-    return list(result.scalars().all())
 
-
-async def _find_llm_verified_matches(
-    db: AsyncSession,
-    *,
-    session_name: str,
-    public_text: str,
-    candidate_idea_block_ids: list[int],
-    task_item_ids: list[int],
-) -> list[PublicContextMatch]:
-    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not openai_api_key:
-        logger.info(
-            "public_context_match_skipped session_name=%s reason=%s task_item_ids=%s candidate_count=%s",
-            session_name,
-            "embedding_failed_and_openai_missing",
-            task_item_ids,
-            len(candidate_idea_block_ids),
+    matches_by_block_id: OrderedDict[int, tuple[int, list[int]]] = OrderedDict()
+    for idea_block_id, user_id, task_item_id in result.all():
+        block_user_id, block_task_item_ids = matches_by_block_id.setdefault(
+            int(idea_block_id),
+            (int(user_id), []),
         )
-        return []
+        normalized_task_item_id = int(task_item_id)
+        if normalized_task_item_id not in block_task_item_ids:
+            block_task_item_ids.append(normalized_task_item_id)
+        matches_by_block_id[int(idea_block_id)] = (block_user_id, block_task_item_ids)
 
-    candidates = await _find_candidate_blocks(
-        db,
-        candidate_idea_block_ids=candidate_idea_block_ids,
-        limit=PUBLIC_CONTEXT_LLM_CANDIDATE_LIMIT,
-    )
-    if not candidates:
-        return []
-
-    ideas_list = "\n".join(
-        f"- ID: {candidate.id}\n  Summary: {_truncate(candidate.summary)}"
-        for candidate in candidates
-    )
-    system_prompt = """
-You decide which private idea blocks are currently relevant to a live public discussion.
-
-Select a candidate only when the public discussion and the idea block describe the same concrete poster-improvement issue, compatible edit direction, or directly connected design rationale.
-
-Do not select a candidate merely because it mentions the same broad poster component or task item.
-Do not select generic matches where the public discussion and idea block would not help the participant join the current conversation.
-
-Return JSON only in this shape:
-{"matches":[{"id":123,"reason":"brief reason"}]}
-
-Return at most 3 matches. If none are genuinely relevant, return {"matches":[]}.
-""".strip()
-    user_prompt = f"""
-# Public discussion context
-{public_text}
-
-# Candidate idea blocks
-{ideas_list}
-""".strip()
-
-    try:
-        completion = await openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
-            temperature=0,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        raw_content = completion.choices[0].message.content or "{}"
-        parsed = _parse_llm_json_payload(raw_content)
-    except Exception as exc:
-        logger.info(
-            "public_context_match_skipped session_name=%s reason=%s task_item_ids=%s candidate_count=%s error_type=%s error=%s",
-            session_name,
-            "llm_fallback_failed",
-            task_item_ids,
-            len(candidates),
-            exc.__class__.__name__,
-            exc,
-        )
-        return []
-
-    matches = _normalize_llm_matches(parsed, candidates=candidates, task_item_ids=task_item_ids)
-    logger.info(
-        "public_context_match_llm_fallback_done session_name=%s task_item_ids=%s candidate_count=%s match_count=%s max_matches=%s",
-        session_name,
-        task_item_ids,
-        len(candidates),
-        len(matches),
-        PUBLIC_CONTEXT_MAX_MATCHES,
-    )
-    return matches
-
-
-async def _find_candidate_blocks(
-    db: AsyncSession,
-    *,
-    candidate_idea_block_ids: list[int],
-    limit: int,
-) -> list[IdeaBlock]:
-    result = await db.execute(
-        select(IdeaBlock)
-        .where(
-            IdeaBlock.id.in_(candidate_idea_block_ids),
-            IdeaBlock.is_deleted.is_(False),
-        )
-        .order_by(IdeaBlock.id.desc())
-        .limit(limit)
-    )
-    return list(result.scalars().all())
-
-
-async def _find_semantic_matches(
-    db: AsyncSession,
-    *,
-    session_name: str,
-    embedding_vector: list[float],
-    candidate_idea_block_ids: list[int],
-    task_item_ids: list[int],
-) -> list[PublicContextMatch]:
-    distance = IdeaBlock.embedding_vector.cosine_distance(embedding_vector)
-    similarity_score = (1 - distance).label("similarity_score")
-    result = await db.execute(
-        select(IdeaBlock, similarity_score)
-        .where(
-            IdeaBlock.session_name == session_name,
-            IdeaBlock.is_deleted.is_(False),
-            IdeaBlock.id.in_(candidate_idea_block_ids),
-            IdeaBlock.embedding_vector.is_not(None),
-            distance < PUBLIC_CONTEXT_DISTANCE_THRESHOLD,
-        )
-        .order_by(similarity_score.desc(), IdeaBlock.id.desc())
-    )
     return [
         PublicContextMatch(
-            idea_block_id=idea_block.id,
-            user_id=idea_block.user_id,
-            score=float(similarity),
-            reason="same task item + semantic similarity",
-            task_item_ids=task_item_ids,
+            idea_block_id=idea_block_id,
+            user_id=user_id,
+            reason="same task item",
+            task_item_ids=block_task_item_ids,
         )
-        for idea_block, similarity in result.all()
+        for idea_block_id, (user_id, block_task_item_ids) in matches_by_block_id.items()
     ]
-
-
-def _normalize_llm_matches(
-    parsed: Any,
-    *,
-    candidates: list[IdeaBlock],
-    task_item_ids: list[int],
-) -> list[PublicContextMatch]:
-    if not isinstance(parsed, dict):
-        return []
-    raw_matches = parsed.get("matches")
-    if not isinstance(raw_matches, list):
-        return []
-
-    candidates_by_id = {candidate.id: candidate for candidate in candidates}
-    matches: list[PublicContextMatch] = []
-    seen_ids: set[int] = set()
-    for raw_match in raw_matches:
-        if not isinstance(raw_match, dict):
-            continue
-        match_id = raw_match.get("id")
-        if isinstance(match_id, str) and match_id.isdigit():
-            match_id = int(match_id)
-        if not isinstance(match_id, int) or match_id in seen_ids:
-            continue
-        candidate = candidates_by_id.get(match_id)
-        if candidate is None:
-            continue
-        seen_ids.add(match_id)
-        reason = str(raw_match.get("reason") or "same task item + LLM relevance").strip()
-        matches.append(
-            PublicContextMatch(
-                idea_block_id=candidate.id,
-                user_id=candidate.user_id,
-                score=None,
-                reason=f"same task item + LLM relevance: {reason}",
-                task_item_ids=task_item_ids,
-            )
-        )
-        if len(matches) >= PUBLIC_CONTEXT_MAX_MATCHES:
-            break
-
-    return matches
-
-
-def _parse_llm_json_payload(raw_content: str) -> Any:
-    text = raw_content.strip()
-    if not text:
-        return {}
-
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
-        text = re.sub(r"\s*```$", "", text).strip()
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    start = text.find("{")
-    if start == -1:
-        return {}
-    sliced = text[start:]
-    for end in range(len(sliced), 0, -1):
-        candidate = sliced[:end].strip()
-        if not candidate:
-            continue
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-    return {}
-
-
-def _truncate(text: str, limit: int = 300) -> str:
-    value = text.strip()
-    if len(value) <= limit:
-        return value
-    return f"{value[:limit].rstrip()}..."

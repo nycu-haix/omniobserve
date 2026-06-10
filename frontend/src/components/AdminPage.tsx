@@ -1,4 +1,4 @@
-import { AlertCircle, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -13,7 +13,7 @@ import {
 	type SessionPhaseOption
 } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
-import { apiUrl, fetchTaskConfig, type TaskConfigItem } from "../services/api";
+import { apiUrl, fetchTaskConfig, type Phase1BuilderOption, type TaskConfigItem } from "../services/api";
 import type { ParticipantPresence } from "../services/presence";
 import type { PublicChatMessage } from "../types";
 import { PublicChatComposer, PublicChatMessages } from "./private-board/PublicChatPanel";
@@ -107,6 +107,34 @@ interface IdeaBlocksUpdateMessage extends RealtimeMessage {
 	idea_blocks?: unknown;
 }
 
+interface PublicContextComponentStateMessage extends RealtimeMessage {
+	type: "public_context_component_state";
+	componentIds?: unknown;
+	component_ids?: unknown;
+	taskItemIds?: unknown;
+	task_item_ids?: unknown;
+	source?: unknown;
+	matchCount?: unknown;
+	match_count?: unknown;
+	deliveredCount?: unknown;
+	delivered_count?: unknown;
+}
+
+type PublicNowTarget =
+	| {
+			kind: "component";
+			id: string;
+			label: string;
+			title: string;
+	  }
+	| {
+			kind: "task_item";
+			id: string;
+			taskItemId: number;
+			label: string;
+			title: string;
+	  };
+
 interface LatestParticipantTranscript {
 	scope: string;
 	text: string;
@@ -138,6 +166,16 @@ interface PublicChatMessagePayload {
 type CueCondition = "experimental" | "control";
 type AdminTab = "ranking" | "transcript" | "chat";
 type ManualCueReasonType = "same" | "different";
+type SimilarityReasonKind = "same" | "different" | "mixed";
+type PublicNowSource = "auto" | "manual" | "manual_clear" | string;
+
+interface SimilarityLink {
+	id: number;
+	relatedBlockId: number;
+	relatedSummary: string;
+	isSameReason: boolean;
+	reason: string;
+}
 
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
@@ -154,6 +192,16 @@ const MANUAL_CUE_REASON_PREFIX = "Manual cue from admin:";
 const MANUAL_CUE_REASON_LABELS: Record<ManualCueReasonType, string> = {
 	same: "Same reason",
 	different: "Different reason"
+};
+const SIMILARITY_REASON_LABELS: Record<SimilarityReasonKind, string> = {
+	same: "same reason",
+	different: "different reason",
+	mixed: "same + different"
+};
+const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
+	same: "border-green-700/30 bg-green-100 text-green-900",
+	different: "border-yellow-700/30 bg-yellow-100 text-yellow-900",
+	mixed: "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
 };
 
 function getAdminAvailableLayoutWidth() {
@@ -247,6 +295,35 @@ function matchesQuery(value: string | null | undefined, query: string) {
 	return !query || (value || "").toLowerCase().includes(query);
 }
 
+function getSimilarityReasonKind(hasSameReason: boolean, hasDifferentReason: boolean): SimilarityReasonKind | null {
+	if (hasSameReason && hasDifferentReason) {
+		return "mixed";
+	}
+	if (hasSameReason) {
+		return "same";
+	}
+	if (hasDifferentReason) {
+		return "different";
+	}
+	return null;
+}
+
+function getSimilarityReasonTagLabel(kind: SimilarityReasonKind, count?: number) {
+	const countText = count && count > 1 ? ` ${count}` : "";
+	return `${SIMILARITY_REASON_LABELS[kind]}${countText}`;
+}
+
+function getSimilarityPeerSummary(similarity: SimilarityRecord, currentBlockId: number) {
+	if (similarity.idea_block_id_1 === currentBlockId) {
+		return similarity.idea_block_2.summary || "Idea block";
+	}
+	return similarity.idea_block_1.summary || "Idea block";
+}
+
+function getManualCuePairCount(selectedBlockCount: number) {
+	return Math.max(0, selectedBlockCount - 1);
+}
+
 function isBoardStateMessage(message: RealtimeMessage | null): message is BoardStateMessage {
 	return message?.type === "board_state";
 }
@@ -272,6 +349,44 @@ function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
+function normalizeStringList(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+	value.forEach(item => {
+		const id = String(item ?? "").trim();
+		if (!id || seen.has(id)) {
+			return;
+		}
+		seen.add(id);
+		normalized.push(id);
+	});
+	return normalized;
+}
+
+function normalizeNumberList(value: unknown): number[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set<number>();
+	const normalized: number[] = [];
+	value.forEach(item => {
+		const id = Number(item);
+		if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
+			return;
+		}
+		seen.add(id);
+		normalized.push(id);
+	});
+	return normalized;
+}
+
+function normalizeNumberValue(value: unknown, fallback: number) {
+	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {
 	if (message?.type !== "admin_ranking_state" || !isRankingSnapshot(message.public_ranking)) {
 		return false;
@@ -295,6 +410,10 @@ function isPresenceStateMessage(message: RealtimeMessage | null): message is Pre
 
 function isIdeaBlocksUpdateMessage(message: RealtimeMessage | null): message is IdeaBlocksUpdateMessage {
 	return message?.type === "idea_blocks_update" && Array.isArray(message.idea_blocks);
+}
+
+function isPublicContextComponentStateMessage(message: RealtimeMessage | null): message is PublicContextComponentStateMessage {
+	return message?.type === "public_context_component_state";
 }
 
 function normalizePresenceParticipant(item: unknown): ParticipantPresence | null {
@@ -665,6 +784,7 @@ export function AdminPage() {
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
 	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
+	const [phase1Components, setPhase1Components] = useState<Phase1BuilderOption[]>([]);
 	const [query, setQuery] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<number | "all">("all");
 	const [selectedCueBlockIds, setSelectedCueBlockIds] = useState<number[]>([]);
@@ -672,6 +792,13 @@ export function AdminPage() {
 	const [isCreatingManualCue, setIsCreatingManualCue] = useState(false);
 	const [undoingManualCueId, setUndoingManualCueId] = useState<number | null>(null);
 	const [manualCueError, setManualCueError] = useState<string | null>(null);
+	const [publicNowComponentIds, setPublicNowComponentIds] = useState<string[]>([]);
+	const [publicNowTaskItemIds, setPublicNowTaskItemIds] = useState<number[]>([]);
+	const [publicNowSource, setPublicNowSource] = useState<PublicNowSource | null>(null);
+	const [publicNowMatchCount, setPublicNowMatchCount] = useState(0);
+	const [publicNowDeliveredCount, setPublicNowDeliveredCount] = useState(0);
+	const [isSettingPublicNow, setIsSettingPublicNow] = useState(false);
+	const [publicNowError, setPublicNowError] = useState<string | null>(null);
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [taskPhases, setTaskPhases] = useState<SessionPhaseOption[]>(DEFAULT_SESSION_PHASE_OPTIONS);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
@@ -687,8 +814,46 @@ export function AdminPage() {
 	});
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | null>(null);
 	const [rankingsCopied, setRankingsCopied] = useState(false);
+	const [highlightedIdeaBlockIds, setHighlightedIdeaBlockIds] = useState<number[]>([]);
+	const [pendingJumpBlockIds, setPendingJumpBlockIds] = useState<number[]>([]);
+	const ideaBlockRefs = useRef(new Map<number, HTMLElement>());
+	const jumpHighlightTimerRef = useRef<number | null>(null);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
 	const defaultRankingItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
+	const phase1ComponentById = useMemo(() => new Map(phase1Components.map(component => [component.id, component])), [phase1Components]);
+	const publicNowTaskItemTargets = useMemo<PublicNowTarget[]>(
+		() =>
+			taskItems.map((item, index) => {
+				const label = item.label_zh || item.label || item.label_en || item.id;
+				return {
+					kind: "task_item",
+					id: item.id,
+					taskItemId: index + 1,
+					label,
+					title: item.label_en ? `${label} / ${item.label_en}` : label
+				};
+			}),
+		[taskItems]
+	);
+	const publicNowTaskItemTargetById = useMemo(
+		() => new Map(publicNowTaskItemTargets.filter((target): target is Extract<PublicNowTarget, { kind: "task_item" }> => target.kind === "task_item").map(target => [target.taskItemId, target])),
+		[publicNowTaskItemTargets]
+	);
+	const publicNowTargets = useMemo<PublicNowTarget[]>(
+		() =>
+			phase1Components.length > 0
+				? phase1Components.map(component => {
+						const label = component.label_zh || component.label_en || component.id;
+						return {
+							kind: "component",
+							id: component.id,
+							label,
+							title: component.label_en ? `${label} / ${component.label_en}` : label
+						};
+					})
+				: publicNowTaskItemTargets,
+		[phase1Components, publicNowTaskItemTargets]
+	);
 	const participantNameById = useMemo(() => {
 		const nextParticipantNameById = new Map<string, string>();
 		participants.forEach(participant => {
@@ -783,6 +948,19 @@ export function AdminPage() {
 		const nextCueCondition = normalizeCueCondition(message.cue_condition) ?? normalizeCueCondition(message.condition);
 		if (nextCueCondition) {
 			setCueCondition(nextCueCondition);
+		}
+		if (isPublicContextComponentStateMessage(message)) {
+			setPublicNowComponentIds(normalizeStringList(message.componentIds ?? message.component_ids));
+			setPublicNowTaskItemIds(normalizeNumberList(message.taskItemIds ?? message.task_item_ids));
+			setPublicNowSource(typeof message.source === "string" ? message.source : null);
+			setPublicNowMatchCount(normalizeNumberValue(message.matchCount ?? message.match_count, 0));
+			setPublicNowDeliveredCount(normalizeNumberValue(message.deliveredCount ?? message.delivered_count, 0));
+			setIsSettingPublicNow(false);
+			setPublicNowError(null);
+		}
+		if (message.type === "public_context_component_error") {
+			setIsSettingPublicNow(false);
+			setPublicNowError(typeof message.reason === "string" ? message.reason : "NOW component update failed");
 		}
 
 		if (isBoardStateMessage(message)) {
@@ -898,6 +1076,7 @@ export function AdminPage() {
 			try {
 				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				setTaskItems(taskConfig.items);
+				setPhase1Components(taskConfig.phase1_builder?.components ?? []);
 				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
 				setTaskPhases(nextTaskPhases);
 				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
@@ -1032,13 +1211,42 @@ export function AdminPage() {
 		sendAdminMessage({ type: "set_cue_condition", condition });
 		setCueCondition(condition);
 	};
+	const setPublicNowTargets = ({ componentIds = [], taskItemIds = [] }: { componentIds?: string[]; taskItemIds?: number[] }) => {
+		if (isSettingPublicNow) {
+			return;
+		}
+		setIsSettingPublicNow(true);
+		setPublicNowError(null);
+		sendAdminMessage({
+			type: "set_public_context_components",
+			componentIds,
+			taskItemIds,
+			clear: componentIds.length === 0 && taskItemIds.length === 0
+		});
+		window.setTimeout(() => {
+			setIsSettingPublicNow(false);
+		}, 5000);
+	};
+	const selectPublicNowTarget = (target: PublicNowTarget) => {
+		if (target.kind === "component") {
+			setPublicNowTargets({ componentIds: [target.id] });
+			return;
+		}
+		setPublicNowTargets({ taskItemIds: [target.taskItemId] });
+	};
+	const clearPublicNowTargets = () => {
+		if (publicNowComponentIds.length === 0 && publicNowTaskItemIds.length === 0) {
+			return;
+		}
+		setPublicNowTargets({});
+	};
 	const toggleCueBlockSelection = (blockId: number) => {
 		setManualCueError(null);
 		setSelectedCueBlockIds(current => {
 			if (current.includes(blockId)) {
 				return current.filter(id => id !== blockId);
 			}
-			return [...current, blockId].slice(-2);
+			return [...current, blockId];
 		});
 	};
 	const publicRankingSnapshot =
@@ -1104,6 +1312,15 @@ export function AdminPage() {
 
 	const isExperimentalCondition = cueCondition === "experimental";
 	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
+	const activePublicNowComponents = publicNowComponentIds.map(componentId => phase1ComponentById.get(componentId)).filter((component): component is Phase1BuilderOption => !!component);
+	const activePublicNowTaskItems = publicNowTaskItemIds
+		.map(taskItemId => publicNowTaskItemTargetById.get(taskItemId))
+		.filter((target): target is Extract<PublicNowTarget, { kind: "task_item" }> => !!target);
+	const activePublicNowLabels = [...activePublicNowComponents.map(component => component.label_zh || component.label_en || component.id), ...activePublicNowTaskItems.map(target => target.label)];
+	const publicNowTargetCount = publicNowComponentIds.length + publicNowTaskItemIds.length;
+	const publicNowLabel =
+		activePublicNowLabels.length > 0 ? activePublicNowLabels.join(" + ") : publicNowTargetCount > 0 ? [...publicNowComponentIds, ...publicNowTaskItemIds.map(String)].join(" + ") : "尚未指定";
+	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -1118,6 +1335,43 @@ export function AdminPage() {
 		ideaBlocks.forEach(item => ids.add(item.user_id));
 		return [...ids].sort((a, b) => a - b);
 	}, [ideaBlocks, participants, transcripts]);
+	const ideaBlockById = useMemo(() => new Map(ideaBlocks.map(block => [block.id, block])), [ideaBlocks]);
+	const similarityLinksByBlockId = useMemo(() => {
+		const linksByBlockId = new Map<number, SimilarityLink[]>();
+		const addLink = (blockId: number, link: SimilarityLink) => {
+			const nextLinks = linksByBlockId.get(blockId) ?? [];
+			nextLinks.push(link);
+			linksByBlockId.set(blockId, nextLinks);
+		};
+
+		similarities.forEach(similarity => {
+			const firstBlock = ideaBlockById.get(similarity.idea_block_id_1);
+			const secondBlock = ideaBlockById.get(similarity.idea_block_id_2);
+			if (!firstBlock || !secondBlock) {
+				return;
+			}
+
+			addLink(similarity.idea_block_id_1, {
+				id: similarity.id,
+				relatedBlockId: similarity.idea_block_id_2,
+				relatedSummary: getSimilarityPeerSummary(similarity, similarity.idea_block_id_1),
+				isSameReason: similarity.is_same_reason,
+				reason: similarity.reason
+			});
+			addLink(similarity.idea_block_id_2, {
+				id: similarity.id,
+				relatedBlockId: similarity.idea_block_id_1,
+				relatedSummary: getSimilarityPeerSummary(similarity, similarity.idea_block_id_2),
+				isSameReason: similarity.is_same_reason,
+				reason: similarity.reason
+			});
+		});
+
+		linksByBlockId.forEach(links => {
+			links.sort((a, b) => b.id - a.id || b.relatedBlockId - a.relatedBlockId);
+		});
+		return linksByBlockId;
+	}, [ideaBlockById, similarities]);
 	const filteredTranscripts = transcripts
 		.filter(item => selectedUserId === "all" || item.user_id === selectedUserId)
 		.filter(item => matchesQuery(item.transcript, normalizedQuery))
@@ -1127,41 +1381,109 @@ export function AdminPage() {
 		.filter(item => matchesQuery(`${item.title || ""}\n${item.summary || ""}\n${item.transcript || ""}`, normalizedQuery))
 		.sort((a, b) => b.id - a.id);
 	const selectedCueBlocks = selectedCueBlockIds.map(blockId => ideaBlocks.find(block => block.id === blockId)).filter((block): block is IdeaBlockRecord => !!block);
+	const selectedCueSourceBlock = selectedCueBlocks[0] ?? null;
+	const selectedCueTargetBlocks = selectedCueBlocks.slice(1);
+	const manualCuePairCount = getManualCuePairCount(selectedCueBlocks.length);
 	const manualCueHistory = similarities
 		.filter(similarity => similarity.reason.includes(MANUAL_CUE_REASON_PREFIX))
 		.sort((a, b) => b.id - a.id)
 		.slice(0, 6);
+	const registerIdeaBlockRef = useCallback((blockId: number, node: HTMLElement | null) => {
+		if (node) {
+			ideaBlockRefs.current.set(blockId, node);
+		} else {
+			ideaBlockRefs.current.delete(blockId);
+		}
+	}, []);
+	const jumpToIdeaBlocks = useCallback(
+		(blockIds: number[]) => {
+			const uniqueBlockIds = [...new Set(blockIds)].filter(blockId => ideaBlockById.has(blockId));
+			if (uniqueBlockIds.length === 0) {
+				return;
+			}
+
+			setSelectedUserId("all");
+			setQuery("");
+			setHighlightedIdeaBlockIds(uniqueBlockIds);
+			setPendingJumpBlockIds(uniqueBlockIds);
+			if (jumpHighlightTimerRef.current !== null) {
+				window.clearTimeout(jumpHighlightTimerRef.current);
+			}
+			jumpHighlightTimerRef.current = window.setTimeout(() => {
+				setHighlightedIdeaBlockIds([]);
+				jumpHighlightTimerRef.current = null;
+			}, 4500);
+		},
+		[ideaBlockById]
+	);
+
+	useEffect(() => {
+		return () => {
+			if (jumpHighlightTimerRef.current !== null) {
+				window.clearTimeout(jumpHighlightTimerRef.current);
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		if (pendingJumpBlockIds.length === 0) {
+			return;
+		}
+
+		const frame = window.requestAnimationFrame(() => {
+			const target = pendingJumpBlockIds.map(blockId => ideaBlockRefs.current.get(blockId)).find((node): node is HTMLElement => !!node);
+			target?.scrollIntoView({ block: "center", behavior: "smooth" });
+			setPendingJumpBlockIds([]);
+		});
+
+		return () => window.cancelAnimationFrame(frame);
+	}, [filteredIdeaBlocks, pendingJumpBlockIds]);
 	const createManualCue = async () => {
-		if (selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition) {
+		if (!selectedCueSourceBlock || selectedCueTargetBlocks.length === 0 || isCreatingManualCue || !isExperimentalCondition) {
 			return;
 		}
 
 		setIsCreatingManualCue(true);
 		setManualCueError(null);
 		try {
-			const [firstBlock, secondBlock] = selectedCueBlocks;
 			const isSameReason = manualCueReasonType === "same";
-			const response = await fetch(buildSessionApiUrl(roomName, "/similarities"), {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					idea_block_id_1: firstBlock.id,
-					idea_block_id_2: secondBlock.id,
-					reason: `${MANUAL_CUE_REASON_PREFIX} ${MANUAL_CUE_REASON_LABELS[manualCueReasonType].toLowerCase()} idea block #${firstBlock.id} and #${secondBlock.id}`,
-					is_same_reason: isSameReason
-				})
+			const batchBlockIds = selectedCueBlocks.map(block => block.id);
+			const cueRequests = selectedCueTargetBlocks.map(async targetBlock => {
+				const response = await fetch(buildSessionApiUrl(roomName, "/similarities"), {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						idea_block_id_1: selectedCueSourceBlock.id,
+						idea_block_id_2: targetBlock.id,
+						reason: [
+							`${MANUAL_CUE_REASON_PREFIX} ${MANUAL_CUE_REASON_LABELS[manualCueReasonType].toLowerCase()} source idea block #${selectedCueSourceBlock.id} and related idea block #${targetBlock.id}`,
+							batchBlockIds.length > 2 ? `batch ${batchBlockIds.map(id => `#${id}`).join(", ")}` : null
+						]
+							.filter(Boolean)
+							.join("; "),
+						is_same_reason: isSameReason
+					})
+				});
+
+				if (!response.ok) {
+					throw new Error(`Failed to create manual cue #${selectedCueSourceBlock.id} ↔ #${targetBlock.id} (${response.status})`);
+				}
+
+				return (await response.json()) as SimilarityRecord;
 			});
-
-			if (!response.ok) {
-				throw new Error(`Failed to create manual cue (${response.status})`);
+			const results = await Promise.allSettled(cueRequests);
+			const createdSimilarities = results.flatMap(result => (result.status === "fulfilled" ? [result.value] : []));
+			const failedResults = results.filter(result => result.status === "rejected");
+			if (createdSimilarities.length > 0) {
+				setSimilarities(current => upsertById(current, createdSimilarities));
 			}
-
-			await response.json();
-			setIdeaBlocks(current =>
-				current.map(block => (block.id === firstBlock.id ? { ...block, similarity_id: secondBlock.id } : block.id === secondBlock.id ? { ...block, similarity_id: firstBlock.id } : block))
-			);
-			// Removed recordEvent call for local state since events are not tracked anymore
-			setSelectedCueBlockIds([]);
+			if (failedResults.length > 0) {
+				const firstFailure = failedResults[0];
+				const detail = firstFailure.status === "rejected" && firstFailure.reason instanceof Error ? firstFailure.reason.message : "Unknown error";
+				setManualCueError(`Created ${createdSimilarities.length}/${cueRequests.length} cues. ${detail}`);
+			} else {
+				setSelectedCueBlockIds([]);
+			}
 			void loadAdminApiData();
 		} catch (error) {
 			setManualCueError(error instanceof Error ? error.message : String(error));
@@ -1380,6 +1702,54 @@ export function AdminPage() {
 
 					<section className="rounded-lg border bg-card p-4 text-card-foreground">
 						<header className="mb-3 flex items-center gap-2">
+							<Radio className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Public NOW</h2>
+						</header>
+						<div className="grid gap-3">
+							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+								<div className="min-w-0">
+									<div className="truncate font-medium">{publicNowLabel}</div>
+									<div className="text-xs text-muted-foreground">
+										{publicNowSourceLabel} · {publicNowMatchCount} blocks · {publicNowDeliveredCount} boards
+									</div>
+								</div>
+								<Badge variant={publicNowTargetCount > 0 ? "secondary" : "outline"}>{publicNowTargetCount > 0 ? "NOW" : "none"}</Badge>
+							</div>
+							{publicNowTargets.length > 0 ? (
+								<div className="flex flex-wrap gap-2">
+									{publicNowTargets.map(target => {
+										const isSelected = target.kind === "component" ? publicNowComponentIds.includes(target.id) : publicNowTaskItemIds.includes(target.taskItemId);
+										return (
+											<Button
+												key={`${target.kind}-${target.id}`}
+												type="button"
+												size="sm"
+												variant={isSelected ? "default" : "outline"}
+												className="h-8 max-w-full px-2 text-xs"
+												onClick={() => selectPublicNowTarget(target)}
+												disabled={isSettingPublicNow || !adminConnected}
+												title={target.title}
+											>
+												<span className="truncate">{target.label}</span>
+											</Button>
+										);
+									})}
+								</div>
+							) : (
+								<p className="rounded-md border border-dashed bg-background p-3 text-xs leading-5 text-muted-foreground">這個 task 沒有可手動指定的 NOW target。</p>
+							)}
+							<div className="flex items-center justify-between gap-2">
+								<Button type="button" size="sm" variant="secondary" onClick={clearPublicNowTargets} disabled={isSettingPublicNow || !adminConnected || publicNowTargetCount === 0}>
+									Clear NOW
+								</Button>
+								{isSettingPublicNow && <span className="text-xs text-muted-foreground">Updating...</span>}
+							</div>
+							{publicNowError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{publicNowError}</p>}
+						</div>
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
 							<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 							<h2 className="text-sm font-semibold">Presence</h2>
 						</header>
@@ -1492,8 +1862,8 @@ export function AdminPage() {
 								{!isExperimentalCondition
 									? "Control condition: similarity cues are disabled"
 									: selectedCueBlocks.length > 0
-										? selectedCueBlocks.map(block => `#${block.id} ${getParticipantLabel(block.user_id)}`).join(" + ")
-										: "Select 2 idea blocks to cue together"}
+										? `${selectedCueSourceBlock ? `Source #${selectedCueSourceBlock.id} ${getParticipantLabel(selectedCueSourceBlock.user_id)}` : ""}${selectedCueTargetBlocks.length > 0 ? ` → ${selectedCueTargetBlocks.map(block => `#${block.id} ${getParticipantLabel(block.user_id)}`).join(" + ")}` : " → select related blocks"}`
+										: "Select a source block, then one or more related blocks"}
 							</p>
 						</div>
 						<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -1524,9 +1894,9 @@ export function AdminPage() {
 									Clear
 								</Button>
 							)}
-							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={selectedCueBlocks.length !== 2 || isCreatingManualCue || !isExperimentalCondition}>
+							<Button type="button" size="sm" className="gap-2" onClick={() => void createManualCue()} disabled={manualCuePairCount === 0 || isCreatingManualCue || !isExperimentalCondition}>
 								<Link2 className="h-3.5 w-3.5" aria-hidden="true" />
-								{isCreatingManualCue ? "Sending" : "Send cue"}
+								{isCreatingManualCue ? "Sending" : manualCuePairCount > 1 ? `Send ${manualCuePairCount} cues` : "Send cue"}
 							</Button>
 						</div>
 						{manualCueError && <p className="basis-full text-xs text-destructive">{manualCueError}</p>}
@@ -1548,14 +1918,8 @@ export function AdminPage() {
 												<span className="min-w-0 truncate">
 													#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
 												</span>
-												<Badge
-													variant="outline"
-													className={cn(
-														"shrink-0 px-1.5 py-0 text-[10px]",
-														similarity.is_same_reason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900"
-													)}
-												>
-													{similarity.is_same_reason ? MANUAL_CUE_REASON_LABELS.same : MANUAL_CUE_REASON_LABELS.different}
+												<Badge variant="outline" className={cn("shrink-0 px-1.5 py-0 text-[10px]", SIMILARITY_REASON_TAG_CLASSES[similarity.is_same_reason ? "same" : "different"])}>
+													{SIMILARITY_REASON_LABELS[similarity.is_same_reason ? "same" : "different"]}
 												</Badge>
 											</div>
 											<div
@@ -1580,8 +1944,24 @@ export function AdminPage() {
 						<div className="grid gap-3">
 							{filteredIdeaBlocks.map(block => {
 								const isSelectedForCue = selectedCueBlockIds.includes(block.id);
+								const cueSelectionIndex = selectedCueBlockIds.indexOf(block.id);
+								const isCueSourceBlock = cueSelectionIndex === 0;
+								const similarityLinks = similarityLinksByBlockId.get(block.id) ?? [];
+								const sameReasonLinks = similarityLinks.filter(link => link.isSameReason);
+								const differentReasonLinks = similarityLinks.filter(link => !link.isSameReason);
+								const similarityReasonKind = getSimilarityReasonKind(sameReasonLinks.length > 0, differentReasonLinks.length > 0);
+								const relatedBlockIds = similarityLinks.map(link => link.relatedBlockId);
+								const isHighlightedAsJumpTarget = highlightedIdeaBlockIds.includes(block.id);
 								return (
-									<article key={block.id} className={cn("rounded-lg border bg-background p-3 transition-colors", isSelectedForCue && "border-primary bg-primary/5")}>
+									<article
+										key={block.id}
+										ref={node => registerIdeaBlockRef(block.id, node)}
+										className={cn(
+											"scroll-mt-4 rounded-lg border bg-background p-3 transition-colors transition-shadow",
+											isSelectedForCue && "border-primary bg-primary/5",
+											isHighlightedAsJumpTarget && "ring-2 ring-lime-500 ring-offset-2 ring-offset-background"
+										)}
+									>
 										<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 											<div className="flex min-w-0 items-center gap-2">
 												<Badge variant="outline" title={`Participant ID ${block.user_id}`}>
@@ -1590,22 +1970,63 @@ export function AdminPage() {
 												<span className="truncate text-sm font-medium">idea block #{block.id}</span>
 											</div>
 											<div className="flex items-center gap-2">
-												{block.similarity_id && <Badge variant="secondary">similarity</Badge>}
+												{similarityReasonKind ? (
+													<button
+														type="button"
+														className={cn(
+															"inline-flex h-7 max-w-full shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+															SIMILARITY_REASON_TAG_CLASSES[similarityReasonKind]
+														)}
+														title={`Jump to ${relatedBlockIds.length} related idea block${relatedBlockIds.length > 1 ? "s" : ""}`}
+														onClick={() => jumpToIdeaBlocks(relatedBlockIds)}
+													>
+														<Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+														<span className="truncate">{getSimilarityReasonTagLabel(similarityReasonKind, similarityLinks.length)}</span>
+													</button>
+												) : (
+													block.similarity_id && <Badge variant="secondary">similarity</Badge>
+												)}
 												<Button
 													type="button"
 													size="sm"
-													variant={isSelectedForCue ? "secondary" : "outline"}
+													variant={isCueSourceBlock ? "default" : isSelectedForCue ? "secondary" : "outline"}
 													className="gap-1"
 													onClick={() => toggleCueBlockSelection(block.id)}
 													disabled={isCreatingManualCue || !isExperimentalCondition}
 												>
 													{isSelectedForCue && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-													{isSelectedForCue ? "Selected" : "Select"}
+													{isCueSourceBlock ? "Source" : isSelectedForCue ? "Selected" : "Select"}
 												</Button>
 											</div>
 										</div>
 										<p className="text-sm font-semibold leading-6">{block.title || block.summary || "-"}</p>
 										{block.summary && block.summary !== block.title && <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{block.summary}</p>}
+										{similarityLinks.length > 0 && (
+											<div className="mt-3 flex flex-wrap gap-1.5" aria-label={`Similarity cue links for idea block ${block.id}`}>
+												{similarityLinks.map(link => {
+													const linkKind: SimilarityReasonKind = link.isSameReason ? "same" : "different";
+													const relatedBlock = ideaBlockById.get(link.relatedBlockId);
+													const relatedParticipantLabel = relatedBlock ? getParticipantLabel(relatedBlock.user_id) : "Unknown participant";
+													return (
+														<button
+															key={link.id}
+															type="button"
+															className={cn(
+																"inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+																SIMILARITY_REASON_TAG_CLASSES[linkKind]
+															)}
+															title={`${SIMILARITY_REASON_LABELS[linkKind]} cue to idea block #${link.relatedBlockId}: ${link.relatedSummary}`}
+															onClick={() => jumpToIdeaBlocks([link.relatedBlockId])}
+														>
+															<span className="shrink-0">{SIMILARITY_REASON_LABELS[linkKind]}</span>
+															<ArrowRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+															<span className="shrink-0 font-mono">#{link.relatedBlockId}</span>
+															<span className="min-w-0 max-w-36 truncate font-medium">{relatedParticipantLabel}</span>
+														</button>
+													);
+												})}
+											</div>
+										)}
 										{block.transcript && <p className="mt-3 whitespace-pre-wrap border-t pt-3 text-xs leading-5 text-muted-foreground">{block.transcript}</p>}
 									</article>
 								);

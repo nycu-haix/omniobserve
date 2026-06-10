@@ -108,6 +108,105 @@ async def build_task_item_ids_with_llm(text: str, *, session_name: str | None = 
     return normalized_ids
 
 
+def build_task_item_ids_by_keyword(text: str, *, session_name: str | None = None, task_name: str | None = None) -> list[int]:
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    ranking_items = get_ranking_items_for_session(session_name=session_name, task_id=resolved_task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
+    task_item_configs_by_id = {item["id"]: item for item in task_config["items"]}
+    normalized_text = _normalize_keyword_text(text)
+    if not normalized_text:
+        return []
+
+    matched_ids: list[int] = []
+    for index, item_id in enumerate(ranking_items, start=1):
+        item = task_item_configs_by_id.get(item_id)
+        if item is None:
+            continue
+        keywords = [
+            item_id,
+            item.get("label_zh"),
+            item.get("label_en"),
+            *(item.get("aliases") or []),
+        ]
+        if _text_matches_any_keyword(normalized_text, keywords):
+            matched_ids.append(index)
+    return matched_ids
+
+
+async def build_poster_component_ids_with_llm(text: str, *, session_name: str | None = None, task_name: str | None = None) -> list[str]:
+    keyword_ids = build_poster_component_ids_by_keyword(text, session_name=session_name, task_name=task_name)
+    if keyword_ids:
+        logger.info(
+            "poster_component_keyword_match text_chars=%s component_ids=%s",
+            len(text),
+            keyword_ids,
+        )
+        return keyword_ids
+
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
+    builder = task_config.get("phase1_builder") or {}
+    components = [item for item in builder.get("components", []) if item.get("id")]
+    if not components:
+        return []
+
+    openai_api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not openai_api_key:
+        logger.info("poster_component_match_skipped_no_openai_key text_chars=%s", len(text))
+        return []
+
+    component_lines = "\n".join(_format_builder_option_line(item) for item in components)
+    system_prompt = (
+        "You classify live public discussion for the Enhance the Poster task.\n"
+        "Use only this exact poster component vocabulary.\n\n"
+        f"Components:\n{component_lines}\n\n"
+        "Identify every poster component that is explicitly mentioned or clearly referred to. "
+        "The input may be Mandarin Chinese, English, or mixed language. "
+        "Match against component ids, Chinese labels, English labels, and obvious synonyms. "
+        "Do not require an edit action such as move, enlarge, or change color. "
+        "Do not invent components. "
+        'Return JSON only in this exact shape: {"component_ids":["main_title"]} . '
+        'If unrelated, return {"component_ids":[]}.'
+    )
+    completion = await openai_client.chat.completions.create(
+        model=OPENAI_MODEL,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Public discussion:\n{text.strip()}"},
+        ],
+    )
+    parsed = _parse_llm_json_payload(completion.choices[0].message.content or "{}")
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("component_ids"), list):
+        return []
+    return _normalize_component_ids(
+        parsed["component_ids"],
+        valid_component_ids={str(item["id"]) for item in components},
+    )
+
+
+def build_poster_component_ids_by_keyword(text: str, *, session_name: str | None = None, task_name: str | None = None) -> list[str]:
+    resolved_task_name = _resolve_task_name(session_name, task_name)
+    task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
+    builder = task_config.get("phase1_builder") or {}
+    components = [item for item in builder.get("components", []) if item.get("id")]
+    normalized_text = _normalize_keyword_text(text)
+    if not normalized_text:
+        return []
+
+    matched_ids: list[str] = []
+    for component in components:
+        component_id = str(component["id"])
+        keywords = [
+            component_id,
+            component.get("label_zh"),
+            component.get("label_en"),
+        ]
+        if _text_matches_any_keyword(normalized_text, keywords):
+            matched_ids.append(component_id)
+    return matched_ids
+
+
 async def generate_and_save_task_items_for_idea_block(
     db: AsyncSession,
     *,
@@ -341,6 +440,18 @@ def _normalize_poster_component_action_mappings(
     return normalized
 
 
+def _normalize_component_ids(values: list[Any], *, valid_component_ids: set[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        component_id = str(value or "").strip()
+        if component_id not in valid_component_ids or component_id in seen:
+            continue
+        seen.add(component_id)
+        normalized.append(component_id)
+    return normalized
+
+
 def _normalize_task_item_ids(values: list[Any], ranking_items: list[str]) -> list[int]:
     normalized: list[int] = []
     seen: set[int] = set()
@@ -354,6 +465,20 @@ def _normalize_task_item_ids(values: list[Any], ranking_items: list[str]) -> lis
         seen.add(value)
         normalized.append(value)
     return normalized
+
+
+def _normalize_keyword_text(value: str) -> str:
+    return "".join(character.casefold() for character in value if character.isalnum())
+
+
+def _text_matches_any_keyword(normalized_text: str, keywords: list[Any]) -> bool:
+    for keyword in keywords:
+        normalized_keyword = _normalize_keyword_text(str(keyword or ""))
+        if not normalized_keyword:
+            continue
+        if normalized_keyword in normalized_text:
+            return True
+    return False
 
 
 def _format_ranking_item_line(index: int, item_id: str, task_item_configs_by_id: dict[str, Any]) -> str:

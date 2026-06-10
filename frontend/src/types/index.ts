@@ -29,6 +29,7 @@ export interface SharedSimilarityReason {
 	id: string;
 	title: string;
 	summary: string;
+	isSameReason?: boolean;
 	receivedAtMs?: number;
 }
 
@@ -52,6 +53,8 @@ export interface SimilarityPairCueData {
 	blockId: string;
 	blockSummary: string;
 	isSameReason?: boolean;
+	hasSameReason?: boolean;
+	hasDifferentReason?: boolean;
 }
 
 export interface SimilaritySummaryCueData {
