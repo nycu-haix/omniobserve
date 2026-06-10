@@ -165,14 +165,14 @@ const MANUAL_CUE_REASON_LABELS: Record<ManualCueReasonType, string> = {
 	different: "Different reason"
 };
 const SIMILARITY_REASON_LABELS: Record<SimilarityReasonKind, string> = {
-	same: "Same reason",
-	different: "Different reason",
-	mixed: "Same + Different"
+	same: "same reason",
+	different: "different reason",
+	mixed: "same + different"
 };
 const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
-	same: "border-green-700/30 bg-green-100 text-green-900 hover:bg-green-100/80",
-	different: "border-yellow-700/30 bg-yellow-100 text-yellow-950 hover:bg-yellow-100/80",
-	mixed: "border-lime-700/40 bg-lime-100 text-lime-950 hover:bg-lime-100/80"
+	same: "border-green-700/30 bg-green-100 text-green-900",
+	different: "border-yellow-700/30 bg-yellow-100 text-yellow-900",
+	mixed: "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
 };
 
 function getAdminAvailableLayoutWidth() {
@@ -1684,7 +1684,7 @@ export function AdminPage() {
 													#{similarity.idea_block_id_1} ↔ #{similarity.idea_block_id_2}
 												</span>
 												<Badge variant="outline" className={cn("shrink-0 px-1.5 py-0 text-[10px]", SIMILARITY_REASON_TAG_CLASSES[similarity.is_same_reason ? "same" : "different"])}>
-													{similarity.is_same_reason ? MANUAL_CUE_REASON_LABELS.same : MANUAL_CUE_REASON_LABELS.different}
+													{SIMILARITY_REASON_LABELS[similarity.is_same_reason ? "same" : "different"]}
 												</Badge>
 											</div>
 											<div
