@@ -3241,22 +3241,29 @@ export function PrivateBoard({
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
 		) : undefined;
+	const ideaBlockNoticeContent = ideaBlockNotice ? (
+		<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-md border bg-card p-3 text-card-foreground shadow-lg" role="status" aria-live="polite">
+			<div className="flex items-start gap-3">
+				<button type="button" className="min-w-0 flex-1 text-left" onClick={() => jumpToBlock(ideaBlockNotice.blockId)}>
+					<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
+					<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
+				</button>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="關閉通知" onClick={() => setIdeaBlockNotice(null)}>
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+		</div>
+	) : undefined;
+	const notificationCueContent =
+		ideaBlockNoticeContent || ideaBlockChatShareCueContent ? (
+			<>
+				{ideaBlockNoticeContent}
+				{ideaBlockChatShareCueContent}
+			</>
+		) : undefined;
 
 	return (
 		<>
-			{ideaBlockNotice && (
-				<div className="fixed right-4 top-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-md border bg-card p-3 text-card-foreground shadow-lg" role="status" aria-live="polite">
-					<div className="flex items-start gap-3">
-						<button type="button" className="min-w-0 flex-1 text-left" onClick={() => jumpToBlock(ideaBlockNotice.blockId)}>
-							<div className="text-sm font-medium">{ideaBlockNotice.title}</div>
-							<div className="mt-1 text-xs leading-5 text-muted-foreground">{ideaBlockNotice.message}</div>
-						</button>
-						<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="關閉通知" onClick={() => setIdeaBlockNotice(null)}>
-							<X className="h-4 w-4" />
-						</Button>
-					</div>
-				</div>
-			)}
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
 				<header className="flex items-center justify-between gap-3 border-b p-3">
 					<div className="flex items-center gap-2">
@@ -3460,7 +3467,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			<SimilarityCue cues={visibleSimilarityCues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={ideaBlockChatShareCueContent} />
+			<SimilarityCue cues={visibleSimilarityCues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={notificationCueContent} />
 		</>
 	);
 }
