@@ -52,21 +52,26 @@ export function PublicChatMessages({ messages }: { messages: PublicChatMessage[]
 			{messages.map(message => {
 				const ideaBlockMessage = parseIdeaBlockChatMessage(message.message);
 				const participantLabel = formatParticipantDisplayName(message.userId, message.displayName) || "你";
+				const statusLabel = message.isPending ? "傳送中" : null;
 				return (
 					<div key={message.id} className={cn("flex", message.isOwn ? "justify-end" : "justify-start")}>
 						{ideaBlockMessage ? (
-							<div className={cn("grid w-[92%] max-w-[32rem] gap-1", message.isOwn ? "justify-items-end" : "justify-items-start")}>
+							<div className={cn("grid w-[92%] max-w-[32rem] gap-1", message.isOwn ? "justify-items-end" : "justify-items-start", message.isPending && "opacity-80")}>
 								<div className="flex max-w-full items-center gap-2 text-xs text-muted-foreground">
 									<span className="min-w-0 truncate">{participantLabel}</span>
 									{message.time && <span className="shrink-0">{message.time}</span>}
+									{statusLabel && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none">{statusLabel}</span>}
 								</div>
 								<IdeaBlockChatCard parsedMessage={ideaBlockMessage} className={cn("w-full", message.isOwn && "border-primary/40 bg-primary/5")} />
 							</div>
 						) : (
-							<div className={cn("grid max-w-[86%] gap-1 rounded-lg border px-3 py-2 text-sm", message.isOwn ? "bg-primary text-primary-foreground" : "bg-background")}>
+							<div
+								className={cn("grid max-w-[86%] gap-1 rounded-lg border px-3 py-2 text-sm", message.isOwn ? "bg-primary text-primary-foreground" : "bg-background", message.isPending && "opacity-80")}
+							>
 								<div className={cn("flex items-center gap-2 text-xs", message.isOwn ? "text-primary-foreground/75" : "text-muted-foreground")}>
 									<span className="min-w-0 truncate">{participantLabel}</span>
 									{message.time && <span className="shrink-0">{message.time}</span>}
+									{statusLabel && <span className="shrink-0 rounded-full bg-background/20 px-1.5 py-0.5 text-[10px] font-medium leading-none">{statusLabel}</span>}
 								</div>
 								<div className="whitespace-pre-wrap break-words leading-5">{message.message}</div>
 							</div>

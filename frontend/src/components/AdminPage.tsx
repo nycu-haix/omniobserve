@@ -161,6 +161,7 @@ interface PublicChatMessagePayload {
 	message: string;
 	timestampMs?: number;
 	isDeleted?: boolean;
+	clientMessageId?: string;
 }
 
 type CueCondition = "experimental" | "control";
@@ -180,6 +181,7 @@ interface SimilarityLink {
 const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
 const ADMIN_PARTICIPANT_ID_PREFIX = `${ADMIN_PARTICIPANT_ID}-`;
+const PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS = 5000;
 const DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH = 320;
 const DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH = 360;
 const MIN_ADMIN_LEFT_SIDEBAR_WIDTH = 280;
@@ -267,6 +269,11 @@ function getWsBaseUrl() {
 function createAdminClientId() {
 	const randomId = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 	return `${ADMIN_PARTICIPANT_ID_PREFIX}${randomId}`;
+}
+
+function createClientMessageId(prefix: string) {
+	const randomId = typeof window.crypto?.randomUUID === "function" ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	return `${prefix}-${randomId}`;
 }
 
 function buildSessionApiUrl(roomName: string, path: string) {
@@ -522,7 +529,8 @@ function publicChatPayloadToMessage(payload: PublicChatMessagePayload, participa
 		time: formatApiTime(timestampMs),
 		timestampMs,
 		isOwn: isOwnTranscriptUser(payload.userId, participantId),
-		isDeleted: payload.isDeleted ?? false
+		isDeleted: payload.isDeleted ?? false,
+		clientMessageId: payload.clientMessageId
 	};
 }
 
@@ -539,6 +547,34 @@ function sortPublicChatMessages(messages: PublicChatMessage[]) {
 	});
 }
 
+function isMatchingPendingPublicChatMessage(pendingMessage: PublicChatMessage, confirmedMessage: PublicChatMessage): boolean {
+	if (!pendingMessage.isPending || confirmedMessage.isPending) {
+		return false;
+	}
+
+	if (pendingMessage.clientMessageId && confirmedMessage.clientMessageId) {
+		return pendingMessage.clientMessageId === confirmedMessage.clientMessageId;
+	}
+
+	if (!pendingMessage.isOwn || !confirmedMessage.isOwn || pendingMessage.message.trim() !== confirmedMessage.message.trim()) {
+		return false;
+	}
+
+	if (pendingMessage.userId && confirmedMessage.userId && pendingMessage.userId !== confirmedMessage.userId) {
+		return false;
+	}
+
+	if (pendingMessage.timestampMs && confirmedMessage.timestampMs) {
+		return Math.abs(confirmedMessage.timestampMs - pendingMessage.timestampMs) <= PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS * 3;
+	}
+
+	return true;
+}
+
+function removePendingPublicChatMessage(messages: PublicChatMessage[], clientMessageId: string): PublicChatMessage[] {
+	return messages.filter(message => message.clientMessageId !== clientMessageId || !message.isPending);
+}
+
 function mergePublicChatMessages(baseMessages: PublicChatMessage[], nextMessages: PublicChatMessage[]) {
 	const byId = new Map(baseMessages.map(message => [message.id, message]));
 	nextMessages.forEach(message => {
@@ -546,11 +582,18 @@ function mergePublicChatMessages(baseMessages: PublicChatMessage[], nextMessages
 		if (!normalizedMessage) {
 			return;
 		}
+		const pendingMessage = !byId.has(message.id) ? baseMessages.find(item => isMatchingPendingPublicChatMessage(item, { ...message, message: normalizedMessage })) : undefined;
+		if (pendingMessage) {
+			byId.delete(pendingMessage.id);
+		}
 		byId.set(message.id, {
+			...pendingMessage,
 			...byId.get(message.id),
 			...message,
+			clientMessageId: message.clientMessageId ?? pendingMessage?.clientMessageId,
+			isPending: message.isPending ?? false,
 			message: normalizedMessage,
-			timestampMs: message.timestampMs ?? byId.get(message.id)?.timestampMs
+			timestampMs: message.timestampMs ?? byId.get(message.id)?.timestampMs ?? pendingMessage?.timestampMs
 		});
 	});
 	return sortPublicChatMessages([...byId.values()]);
@@ -816,6 +859,7 @@ export function AdminPage() {
 	const [rankingsCopied, setRankingsCopied] = useState(false);
 	const [highlightedIdeaBlockIds, setHighlightedIdeaBlockIds] = useState<number[]>([]);
 	const [pendingJumpBlockIds, setPendingJumpBlockIds] = useState<number[]>([]);
+	const publicChatMessagesRef = useRef<PublicChatMessage[]>([]);
 	const ideaBlockRefs = useRef(new Map<number, HTMLElement>());
 	const jumpHighlightTimerRef = useRef<number | null>(null);
 	const rankingLabels = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item.label])), [taskItems]);
@@ -927,6 +971,10 @@ export function AdminPage() {
 			console.warn("[admin] failed to load chat history", error);
 		}
 	}, [adminClientId, roomName]);
+
+	useEffect(() => {
+		publicChatMessagesRef.current = publicChatMessages;
+	}, [publicChatMessages]);
 
 	const recordEvent = (message: RealtimeMessage) => {
 		const receivedAt = new Intl.DateTimeFormat("zh-TW", {
@@ -1043,13 +1091,29 @@ export function AdminPage() {
 		}
 
 		if (message.type === "public_chat_message") {
-			setIsSendingPublicChat(false);
 			const chatPayload = message.payload as PublicChatMessagePayload;
-			setPublicChatMessages(prev => mergePublicChatMessages(prev, [publicChatPayloadToMessage(chatPayload, adminClientId)]));
+			setPublicChatMessages(prev => {
+				const nextMessages = mergePublicChatMessages(prev, [publicChatPayloadToMessage(chatPayload, adminClientId)]);
+				setIsSendingPublicChat(nextMessages.some(item => item.isOwn && item.isPending));
+				return nextMessages;
+			});
 		}
 
 		if (message.type === "public_chat_error") {
-			setIsSendingPublicChat(false);
+			const failedClientMessageId = typeof message.clientMessageId === "string" ? message.clientMessageId : null;
+			const failedPendingMessage = failedClientMessageId
+				? publicChatMessagesRef.current.find(item => item.clientMessageId === failedClientMessageId && item.isPending)
+				: publicChatMessagesRef.current.find(item => item.isOwn && item.isPending);
+			if (failedPendingMessage?.clientMessageId) {
+				setPublicChatMessages(prev => {
+					const nextMessages = removePendingPublicChatMessage(prev, failedPendingMessage.clientMessageId || "");
+					setIsSendingPublicChat(nextMessages.some(item => item.isOwn && item.isPending));
+					return nextMessages;
+				});
+				setPublicChatText(current => current || failedPendingMessage.message);
+			} else {
+				setIsSendingPublicChat(publicChatMessagesRef.current.some(item => item.isOwn && item.isPending));
+			}
 			setPublicChatError((message.reason as string) || "公開訊息傳送失敗");
 		}
 	};
@@ -1497,17 +1561,46 @@ export function AdminPage() {
 			return;
 		}
 
+		const clientMessageId = createClientMessageId("admin-public-chat");
+		const timestampMs = Date.now();
 		setIsSendingPublicChat(true);
 		setPublicChatError(null);
+		setPublicChatMessages(prev =>
+			mergePublicChatMessages(prev, [
+				{
+					id: clientMessageId,
+					sessionName: roomName,
+					userId: "0",
+					displayName: "Admin",
+					message: normalizedMessage,
+					time: formatApiTime(timestampMs),
+					timestampMs,
+					isOwn: true,
+					isPending: true,
+					clientMessageId
+				}
+			])
+		);
 		sendAdminMessage({
 			type: "public_chat_send",
 			message: normalizedMessage,
-			displayName: "Admin"
+			displayName: "Admin",
+			clientMessageId
 		});
 		setPublicChatText("");
 		window.setTimeout(() => {
-			setIsSendingPublicChat(false);
-		}, 5000);
+			const stillPending = publicChatMessagesRef.current.some(message => message.clientMessageId === clientMessageId && message.isPending);
+			if (!stillPending) {
+				return;
+			}
+			setPublicChatMessages(prev => {
+				const nextMessages = removePendingPublicChatMessage(prev, clientMessageId);
+				setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
+				return nextMessages;
+			});
+			setPublicChatError("公開訊息傳送逾時，請再試一次");
+			setPublicChatText(current => current || normalizedMessage);
+		}, PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS);
 	};
 
 	const undoManualCue = async (similarity: SimilarityRecord) => {

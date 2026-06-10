@@ -667,13 +667,13 @@ def _normalize_public_context_task_item_ids(session_id: str, value: Any) -> list
     return normalized_task_item_ids
 
 
-def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
+def _chat_message_payload(chat_message: Any, client_message_id: str | None = None) -> dict[str, Any]:
     timestamp_ms = (
         int(chat_message.time_stamp.timestamp() * 1000)
         if chat_message.time_stamp
         else _now_ms()
     )
-    return {
+    payload = {
         "id": str(chat_message.id),
         "sessionName": chat_message.session_name,
         "userId": str(chat_message.user_id),
@@ -682,6 +682,22 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
         "timestampMs": timestamp_ms,
         "isDeleted": chat_message.is_deleted,
     }
+    if client_message_id:
+        payload["clientMessageId"] = client_message_id
+    return payload
+
+
+def _public_chat_error_message(
+    reason: str,
+    client_message_id: str | None = None,
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "type": "public_chat_error",
+        "reason": reason,
+    }
+    if client_message_id:
+        message["clientMessageId"] = client_message_id
+    return message
 
 
 async def _send_similarity_reason_share_error(
@@ -1281,21 +1297,19 @@ async def handle_board_websocket(
 
             if message_type == "public_chat_send":
                 message_text = str(payload.get("message") or "").strip()
+                client_message_id = str(payload.get("clientMessageId") or "").strip() or None
                 if not message_text:
                     await board_manager.send_to(
                         session_id,
                         participant_id,
-                        {
-                            "type": "public_chat_error",
-                            "reason": "message cannot be empty",
-                        },
+                        _public_chat_error_message("message cannot be empty", client_message_id),
                     )
                     continue
                 if len(message_text) > 2000:
                     await board_manager.send_to(
                         session_id,
                         participant_id,
-                        {"type": "public_chat_error", "reason": "message is too long"},
+                        _public_chat_error_message("message is too long", client_message_id),
                     )
                     continue
 
@@ -1322,16 +1336,13 @@ async def handle_board_websocket(
                         await board_manager.send_to(
                             session_id,
                             participant_id,
-                            {
-                                "type": "public_chat_error",
-                                "reason": "failed to save message",
-                            },
+                            _public_chat_error_message("failed to save message", client_message_id),
                         )
                         continue
 
                 chat_msg = {
                     "type": "public_chat_message",
-                    "payload": _chat_message_payload(saved_message),
+                    "payload": _chat_message_payload(saved_message, client_message_id),
                 }
                 await board_manager.broadcast(session_id, chat_msg)
                 await admin_manager.broadcast(session_id, chat_msg)
@@ -1647,21 +1658,19 @@ async def handle_admin_websocket(
                 )
             elif message_type == "public_chat_send":
                 message_text = str(payload.get("message") or "").strip()
+                client_message_id = str(payload.get("clientMessageId") or "").strip() or None
                 if not message_text:
                     await admin_manager.send_to(
                         session_id,
                         admin_id,
-                        {
-                            "type": "public_chat_error",
-                            "reason": "message cannot be empty",
-                        },
+                        _public_chat_error_message("message cannot be empty", client_message_id),
                     )
                     continue
                 if len(message_text) > 2000:
                     await admin_manager.send_to(
                         session_id,
                         admin_id,
-                        {"type": "public_chat_error", "reason": "message is too long"},
+                        _public_chat_error_message("message is too long", client_message_id),
                     )
                     continue
 
@@ -1688,16 +1697,13 @@ async def handle_admin_websocket(
                         await admin_manager.send_to(
                             session_id,
                             admin_id,
-                            {
-                                "type": "public_chat_error",
-                                "reason": "failed to save message",
-                            },
+                            _public_chat_error_message("failed to save message", client_message_id),
                         )
                         continue
 
                 chat_msg = {
                     "type": "public_chat_message",
-                    "payload": _chat_message_payload(saved_message),
+                    "payload": _chat_message_payload(saved_message, client_message_id),
                 }
                 await board_manager.broadcast(session_id, chat_msg)
                 await admin_manager.broadcast(session_id, chat_msg)
