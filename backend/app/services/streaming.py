@@ -1014,10 +1014,15 @@ async def handle_transcript_segments_websocket(
                             websocket,
                             {
                                 "type": "transcript",
+                                "participant_id": participant_id,
+                                "scope": visibility.value,
+                                "segment_id": client_segment_id or None,
                                 "text": text,
                                 "is_final": False,
                                 "reason": reason,
                                 "persisted": False,
+                                "client_segment_id": client_segment_id or None,
+                                "client_segment_ids": _dedupe_ids([client_segment_id]),
                             },
                         )
                         continue

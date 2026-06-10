@@ -897,6 +897,12 @@ function audioCompletionTargetKeys(message: AudioIdeaBlocksUpdateMessage | Audio
 	return Array.from(segmentIds, segmentId => [source, String(userId), segmentId].join("|"));
 }
 
+function audioActiveCompletionTargetKey(message: AudioIdeaBlocksUpdateMessage | AudioProvisionalIdeaBlocksUpdateMessage | AudioTerminalErrorMessage, participantId: string): string {
+	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
+	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
+	return [source, String(userId), "active"].join("|");
+}
+
 function isUnpersistedTranscriptDraftId(id: string): boolean {
 	return id.startsWith("live-batch-") || id.startsWith("wlk-live-") || id.startsWith("audio-");
 }
@@ -1575,6 +1581,14 @@ export function PrivateBoard({
 			voiceGeneratingBlocksRef.current.delete(segmentKey);
 			segmentBlockIds.forEach(blockId => blockIds.add(blockId));
 		});
+		if (blockIds.size > 0) {
+			for (const [segmentKey, segmentBlockIds] of voiceGeneratingBlocksRef.current.entries()) {
+				blockIds.forEach(blockId => segmentBlockIds.delete(blockId));
+				if (segmentBlockIds.size === 0) {
+					voiceGeneratingBlocksRef.current.delete(segmentKey);
+				}
+			}
+		}
 		return blockIds;
 	}, []);
 
@@ -2422,7 +2436,10 @@ export function PrivateBoard({
 				return;
 			}
 
-			const segmentKeys = audioCompletionTargetKeys(lastAudioMessage, participantId);
+			const completionSegmentKeys = audioCompletionTargetKeys(lastAudioMessage, participantId);
+			const activeCompletionKey = audioActiveCompletionTargetKey(lastAudioMessage, participantId);
+			const hasMatchingCompletionKey = completionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
+			const segmentKeys = hasMatchingCompletionKey || !voiceGeneratingBlocksRef.current.has(activeCompletionKey) ? completionSegmentKeys : [...completionSegmentKeys, activeCompletionKey];
 			if (segmentKeys.length === 0) {
 				return;
 			}
@@ -2497,7 +2514,13 @@ export function PrivateBoard({
 			const hasConfirmedIdeaBlockResult = ideaBlockResponses.length > 0 || duplicateIdeaBlockResponses.length > 0;
 			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasConfirmedIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
-			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? audioCompletionTargetKeys(lastAudioMessage, participantId) : [];
+			const baseCompletionSegmentKeys = shouldClearVoiceGeneratingBlocks ? audioCompletionTargetKeys(lastAudioMessage, participantId) : [];
+			const activeCompletionKey = shouldClearVoiceGeneratingBlocks ? audioActiveCompletionTargetKey(lastAudioMessage, participantId) : "";
+			const hasMatchingCompletionKey = baseCompletionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
+			const completionSegmentKeys =
+				shouldClearVoiceGeneratingBlocks && !hasMatchingCompletionKey && activeCompletionKey && voiceGeneratingBlocksRef.current.has(activeCompletionKey)
+					? [...baseCompletionSegmentKeys, activeCompletionKey]
+					: baseCompletionSegmentKeys;
 			const pendingVoiceBlockIds = completionSegmentKeys.length > 0 ? takeVoiceGeneratingBlockIds(completionSegmentKeys) : new Set<string>();
 			const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length > 0) {
