@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { UIEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
@@ -193,8 +194,6 @@ type AudioDraftTargetMessage = AudioTranscriptMessage | AudioTranscriptBoundaryM
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 const AUDIO_FINAL_DUPLICATE_WINDOW_MS = 5000;
-const MAX_PUBLIC_CHAT_MESSAGE_LENGTH = 2000;
-const IDEA_BLOCK_CHAT_PREFIX = "Idea block：";
 const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
@@ -780,28 +779,6 @@ function sortPublicChatMessages(messages: PublicChatMessage[]): PublicChatMessag
 	});
 }
 
-function buildIdeaBlockChatMessage(block: IdeaBlock): string {
-	const title = block.summary.trim();
-	const content = (block.aiSummary?.trim() || title).trim();
-	if (!content) {
-		return "";
-	}
-
-	const heading = `${IDEA_BLOCK_CHAT_PREFIX}${title || content}`;
-	if (content === title || !title) {
-		return heading.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
-	}
-
-	const separator = "\n";
-	const availableContentLength = MAX_PUBLIC_CHAT_MESSAGE_LENGTH - heading.length - separator.length;
-	if (availableContentLength <= 0) {
-		return heading.slice(0, MAX_PUBLIC_CHAT_MESSAGE_LENGTH).trimEnd();
-	}
-
-	const truncatedContent = content.slice(0, availableContentLength).trimEnd();
-	return `${heading}${separator}${truncatedContent}`.trim();
-}
-
 function mergeIdeaBlocks(baseBlocks: IdeaBlock[], nextBlocks: IdeaBlock[], options?: { markNewUnread?: boolean }): IdeaBlock[] {
 	return deduplicateIdeaBlocks(
 		sortIdeaBlocks(
@@ -1114,6 +1091,8 @@ function IdeaBlockChatShareCueContent({
 		<>
 			{notices.map(notice => {
 				const title = notice.status === "sending" ? "正在送到聊天室" : notice.status === "failed" ? "傳送失敗" : "已送到聊天室";
+				const ideaBlockMessage = parseIdeaBlockChatMessage(notice.message);
+				const preview = ideaBlockMessage ? `Idea block：${ideaBlockMessage.title}` : notice.message.trim();
 				return (
 					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={notice.id} role="status" aria-live="polite">
 						<div className="mb-3 flex items-start gap-2 text-sm">
@@ -1126,7 +1105,9 @@ function IdeaBlockChatShareCueContent({
 							)}
 							<div className="grid min-w-0 gap-2">
 								<span className="font-medium">{title}</span>
-								<div className="max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-muted-foreground">{notice.message}</div>
+								<div className="truncate rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-muted-foreground" title={preview}>
+									{preview}
+								</div>
 							</div>
 						</div>
 						<div className="flex flex-wrap justify-end gap-2">
