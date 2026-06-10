@@ -188,9 +188,6 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
 	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
 	const requiredItemCount = minimumItemCount(builder);
-	const remainingRequiredItems = Math.max(0, requiredItemCount - items.length);
-	const requirementLabel =
-		remainingRequiredItems > 0 ? `至少建立 ${requiredItemCount} 個，還差 ${remainingRequiredItems} 個` : `已達最低 ${requiredItemCount} 個；後續新增的項目也會帶入 Private Phase 2`;
 
 	const resetForm = useCallback(() => {
 		setForm(createPhaseTaskForm());
@@ -354,14 +351,6 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
 						{items.length} / 至少 {requiredItemCount}
 					</span>
-				</div>
-				<div
-					className={cn(
-						"rounded-md border px-3 py-2 text-xs leading-5",
-						remainingRequiredItems > 0 ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"
-					)}
-				>
-					{requirementLabel}
 				</div>
 				{isLoading && <div className="grid min-h-24 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">載入中</div>}
 				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無改善項目</div>}
