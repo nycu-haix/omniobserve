@@ -266,27 +266,45 @@ PHASE1_POSTER_COMPONENTS = [
     },
     {
         "id": "icon",
-        "label_zh": "圖示",
+        "label_zh": "人物圖示",
         "label_en": "Icon",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "replace1", "replace2", "transparency"],
+    },
+    {
+        "id": "beach_background",
+        "label_zh": "海灘背景圖",
+        "label_en": "Beach background",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "transparency"],
+    },
+    {
+        "id": "blue_block",
+        "label_zh": "下方藍色區塊",
+        "label_en": "Blue block",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "transparency"],
     },
     {
         "id": "qr_code_group",
         "label_zh": "QR 碼+說明",
         "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing"]
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
     },
     {
         "id": "title_group",
         "label_zh": "主標題+副標題+說明文字",
         "label_en": "Title group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
+    },
+    {
+        "id": "info_group2",
+        "label_zh": "日期時間+地點+行動呼籲",
+        "label_en": "Info group2",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
     },
     {
         "id": "info_group",
         "label_zh": "下方資訊",
         "label_en": "Info group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "asemble"],
     },
 ]
 
@@ -299,15 +317,15 @@ PHASE1_ACTION_ITEMS = [
     },
     {
         "id": "replace1",
-        "label_zh": "替換成圖示1",
+        "label_zh": "替換成人物圖示1",
         "label_en": "Replace1",
-        "template_zh": "「{component}」替換成圖示1",
+        "template_zh": "「{component}」替換成人物圖示1",
     },
     {
         "id": "replace2",
-        "label_zh": "替換成圖示2",
+        "label_zh": "替換成人物圖示2",
         "label_en": "Replace2",
-        "template_zh": "「{component}」替換成圖示2",
+        "template_zh": "「{component}」替換成人物圖示2",
     },
     {
         "id": "move",
@@ -346,16 +364,52 @@ PHASE1_ACTION_ITEMS = [
         "template_zh": "調整「{component}」間距",
     },
     {
-        "id": "unify",
-        "label_zh": "統一字型/顏色",
-        "label_en": "Unify",
-        "template_zh": "統一「{component}」字型/顏色",
+        "id": "spread_out",
+        "label_zh": "分散",
+        "label_en": "Spread out",
+        "template_zh": "將「{component}」分散",
+    },
+    {
+        "id": "asemble",
+        "label_zh": "集合",
+        "label_en": "Assemble",
+        "template_zh": "將「{component}」集合",
+    },
+    {
+        "id": "unify_font",
+        "label_zh": "統一字型",
+        "label_en": "Unify font",
+        "template_zh": "統一「{component}」字型",
+    },
+    {
+        "id": "unify_color",
+        "label_zh": "統一顏色",
+        "label_en": "Unify color",
+        "template_zh": "統一「{component}」顏色",
     },
     {
         "id": "transparency",
         "label_zh": "調整透明度",
         "label_en": "Adjust transparency",
         "template_zh": "調整「{component}」透明度",
+    },
+    {
+        "id": "align_left",
+        "label_zh": "向左對齊",
+        "label_en": "Align left",
+        "template_zh": "將「{component}」向左對齊",
+    },
+    {
+        "id": "align_right",
+        "label_zh": "向右對齊",
+        "label_en": "Align right",
+        "template_zh": "將「{component}」向右對齊",
+    },
+    {
+        "id": "align_center",
+        "label_zh": "置中對齊",
+        "label_en": "Align center",
+        "template_zh": "將「{component}」置中對齊",
     },
 ]
 
