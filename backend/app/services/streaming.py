@@ -196,6 +196,8 @@ async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_na
         {
             "type": "idea_blocks_update",
             "idea_blocks": serialized_idea_blocks,
+            "scope": "similarity",
+            "participant_id": participant_id,
         },
     )
     await broadcast_admin_idea_blocks_update(
@@ -533,6 +535,8 @@ async def handle_audio_stream_websocket(
                 if payload.get("type") == "stop":
                     stop_received = True
                     saved_final_segment = await finalize_stream_transcript()
+                    pipeline_result = None
+                    serialized_result = {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                     idea_blocks_payload: list[dict[str, Any]] = []
                     task_items_payload: list[dict[str, Any]] = []
                     if transcript_segments and stream_context.scope == Visibility.PRIVATE:
@@ -563,6 +567,9 @@ async def handle_audio_stream_websocket(
                                 {
                                     "type": "pipeline_error",
                                     "reason": "idea_block_or_task_item_generation_failed",
+                                    "scope": stream_context.scope.value,
+                                    "participant_id": participant_id,
+                                    "transcript_segment_id": saved_final_segment.segment_id if saved_final_segment else None,
                                 },
                             )
                             pipeline_result = None
@@ -585,6 +592,7 @@ async def handle_audio_stream_websocket(
                             "text": last_text,
                             "is_final": True,
                             "persisted": final_persisted,
+                            "client_segment_id": None,
                         },
                     )
                     if last_text:
@@ -609,7 +617,11 @@ async def handle_audio_stream_websocket(
                         {
                             "type": "idea_blocks_update",
                             "idea_blocks": idea_blocks_payload,
-                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"] if pipeline_result is not None else [],
+                            "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
+                            "scope": stream_context.scope.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": last_segment_id,
+                            "client_segment_id": None,
                         },
                     )
                     await broadcast_admin_idea_blocks_update(
@@ -820,6 +832,9 @@ async def handle_transcript_segments_websocket(
                                 {
                                     "type": "transcript_error",
                                     "reason": "save_failed",
+                                    "scope": visibility.value,
+                                    "participant_id": participant_id,
+                                    "client_segment_id": client_segment_id or None,
                                 },
                             )
                             continue
@@ -834,6 +849,7 @@ async def handle_transcript_segments_websocket(
                                 "is_final": True,
                                 "reason": reason,
                                 "persisted": True,
+                                "client_segment_id": client_segment_id or None,
                             },
                         )
                     if reason in FINAL_TRANSCRIPT_REASONS:
@@ -844,7 +860,18 @@ async def handle_transcript_segments_websocket(
                                 text=text,
                                 transcript_segment_id=segment_id,
                             )
-                        await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "idea_blocks_update",
+                                "idea_blocks": [],
+                                "duplicate_idea_blocks": [],
+                                "scope": visibility.value,
+                                "participant_id": participant_id,
+                                "transcript_segment_id": segment_id,
+                                "client_segment_id": client_segment_id or None,
+                            },
+                        )
                         await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
@@ -879,9 +906,21 @@ async def handle_transcript_segments_websocket(
                             "is_final": True,
                             "reason": reason,
                             "persisted": True,
+                            "client_segment_id": client_segment_id or None,
                         },
                     )
-                    await send_ws_json_safe(websocket, {"type": "idea_blocks_update", "idea_blocks": [], "duplicate_idea_blocks": []})
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "idea_blocks_update",
+                            "idea_blocks": [],
+                            "duplicate_idea_blocks": [],
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": cached_segment_id,
+                            "client_segment_id": client_segment_id or None,
+                        },
+                    )
                     await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
                     continue
 
@@ -964,6 +1003,9 @@ async def handle_transcript_segments_websocket(
                         {
                             "type": "transcript_error",
                             "reason": "save_failed",
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "client_segment_id": client_segment_id or None,
                         },
                     )
                     continue
@@ -993,6 +1035,7 @@ async def handle_transcript_segments_websocket(
                         "is_final": True,
                         "reason": reason,
                         "persisted": True,
+                        "client_segment_id": client_segment_id or None,
                     },
                 )
 
@@ -1030,6 +1073,10 @@ async def handle_transcript_segments_websocket(
                         {
                             "type": "pipeline_error",
                             "reason": "idea_block_or_task_item_generation_failed",
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": saved_segment.segment_id,
+                            "client_segment_id": client_segment_id or None,
                         },
                     )
                     continue
@@ -1058,6 +1105,10 @@ async def handle_transcript_segments_websocket(
                         "type": "idea_blocks_update",
                         "idea_blocks": serialized_result["idea_blocks"],
                         "duplicate_idea_blocks": serialized_result["duplicate_idea_blocks"],
+                        "scope": visibility.value,
+                        "participant_id": participant_id,
+                        "transcript_segment_id": saved_segment.segment_id,
+                        "client_segment_id": client_segment_id or None,
                     },
                 )
                 await broadcast_admin_idea_blocks_update(
