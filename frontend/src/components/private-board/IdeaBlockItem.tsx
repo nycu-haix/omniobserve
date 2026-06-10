@@ -15,6 +15,7 @@ interface IdeaBlockItemProps {
 	onDelete?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	onShareToChat?: (block: IdeaBlock) => void;
+	onShareSimilarityReason?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
 	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
@@ -29,6 +30,7 @@ export function IdeaBlockItem({
 	onDelete,
 	onJumpToTranscript,
 	onShareToChat,
+	onShareSimilarityReason,
 	canJumpToTranscript = false,
 	canShareToChat = false,
 	currentPhase = DEFAULT_SESSION_PHASE,
@@ -65,6 +67,8 @@ export function IdeaBlockItem({
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
 	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+	const shouldShowSimilarityReasonShareAction = shouldShowCue && hasDifferentSimilarityReason && !isGenerating && !isDeleted;
+	const canShareSimilarityReason = shouldShowSimilarityReasonShareAction && !!onShareSimilarityReason && !!(block.aiSummary?.trim() || block.summary.trim());
 	const hasMixedSimilarityReasons = hasSameSimilarityReason && hasDifferentSimilarityReason;
 	const similarityReasonTag =
 		!hasSameSimilarityReason && !hasDifferentSimilarityReason
@@ -176,6 +180,15 @@ export function IdeaBlockItem({
 		}
 		setShowDeleteConfirm(false);
 		onShareToChat?.(block);
+	};
+
+	const shareSimilarityReason = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!canShareSimilarityReason) {
+			return;
+		}
+		setShowDeleteConfirm(false);
+		onShareSimilarityReason?.(block);
 	};
 
 	const confirmDelete = async () => {
@@ -429,6 +442,22 @@ export function IdeaBlockItem({
 			)}
 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
+
+			{shouldShowSimilarityReasonShareAction && (
+				<div className="ml-7 mr-7 flex flex-wrap items-center justify-between gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm text-yellow-950">
+					<span className="min-w-0 leading-5">AI：你想不想讓別人知道你的理由？</span>
+					<Button
+						className="shrink-0 gap-1.5 border-yellow-700/30 bg-background text-yellow-950 hover:bg-yellow-100"
+						size="sm"
+						variant="outline"
+						onClick={shareSimilarityReason}
+						disabled={!canShareSimilarityReason}
+					>
+						<Send className="h-3.5 w-3.5" />
+						分享我的理由
+					</Button>
+				</div>
+			)}
 
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">

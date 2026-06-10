@@ -3133,6 +3133,20 @@ export function PrivateBoard({
 		});
 	};
 
+	const shareSimilarityReasonFromBlock = useCallback(
+		(block: IdeaBlock) => {
+			const hasDifferentReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+			if (!canShowSimilarityCues || !isGroupPhase(visiblePhase) || !hasDifferentReason || block.status === "generating" || block.isDeleted) {
+				return;
+			}
+			onSendBoardMessage({
+				type: "share_similarity_reason",
+				blockId: block.id
+			});
+		},
+		[canShowSimilarityCues, onSendBoardMessage, visiblePhase]
+	);
+
 	const dismissSimilarityCue = (cueId: string) => {
 		setCues(prev => {
 			const nextCues = prev.filter(cue => cue.id !== cueId);
@@ -3291,6 +3305,7 @@ export function PrivateBoard({
 												onDelete={deleteIdeaBlock}
 												onJumpToTranscript={jumpToTranscript}
 												onShareToChat={shareIdeaBlockToChat}
+												onShareSimilarityReason={shareSimilarityReasonFromBlock}
 												canJumpToTranscript={canJumpToTranscript(block)}
 												canShareToChat={isConnected && isGroupPhase(visiblePhase)}
 												currentPhase={visiblePhase}
