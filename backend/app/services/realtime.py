@@ -442,6 +442,8 @@ def _schedule_public_context_matching(
                             "participantId": participant_id,
                             "textChars": len(text),
                             "contextChars": len(match_text),
+                            "replaceExisting": True,
+                            "pinMode": "public_context_topic",
                             "matches": [
                                 {
                                     "ideaBlockId": str(match.idea_block_id),
@@ -449,6 +451,7 @@ def _schedule_public_context_matching(
                                     "score": match.score,
                                     "reason": match.reason,
                                     "taskItemIds": match.task_item_ids,
+                                    "componentIds": match.component_ids,
                                 }
                                 for match in user_matches
                             ],

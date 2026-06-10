@@ -114,12 +114,15 @@ interface PublicContextMatchPayload {
 	score?: number | null;
 	reason?: string | null;
 	taskItemIds?: number[];
+	componentIds?: string[];
 }
 
 interface PublicContextMatchesPayload {
 	transcriptId?: string | number | null;
 	participantId?: string | number | null;
 	textChars?: number;
+	replaceExisting?: boolean;
+	pinMode?: string;
 	matches?: PublicContextMatchPayload[];
 }
 
@@ -261,7 +264,6 @@ const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
-const PUBLIC_CONTEXT_RELEVANCE_MS = 30_000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
 const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
@@ -1192,7 +1194,7 @@ function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMa
 		return blocks;
 	}
 
-	const expiresAtMs = Date.now() + PUBLIC_CONTEXT_RELEVANCE_MS;
+	const replaceExisting = payload.replaceExisting !== false;
 	const matchesByBlockId = new Map<string, PublicContextMatchPayload>();
 	for (const match of matches) {
 		if (match.ideaBlockId == null) {
@@ -1207,34 +1209,25 @@ function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMa
 	return blocks.map(block => {
 		const match = matchesByBlockId.get(block.id);
 		if (!match || block.isDeleted) {
-			return block;
+			if (!replaceExisting || !block.publicContextRelevant) {
+				return block;
+			}
+			return {
+				...block,
+				publicContextRelevant: false,
+				publicContextScore: null,
+				publicContextReason: undefined,
+				publicContextExpiresAtMs: undefined
+			};
 		}
 		return {
 			...block,
 			publicContextRelevant: true,
 			publicContextScore: typeof match.score === "number" ? match.score : null,
 			publicContextReason: typeof match.reason === "string" ? match.reason : undefined,
-			publicContextExpiresAtMs: expiresAtMs
-		};
-	});
-}
-
-function clearExpiredPublicContextMatches(blocks: IdeaBlock[], nowMs: number): IdeaBlock[] {
-	let didChange = false;
-	const nextBlocks = blocks.map(block => {
-		if (!block.publicContextRelevant || !block.publicContextExpiresAtMs || block.publicContextExpiresAtMs > nowMs) {
-			return block;
-		}
-		didChange = true;
-		return {
-			...block,
-			publicContextRelevant: false,
-			publicContextScore: null,
-			publicContextReason: undefined,
 			publicContextExpiresAtMs: undefined
 		};
 	});
-	return didChange ? nextBlocks : blocks;
 }
 
 function isDuplicateIdeaBlockResponse(response: IdeaBlockResponse): boolean {
@@ -2001,26 +1994,6 @@ export function PrivateBoard({
 
 		return () => window.clearTimeout(timer);
 	}, [ideaBlocks]);
-
-	useEffect(() => {
-		if (!ideaBlocks.some(block => block.publicContextRelevant)) {
-			return;
-		}
-
-		const interval = window.setInterval(() => {
-			captureIdeaBlockPositions();
-			setIdeaBlocks(prev => {
-				const clearedBlocks = clearExpiredPublicContextMatches(prev, Date.now());
-				if (clearedBlocks === prev) {
-					return prev;
-				}
-				const nextBlocks = sortIdeaBlocks(clearedBlocks);
-				ideaBlocksRef.current = nextBlocks;
-				return nextBlocks;
-			});
-		}, 1000);
-		return () => window.clearInterval(interval);
-	}, [captureIdeaBlockPositions, ideaBlocks]);
 
 	useEffect(() => {
 		publicChatMessagesRef.current = publicChatMessages;
