@@ -154,10 +154,10 @@ async def get_or_create_phase_snapshot(
     db.add(snapshot)
     await db.flush()
 
-    source_items = await load_top_private_phase_items(db, session_name=session_name, task_id=task_id)
+    source_items = await load_private_phase_items(db, session_name=session_name, task_id=task_id)
     deduplicated_items = deduplicate_private_phase_items(source_items)
     logger.info(
-        "phase_snapshot_create_start session_name=%s task_id=%s from_phase=%s to_phase=%s snapshot_id=%s source_top4_count=%s deduped_count=%s",
+        "phase_snapshot_create_start session_name=%s task_id=%s from_phase=%s to_phase=%s snapshot_id=%s source_item_count=%s deduped_count=%s",
         session_name,
         task_id,
         from_phase,
@@ -224,7 +224,7 @@ async def get_phase_snapshot(
     return result.scalar_one_or_none()
 
 
-async def load_top_private_phase_items(
+async def load_private_phase_items(
     db: AsyncSession,
     *,
     session_name: str,
@@ -244,10 +244,9 @@ async def load_top_private_phase_items(
     )
     grouped: dict[int, list[PrivatePhaseTaskItem]] = defaultdict(list)
     for item in result.scalars().all():
-        if len(grouped[item.user_id]) < 4:
-            grouped[item.user_id].append(item)
+        grouped[item.user_id].append(item)
     logger.info(
-        "phase_snapshot_source_top4_loaded session_name=%s task_id=%s users=%s total_selected=%s",
+        "phase_snapshot_source_items_loaded session_name=%s task_id=%s users=%s total_selected=%s",
         session_name,
         task_id,
         {str(user_id): [item.id for item in items] for user_id, items in grouped.items()},

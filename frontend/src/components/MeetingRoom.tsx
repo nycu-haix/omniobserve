@@ -1,9 +1,9 @@
-import type { DragEndEvent } from "@dnd-kit/core";
-import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, Columns2, GripVertical, Info, Keyboard, Lock, Maximize, Mic, Minimize, Radio, Rows2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -66,6 +66,7 @@ const EMPTY_JITSI_AUDIO_SNAPSHOT: JitsiAudioSnapshot = {
 interface RankingSnapshot {
 	revision: number;
 	items: string[];
+	change_count?: number;
 }
 
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
@@ -84,6 +85,7 @@ const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
 const MIN_TASK_PANE_RATIO = 24;
+const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
 	"phase-task-items": "Task Items",
@@ -284,6 +286,83 @@ function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): s
 	const missingIds = defaultItemIds.filter(id => !rankedValidIds.includes(id));
 
 	return [...rankedValidIds, ...missingIds];
+}
+
+function normalizeRankingLimit(value: unknown): number | undefined {
+	const rankingLimit = Number(value);
+	return Number.isFinite(rankingLimit) && rankingLimit > 0 ? Math.floor(rankingLimit) : undefined;
+}
+
+function shouldDefaultCollapseJitsi() {
+	const roomName = new URLSearchParams(window.location.search)
+		.get("room_name")
+		?.trim()
+		.replace(/^["']|["']$/g, "");
+	return roomName?.startsWith("enhance-the-poster") ?? false;
+}
+
+function getActiveRankingLimit(taskId: string, phase: SessionPhase, configuredLimit: number | undefined, itemCount: number): number | undefined {
+	if (taskId !== "enhance-the-poster" || isPrivatePhase1(phase) || configuredLimit === undefined || itemCount <= 0) {
+		return undefined;
+	}
+	return configuredLimit;
+}
+
+function normalizeRankingChangeCount(value: unknown, rankingLimit: number | undefined, itemCount: number): number | undefined {
+	if (rankingLimit === undefined || itemCount <= 0) {
+		return undefined;
+	}
+	const maxChangeCount = Math.min(rankingLimit, itemCount);
+	const changeCount = Number(value);
+	return Number.isFinite(changeCount) ? Math.max(0, Math.min(Math.floor(changeCount), maxChangeCount)) : maxChangeCount;
+}
+
+function getRankingCutoffDropId(scope: RankingScope) {
+	return `${RANKING_CUTOFF_DROP_PREFIX}${scope}`;
+}
+
+function isRankingCutoffDropId(value: UniqueIdentifier, scope: RankingScope) {
+	return String(value) === getRankingCutoffDropId(scope);
+}
+
+function getNextRankingChangeCount({
+	currentChangeCount,
+	rankingLimit,
+	itemCount,
+	oldIndex,
+	targetIndex
+}: {
+	currentChangeCount: number | undefined;
+	rankingLimit: number | undefined;
+	itemCount: number;
+	oldIndex: number;
+	targetIndex: number;
+}) {
+	if (currentChangeCount === undefined || rankingLimit === undefined) {
+		return currentChangeCount;
+	}
+	const boundedTargetIndex = Math.max(0, Math.min(targetIndex, itemCount));
+	if (oldIndex < currentChangeCount && boundedTargetIndex >= currentChangeCount) {
+		return Math.max(0, currentChangeCount - 1);
+	}
+	if (oldIndex >= currentChangeCount && boundedTargetIndex <= currentChangeCount) {
+		return normalizeRankingChangeCount(currentChangeCount + 1, rankingLimit, itemCount);
+	}
+	return currentChangeCount;
+}
+
+function moveRankingItem(items: LostAtSeaItem[], itemId: UniqueIdentifier, targetIndex: number): LostAtSeaItem[] {
+	const currentOldIndex = items.findIndex(item => item.id === itemId);
+	if (currentOldIndex < 0) {
+		return items;
+	}
+	const nextItems = [...items];
+	const [movedItem] = nextItems.splice(currentOldIndex, 1);
+	nextItems.splice(Math.max(0, Math.min(targetIndex, nextItems.length)), 0, movedItem);
+	return nextItems.map((item, index) => ({
+		...item,
+		rank: index + 1
+	}));
 }
 
 function createRankedItems(itemIds: string[], taskItemsById: Record<string, TaskConfigItem>, defaultItemIds: string[]): LostAtSeaItem[] {
@@ -491,12 +570,20 @@ function getTaskPaneContentAvailability(content: TaskPaneContent, phase: Session
 	return true;
 }
 
-function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
+function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[]; change_count?: number } {
 	return !!message && "type" in message && message.type === "ranking_state" && "items" in message && Array.isArray(message.items);
 }
 
 function isRankingSnapshot(value: unknown): value is RankingSnapshot {
-	return typeof value === "object" && value !== null && "revision" in value && typeof value.revision === "number" && "items" in value && Array.isArray(value.items);
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"revision" in value &&
+		typeof value.revision === "number" &&
+		"items" in value &&
+		Array.isArray(value.items) &&
+		(!("change_count" in value) || typeof value.change_count === "number")
+	);
 }
 
 function isBoardStateMessage(message: object | null): message is {
@@ -543,7 +630,42 @@ function isJoinRejectedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "join_rejected";
 }
 
-function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item: LostAtSeaItem; rankDelta?: number; showImage: boolean; onPreview: (item: LostAtSeaItem) => void }) {
+function RankingCutoffSeparator({ scope, limit, changeCount }: { scope: RankingScope; limit: number; changeCount: number }) {
+	const { setNodeRef, isOver } = useDroppable({
+		id: getRankingCutoffDropId(scope)
+	});
+	const label = changeCount >= limit ? `前 ${limit} 個會納入改善排序；以下項目不會改動` : `前 ${changeCount} 個會納入改善排序（最多 ${limit} 個）；以下項目不會改動`;
+	return (
+		<div
+			ref={setNodeRef}
+			className={cn(
+				"grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-md py-1 text-xs font-medium text-muted-foreground transition-colors",
+				isOver && "bg-primary/5 text-primary"
+			)}
+			aria-label="拖到這條線下方代表不改動"
+		>
+			<span className="h-px bg-border" />
+			<span className="max-w-[min(34rem,78vw)] rounded-full border bg-background px-3 py-1 text-center leading-5">{label}</span>
+			<span className="h-px bg-border" />
+		</div>
+	);
+}
+
+function SortableLostAtSeaItem({
+	item,
+	rankDelta,
+	showImage,
+	rankingLimit,
+	changeCount,
+	onPreview
+}: {
+	item: LostAtSeaItem;
+	rankDelta?: number;
+	showImage: boolean;
+	rankingLimit?: number;
+	changeCount?: number;
+	onPreview: (item: LostAtSeaItem) => void;
+}) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
@@ -552,6 +674,13 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 	const hasRankDelta = rankDeltaAmount > 0;
 	const isRankConflict = rankDeltaAmount > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
 	const rankDeltaDirection = typeof rankDelta === "number" && rankDelta < 0 ? "up" : "down";
+	const isBeyondRankingLimit = changeCount !== undefined && item.rank > changeCount;
+	const itemTitle =
+		isBeyondRankingLimit && rankingLimit !== undefined
+			? `這個項目目前不會改動；拖到分隔線上方可納入排序，最多 ${rankingLimit} 個`
+			: hasRankDelta
+				? `與 Public 排序差 ${rankDeltaAmount} 位`
+				: undefined;
 
 	return (
 		<div
@@ -559,13 +688,14 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 			className={cn(
 				"flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
 				isRankConflict && "border-muted-foreground/30",
+				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
 				isDragging && "opacity-50"
 			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
-			title={hasRankDelta ? `與 Public 排序差 ${rankDeltaAmount} 位` : undefined}
+			title={itemTitle}
 			{...attributes}
 			{...listeners}
 		>
@@ -583,7 +713,9 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
 				</button>
 			)}
-			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
+			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
+				{isBeyondRankingLimit ? "不改" : item.rank}
+			</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			{hasRankDelta && (
 				<span
@@ -614,6 +746,7 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 }
 
 function LostAtSeaRankingPanel({
+	scope,
 	title,
 	status,
 	items,
@@ -624,8 +757,11 @@ function LostAtSeaRankingPanel({
 	showImages,
 	onPreviewItem,
 	getRankDelta,
+	rankingLimit,
+	changeCount,
 	scrollContainerRef
 }: {
+	scope: RankingScope;
 	title: string;
 	status: string;
 	items: LostAtSeaItem[];
@@ -636,6 +772,8 @@ function LostAtSeaRankingPanel({
 	showImages: boolean;
 	onPreviewItem: (item: LostAtSeaItem) => void;
 	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
+	rankingLimit?: number;
+	changeCount?: number;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
 	return (
@@ -644,9 +782,13 @@ function LostAtSeaRankingPanel({
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
-						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} onPreview={onPreviewItem} />
+						{items.map((item, index) => (
+							<Fragment key={item.id}>
+								{rankingLimit !== undefined && changeCount !== undefined && index === changeCount && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
+								<SortableLostAtSeaItem item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} rankingLimit={rankingLimit} changeCount={changeCount} onPreview={onPreviewItem} />
+							</Fragment>
 						))}
+						{rankingLimit !== undefined && changeCount !== undefined && changeCount >= items.length && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
 					</div>
 				</SortableContext>
 			</DndContext>
@@ -1077,11 +1219,14 @@ export default function MeetingRoom() {
 	const [taskReferenceImageSrc, setTaskReferenceImageSrc] = useState("");
 	const [taskReferenceImageAlt, setTaskReferenceImageAlt] = useState("");
 	const [phase1BuilderConfig, setPhase1BuilderConfig] = useState<Phase1BuilderConfig | undefined>();
+	const [taskRankingLimit, setTaskRankingLimit] = useState<number | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
+	const [publicRankingChangeCount, setPublicRankingChangeCount] = useState<number | undefined>();
+	const [privateRankingChangeCount, setPrivateRankingChangeCount] = useState<number | undefined>();
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [phaseLayoutConfigById, setPhaseLayoutConfigById] = useState<Partial<Record<SessionPhase, TaskPaneLayoutConfig>>>({});
 	const [timerEndTime, setTimerEndTime] = useState(0);
@@ -1090,7 +1235,7 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
-	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
+	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -1121,10 +1266,15 @@ export default function MeetingRoom() {
 	const handleJitsiAudioParticipantsChange = useCallback((snapshot: JitsiAudioSnapshot) => {
 		setJitsiAudioSnapshot(snapshot);
 	}, []);
+
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
 	const shouldHighlightRankConflict = isGroupPhase(currentPhase);
+	const publicRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, publicItems.length);
+	const privateRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, privateItems.length);
+	const publicChangeCount = normalizeRankingChangeCount(publicRankingChangeCount, publicRankingLimit, publicItems.length);
+	const privateChangeCount = normalizeRankingChangeCount(privateRankingChangeCount, privateRankingLimit, privateItems.length);
 	const meetingLayoutStyle = {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
@@ -1182,6 +1332,7 @@ export default function MeetingRoom() {
 				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
 				setTaskReferenceImageAlt(taskConfig.reference_image_alt || taskConfig.title);
 				setPhase1BuilderConfig(taskConfig.phase1_builder);
+				setTaskRankingLimit(normalizeRankingLimit(taskConfig.ranking_limit));
 				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
 				setPhaseLayoutConfigById(createPhaseLayoutConfigById(taskConfig.phases));
 				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
@@ -1279,11 +1430,13 @@ export default function MeetingRoom() {
 			if (scope === "private") {
 				setPrivateRankingRevision(snapshot.revision);
 				setPrivateItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+				setPrivateRankingChangeCount(snapshot.change_count);
 				return;
 			}
 
 			setPublicRankingRevision(snapshot.revision);
 			setPublicItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+			setPublicRankingChangeCount(snapshot.change_count);
 		},
 		[defaultItemIds, taskItemsById]
 	);
@@ -1323,11 +1476,21 @@ export default function MeetingRoom() {
 
 		const currentItems = scope === "private" ? privateItems : publicItems;
 		const currentRevision = scope === "private" ? privateRankingRevision : publicRankingRevision;
+		const currentChangeCount = scope === "private" ? privateChangeCount : publicChangeCount;
 		const oldIndex = currentItems.findIndex(item => item.id === active.id);
-		const newIndex = currentItems.findIndex(item => item.id === over.id);
-		if (oldIndex < 0 || newIndex < 0) {
+		const isCutoffDrop = isRankingCutoffDropId(over.id, scope);
+		const newIndex = isCutoffDrop ? currentChangeCount : currentItems.findIndex(item => item.id === over.id);
+		if (oldIndex < 0 || newIndex === undefined || newIndex < 0) {
 			return;
 		}
+		const rankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, currentItems.length);
+		const nextChangeCount = getNextRankingChangeCount({
+			currentChangeCount,
+			rankingLimit,
+			itemCount: currentItems.length,
+			oldIndex,
+			targetIndex: newIndex
+		});
 
 		sendMessage({
 			type: "ranking_move",
@@ -1338,21 +1501,15 @@ export default function MeetingRoom() {
 		});
 
 		const updateItems = (current: LostAtSeaItem[]) => {
-			const currentOldIndex = current.findIndex(item => item.id === active.id);
-			const currentNewIndex = current.findIndex(item => item.id === over.id);
-			if (currentOldIndex < 0 || currentNewIndex < 0) {
-				return current;
-			}
-			return arrayMove(current, currentOldIndex, currentNewIndex).map((item, index) => ({
-				...item,
-				rank: index + 1
-			}));
+			return moveRankingItem(current, active.id, newIndex);
 		};
 
 		if (scope === "private") {
 			setPrivateItems(updateItems);
+			setPrivateRankingChangeCount(nextChangeCount);
 		} else {
 			setPublicItems(updateItems);
+			setPublicRankingChangeCount(nextChangeCount);
 		}
 	};
 
@@ -1497,10 +1654,12 @@ export default function MeetingRoom() {
 					if (publicRanking) {
 						setPublicRankingRevision(publicRanking.revision);
 						setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+						setPublicRankingChangeCount(publicRanking.change_count);
 					}
 					if (privateRanking) {
 						setPrivateRankingRevision(privateRanking.revision);
 						setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+						setPrivateRankingChangeCount(privateRanking.change_count);
 					}
 				}, 0);
 				return () => {
@@ -1536,7 +1695,8 @@ export default function MeetingRoom() {
 			const scope = lastMessage.scope === "private" ? "private" : "public";
 			const nextRanking = {
 				revision: lastMessage.revision,
-				items: lastMessage.items
+				items: lastMessage.items,
+				change_count: lastMessage.change_count
 			};
 			if (isDraggingRef.current[scope]) {
 				pendingRankingRef.current[scope] = nextRanking;
@@ -1602,6 +1762,7 @@ export default function MeetingRoom() {
 					phaseLayoutConfig={phaseLayoutConfigById[currentPhase]}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
+							scope="public"
 							title="Public 排序"
 							status="協作中"
 							items={publicItems}
@@ -1613,11 +1774,14 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("public", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={publicRankingLimit}
+							changeCount={publicChangeCount}
 							scrollContainerRef={publicRankingScrollRef}
 						/>
 					)}
 					renderPrivateRanking={() => (
 						<LostAtSeaRankingPanel
+							scope="private"
 							title="Private 排序"
 							status={`${displayName} (${participantId})`}
 							items={privateItems}
@@ -1629,6 +1793,8 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={privateRankingLimit}
+							changeCount={privateChangeCount}
 							scrollContainerRef={privateRankingScrollRef}
 							getRankDelta={item => {
 								if (!shouldHighlightRankConflict) {

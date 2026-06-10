@@ -39,6 +39,7 @@ interface BoardStateMessage extends RealtimeMessage {
 interface RankingSnapshot {
 	revision: number;
 	items: string[];
+	change_count?: number;
 }
 
 interface AdminRankingStateMessage extends RealtimeMessage {
@@ -262,7 +263,8 @@ function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 		typeof value.revision === "number" &&
 		"items" in value &&
 		Array.isArray(value.items) &&
-		value.items.every(item => typeof item === "string")
+		value.items.every(item => typeof item === "string") &&
+		(!("change_count" in value) || typeof value.change_count === "number")
 	);
 }
 

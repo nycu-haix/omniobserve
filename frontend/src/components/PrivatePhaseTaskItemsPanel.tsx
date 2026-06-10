@@ -72,6 +72,21 @@ function reindexPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePha
 	}));
 }
 
+function minimumItemCount(builder: Phase1BuilderConfig): number {
+	const configuredMinimum = Number(builder.minimum_items);
+	return Number.isFinite(configuredMinimum) && configuredMinimum > 0 ? Math.floor(configuredMinimum) : 4;
+}
+
+function PhaseTaskItemThresholdSeparator({ label }: { label: string }) {
+	return (
+		<div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 py-1 text-xs font-medium text-muted-foreground">
+			<span className="h-px bg-border" />
+			<span className="max-w-[min(28rem,70vw)] rounded-full border bg-background px-3 py-1 text-center leading-5">{label}</span>
+			<span className="h-px bg-border" />
+		</div>
+	);
+}
+
 function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: string; selectedOption?: Phase1BuilderOption; isActive: boolean; onClear: () => void }) {
 	return (
 		<div className={cn("grid min-h-24 gap-2 rounded-lg border border-dashed bg-card p-3 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
@@ -172,6 +187,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const selectedAction = availableActions.find(item => item.id === form.actionId);
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
 	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
+	const requiredItemCount = minimumItemCount(builder);
 
 	const resetForm = useCallback(() => {
 		setForm(createPhaseTaskForm());
@@ -332,20 +348,15 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			<div className="grid gap-2" aria-label="優先改善項目清單">
 				<div className="flex items-center justify-between gap-3">
 					<h3 className="text-sm font-semibold">優先改善項目</h3>
-					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">{items.length}</span>
+					<span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+						{items.length} / 至少 {requiredItemCount}
+					</span>
 				</div>
 				{isLoading && <div className="grid min-h-24 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">載入中</div>}
 				{!isLoading && items.length === 0 && <div className="grid min-h-32 place-items-center rounded-lg border border-dashed text-sm text-muted-foreground">尚無改善項目</div>}
 				{!isLoading &&
 					sortPrivatePhaseTaskItems(items).map((item, index, sortedItems) => (
 						<div key={item.id} className="contents">
-							{index === 4 && (
-								<div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 py-1 text-xs font-medium text-muted-foreground">
-									<span className="h-px bg-border" />
-									<span className="rounded-full border bg-background px-3 py-1">Only the first four items will be saved for Private Phase 2</span>
-									<span className="h-px bg-border" />
-								</div>
-							)}
 							<PrivatePhaseTaskItemRow
 								key={item.id}
 								item={item}
@@ -357,6 +368,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 								onEdit={editTaskItem}
 								onDelete={itemId => void deleteTaskItem(itemId)}
 							/>
+							{index === requiredItemCount - 1 && <PhaseTaskItemThresholdSeparator label={`最低 ${requiredItemCount} 個門檻；下面的項目也會全部帶入下一階段`} />}
 						</div>
 					))}
 			</div>

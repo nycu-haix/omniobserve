@@ -34,6 +34,7 @@ export interface Phase1BuilderConfig {
 	enabled: boolean;
 	title?: string;
 	detail_placeholder?: string;
+	minimum_items?: number;
 	components: Phase1BuilderOption[];
 	actions: Phase1BuilderOption[];
 }
@@ -67,6 +68,7 @@ export interface TaskConfig {
 	reference_image_alt?: string;
 	phases?: TaskPhaseConfig[];
 	phase1_builder?: Phase1BuilderConfig;
+	ranking_limit?: number;
 	items: TaskConfigItem[];
 }
 

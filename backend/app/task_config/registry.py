@@ -112,12 +112,11 @@ def _lost_at_sea_prompt_config() -> TaskPromptConfig:
 
 def _enhance_the_poster_prompt_config() -> TaskPromptConfig:
     task_context = """
-Participants are improving an ugly poster. In private phase 1, each participant proposes four poster task items. Each task item is a structured edit:
-- poster_component: the poster element being changed
-- action: add, remove, or edit
-- advanced_action: the specific edit method such as enlarge, shrink, reposition, rewrite, change_color, change_font, or replace
+Participants are improving an ugly poster. In Private Phase 1, each participant proposes at least four poster task items, with no maximum. Each task item combines:
+- component_id: the poster element being changed
+- action_id: the specific edit action such as remove, move, enlarge, shrink, change_color, change_font, adjust_spacing, unify, replace, or transparency
 
-In phase 2, participants rank the deduplicated set of proposed poster task items by importance.
+In Private Phase 2 and Public Phase, participants rank only the top 15 most important proposed poster task items. Items below the top 15 are treated as not changed.
 """.strip()
     return TaskPromptConfig(
         task_name=enhance_the_poster.TASK_ID,
@@ -137,7 +136,7 @@ In phase 2, participants rank the deduplicated set of proposed poster task items
             ),
         ),
         task_items=[],
-        poster_components=[dict(item) for item in enhance_the_poster.POSTER_COMPONENTS],
-        actions=[dict(item) for item in enhance_the_poster.ACTIONS],
-        advanced_actions=[dict(item) for item in enhance_the_poster.ADVANCED_ACTIONS],
+        poster_components=[dict(item) for item in enhance_the_poster.PHASE1_POSTER_COMPONENTS],
+        actions=[dict(item) for item in enhance_the_poster.PHASE1_ACTION_ITEMS],
+        advanced_actions=[],
     )
