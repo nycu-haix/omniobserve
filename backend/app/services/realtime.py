@@ -17,6 +17,7 @@ from ..models import IdeaBlock, Similarity, Visibility
 from ..schemas import ChatMessageCreate
 from ..task_config import (
     get_default_phase_for_session,
+    get_ranking_limit_for_session,
     get_ranking_items_for_session,
     normalize_phase_for_session,
 )
@@ -703,6 +704,13 @@ def _get_current_ranking_items(session_id: str) -> list[str]:
     return _get_default_ranking_items(session_id)
 
 
+def _get_active_ranking_limit(session_id: str) -> int | None:
+    ranking_limit = get_ranking_limit_for_session(session_name=session_id)
+    if ranking_limit is None:
+        return None
+    return ranking_limit if len(_get_current_ranking_items(session_id)) > ranking_limit else None
+
+
 def _get_current_ranking_item_catalog(session_id: str) -> list[dict[str, Any]] | None:
     catalog = session_ranking_item_catalog.get(session_id)
     return [dict(item) for item in catalog] if catalog else None
@@ -815,9 +823,11 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     }
 
 
-def _apply_ranking_move(items: list[str], item_id: str, to_index: int) -> list[str]:
+def _apply_ranking_move(items: list[str], item_id: str, to_index: int, *, ranking_limit: int | None = None) -> list[str]:
     if item_id not in items:
         raise ValueError("ranking item does not exist")
+    if ranking_limit is not None and to_index >= ranking_limit:
+        raise ValueError(f"only the first {ranking_limit} ranking positions can be changed")
     next_items = [item for item in items if item != item_id]
     bounded_index = max(0, min(to_index, len(next_items)))
     next_items.insert(bounded_index, item_id)
@@ -930,8 +940,12 @@ async def handle_board_websocket(
                         else None
                     )
                     try:
+                        ranking_limit = _get_active_ranking_limit(session_id)
                         next_items = _apply_ranking_move(
-                            previous_items, item_id, to_index
+                            previous_items,
+                            item_id,
+                            to_index,
+                            ranking_limit=ranking_limit,
                         )
                     except ValueError as exc:
                         logger.warning(

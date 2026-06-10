@@ -3,7 +3,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, Columns2, GripVertical, Info, Keyboard, Lock, Maximize, Mic, Minimize, Radio, Rows2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -286,6 +286,18 @@ function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): s
 	return [...rankedValidIds, ...missingIds];
 }
 
+function normalizeRankingLimit(value: unknown): number | undefined {
+	const rankingLimit = Number(value);
+	return Number.isFinite(rankingLimit) && rankingLimit > 0 ? Math.floor(rankingLimit) : undefined;
+}
+
+function getActiveRankingLimit(taskId: string, phase: SessionPhase, configuredLimit: number | undefined, itemCount: number): number | undefined {
+	if (taskId !== "enhance-the-poster" || isPrivatePhase1(phase) || configuredLimit === undefined || itemCount <= configuredLimit) {
+		return undefined;
+	}
+	return configuredLimit;
+}
+
 function createRankedItems(itemIds: string[], taskItemsById: Record<string, TaskConfigItem>, defaultItemIds: string[]): LostAtSeaItem[] {
 	return normalizeRankingItemIds(itemIds, defaultItemIds).map((id, index) =>
 		createLostAtSeaItem(
@@ -543,7 +555,29 @@ function isJoinRejectedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "join_rejected";
 }
 
-function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item: LostAtSeaItem; rankDelta?: number; showImage: boolean; onPreview: (item: LostAtSeaItem) => void }) {
+function RankingLimitSeparator({ limit }: { limit: number }) {
+	return (
+		<div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 py-1 text-xs font-medium text-muted-foreground">
+			<span className="h-px bg-border" />
+			<span className="max-w-[min(30rem,72vw)] rounded-full border bg-background px-3 py-1 text-center leading-5">前 {limit} 個會納入改善排序；以下項目不會改動</span>
+			<span className="h-px bg-border" />
+		</div>
+	);
+}
+
+function SortableLostAtSeaItem({
+	item,
+	rankDelta,
+	showImage,
+	rankingLimit,
+	onPreview
+}: {
+	item: LostAtSeaItem;
+	rankDelta?: number;
+	showImage: boolean;
+	rankingLimit?: number;
+	onPreview: (item: LostAtSeaItem) => void;
+}) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
 		id: item.id
 	});
@@ -552,6 +586,8 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 	const hasRankDelta = rankDeltaAmount > 0;
 	const isRankConflict = rankDeltaAmount > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
 	const rankDeltaDirection = typeof rankDelta === "number" && rankDelta < 0 ? "up" : "down";
+	const isBeyondRankingLimit = rankingLimit !== undefined && item.rank > rankingLimit;
+	const itemTitle = isBeyondRankingLimit ? `第 ${rankingLimit + 1} 名以後目前不會改動；拖到前 ${rankingLimit} 可納入排序` : hasRankDelta ? `與 Public 排序差 ${rankDeltaAmount} 位` : undefined;
 
 	return (
 		<div
@@ -559,13 +595,14 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 			className={cn(
 				"flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
 				isRankConflict && "border-muted-foreground/30",
+				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
 				isDragging && "opacity-50"
 			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
-			title={hasRankDelta ? `與 Public 排序差 ${rankDeltaAmount} 位` : undefined}
+			title={itemTitle}
 			{...attributes}
 			{...listeners}
 		>
@@ -583,7 +620,9 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
 				</button>
 			)}
-			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
+			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
+				{isBeyondRankingLimit ? "不改" : item.rank}
+			</span>
 			<span className="min-w-0 flex-1">{item.label}</span>
 			{hasRankDelta && (
 				<span
@@ -624,6 +663,7 @@ function LostAtSeaRankingPanel({
 	showImages,
 	onPreviewItem,
 	getRankDelta,
+	rankingLimit,
 	scrollContainerRef
 }: {
 	title: string;
@@ -636,6 +676,7 @@ function LostAtSeaRankingPanel({
 	showImages: boolean;
 	onPreviewItem: (item: LostAtSeaItem) => void;
 	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
+	rankingLimit?: number;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
 }) {
 	return (
@@ -644,8 +685,11 @@ function LostAtSeaRankingPanel({
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
 					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
-						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} onPreview={onPreviewItem} />
+						{items.map((item, index) => (
+							<Fragment key={item.id}>
+								{rankingLimit !== undefined && index === rankingLimit && <RankingLimitSeparator limit={rankingLimit} />}
+								<SortableLostAtSeaItem item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} rankingLimit={rankingLimit} onPreview={onPreviewItem} />
+							</Fragment>
 						))}
 					</div>
 				</SortableContext>
@@ -1077,6 +1121,7 @@ export default function MeetingRoom() {
 	const [taskReferenceImageSrc, setTaskReferenceImageSrc] = useState("");
 	const [taskReferenceImageAlt, setTaskReferenceImageAlt] = useState("");
 	const [phase1BuilderConfig, setPhase1BuilderConfig] = useState<Phase1BuilderConfig | undefined>();
+	const [taskRankingLimit, setTaskRankingLimit] = useState<number | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
@@ -1125,6 +1170,8 @@ export default function MeetingRoom() {
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
 	const shouldHighlightRankConflict = isGroupPhase(currentPhase);
+	const publicRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, publicItems.length);
+	const privateRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, privateItems.length);
 	const meetingLayoutStyle = {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
@@ -1182,6 +1229,7 @@ export default function MeetingRoom() {
 				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
 				setTaskReferenceImageAlt(taskConfig.reference_image_alt || taskConfig.title);
 				setPhase1BuilderConfig(taskConfig.phase1_builder);
+				setTaskRankingLimit(normalizeRankingLimit(taskConfig.ranking_limit));
 				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
 				setPhaseLayoutConfigById(createPhaseLayoutConfigById(taskConfig.phases));
 				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
@@ -1326,6 +1374,10 @@ export default function MeetingRoom() {
 		const oldIndex = currentItems.findIndex(item => item.id === active.id);
 		const newIndex = currentItems.findIndex(item => item.id === over.id);
 		if (oldIndex < 0 || newIndex < 0) {
+			return;
+		}
+		const rankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, currentItems.length);
+		if (rankingLimit !== undefined && newIndex >= rankingLimit) {
 			return;
 		}
 
@@ -1613,6 +1665,7 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("public", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={publicRankingLimit}
 							scrollContainerRef={publicRankingScrollRef}
 						/>
 					)}
@@ -1629,6 +1682,7 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={privateRankingLimit}
 							scrollContainerRef={privateRankingScrollRef}
 							getRankDelta={item => {
 								if (!shouldHighlightRankConflict) {

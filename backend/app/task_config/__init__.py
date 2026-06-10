@@ -96,6 +96,15 @@ def get_ranking_items_for_session(session_name: str | None = None, task_id: str 
     return list(get_task_module(session_name=session_name, task_id=task_id).RANKING_ITEMS)
 
 
+def get_ranking_limit_for_session(session_name: str | None = None, task_id: str | None = None) -> int | None:
+    value = get_task_config_for_session(session_name=session_name, task_id=task_id).get("ranking_limit")
+    try:
+        ranking_limit = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ranking_limit if ranking_limit > 0 else None
+
+
 def get_ranking_item_display_names_for_session(session_name: str | None = None, task_id: str | None = None) -> dict[str, tuple[str, str]]:
     return dict(get_task_module(session_name=session_name, task_id=task_id).RANKING_ITEM_DISPLAY_NAMES)
 
@@ -134,6 +143,8 @@ def serialize_task_config(session_name: str | None = None, task_id: str | None =
             for item in config["items"]
         ],
     }
+    if config.get("ranking_limit"):
+        payload["ranking_limit"] = config["ranking_limit"]
     if config.get("reference_image_src"):
         payload["reference_image_src"] = config["reference_image_src"]
     if config.get("reference_image_alt"):
@@ -171,6 +182,7 @@ __all__ = [
     "TASK_TOPIC_DETAIL",
     "TOPIC_DESCRIPTION",
     "get_llm_topic_description_for_session",
+    "get_ranking_limit_for_session",
     "get_ranking_item_display_names_for_session",
     "get_ranking_items_for_session",
     "get_similarity_task_context_for_session",

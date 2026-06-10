@@ -18,12 +18,16 @@ TASK_TITLE = "Enhance the Poster"
 TEMPLATE_DESCRIPTION = "針對淨灘活動招募海報，建立並排序優先改善的 task items。"
 REFERENCE_IMAGE_SRC = "/task-assets/beach-cleanup-poster.png"
 REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
+PHASE1_MIN_TASK_ITEMS = 4
+RANKING_IMPORTANCE_LIMIT = 15
 
 TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
 
 你們的任務是：**先各自建立最值得優先改善的 task items，再於小組討論時整合成共同優先順序。**
 
-Private Phase 1 請從預設的海報元件與改善動作中組合 task item，並依照優先改善順序排列。排序時請考慮：路過的人能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易被注意並掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。"""
+Private Phase 1 請從預設的海報元件與改善動作中組合至少 4 個 task items，沒有數量上限，並依照優先改善順序排列。進入 Private Phase 2 後，所有成員建立的 task items 會集中在一起；Private Phase 2 與 Public Phase 都只需要排序前 15 個最重要的改善項目，排在第 16 個之後的項目表示不會改動。
+
+排序時請考慮：路過的人能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易被注意並掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。"""
 
 TASK_ITEMS: list[TaskItemConfig] = [
     {
@@ -358,6 +362,7 @@ PHASE1_ACTION_ITEMS = [
 PHASE1_BUILDER_CONFIG = {
     "enabled": True,
     "title": "第一階段改善項目",
+    "minimum_items": PHASE1_MIN_TASK_ITEMS,
     "components": PHASE1_POSTER_COMPONENTS,
     "actions": PHASE1_ACTION_ITEMS,
 }
@@ -379,7 +384,7 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 
 請先獨立檢視海報草稿，不要和其他人討論。
 
-根據你自己的判斷，從預設的海報元件與改善動作中組合出最值得優先改善的 task items，並依照優先順序排列。
+根據你自己的判斷，從預設的海報元件與改善動作中組合出至少 4 個最值得優先改善的 task items。你可以建立超過 4 個，所有項目都會帶到下一階段。
 
 請注意：
 
@@ -389,7 +394,7 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 
 完成個人排序後，請和小組成員討論。
 
-你們需要共同產生一份小組優先改善清單。小組清單不一定要完全符合任何一位成員的個人清單，但每個成員的意見都應該被聽見。你們需要透過討論、說服、妥協，形成一份大家都能接受的共同排序。
+你們需要共同產生一份小組優先改善清單。請只排序前 15 個最重要的改善項目；第 16 個之後代表暫時不會改動。小組清單不一定要完全符合任何一位成員的個人清單，但每個成員的意見都應該被聽見。你們需要透過討論、說服、妥協，形成一份大家都能接受的共同排序。
 
 ---
 
@@ -400,13 +405,14 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 TASK_TOPIC_DETAIL = (
     "你們正在檢視一張淨灘活動招募海報。海報目前包含淨灘插圖、主標語「一起來淨灘吧!」、"
     "日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、用品說明與報名 QR Code。"
-    "Private Phase 1 請從預設的海報元件與改善動作中建立具體 task items，並將最應該優先改善的項目排在前面。"
+    "Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將最應該優先改善的項目排在前面。"
+    "Private Phase 2 與 Public Phase 只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。"
     "建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、"
     "視覺層次是否有效，以及資訊是否足以讓人安心參與。"
 )
 
 SIMILARITY_TASK_CONTEXT = (
-    "參與者正在針對淨灘活動招募海報的 15 個改善面向進行優先順序排序，分析必須基於提升海報招募效果的目標：\n"
+    "參與者正在針對淨灘活動招募海報建立改善項目，並在後續階段排序前 15 個最重要的改善項目。分析必須基於提升海報招募效果的目標：\n"
     + "- "
     + "、".join(f"{item['label_zh']} ({item['id']})" for item in TASK_ITEMS)
     + "。"
@@ -455,6 +461,7 @@ TASK_CONFIG = {
     "reference_image_src": REFERENCE_IMAGE_SRC,
     "reference_image_alt": REFERENCE_IMAGE_ALT,
     "phase1_builder": PHASE1_BUILDER_CONFIG,
+    "ranking_limit": RANKING_IMPORTANCE_LIMIT,
 }
 
 
@@ -469,6 +476,7 @@ def serialize_task_config() -> dict[str, Any]:
         "reference_image_alt": REFERENCE_IMAGE_ALT,
         "phases": TASK_PHASES,
         "phase1_builder": PHASE1_BUILDER_CONFIG,
+        "ranking_limit": RANKING_IMPORTANCE_LIMIT,
         "items": [
             {
                 "id": item["id"],

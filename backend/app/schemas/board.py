@@ -139,6 +139,7 @@ class Phase1BuilderResponse(BaseModel):
     enabled: bool = True
     title: str | None = None
     detail_placeholder: str | None = None
+    minimum_items: int | None = None
     components: list[Phase1BuilderOptionResponse]
     actions: list[Phase1BuilderOptionResponse]
 
@@ -159,6 +160,7 @@ class TaskConfigResponse(BaseModel):
     reference_image_alt: str | None = None
     phases: list[TaskPhaseResponse] = Field(default_factory=list)
     phase1_builder: Phase1BuilderResponse | None = None
+    ranking_limit: int | None = None
     items: list[TaskConfigItemResponse]
 
 
