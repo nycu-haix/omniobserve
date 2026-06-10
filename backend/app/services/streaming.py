@@ -16,8 +16,9 @@ from ..task_config import resolve_task_id
 from ..task_config.registry import normalize_task_name
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
+from .board_payloads import serialize_frontend_board_idea_block, serialize_frontend_board_idea_block_update
 from .participant_status import mark_audio_disconnected, update_audio_status
-from .realtime import broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
+from .realtime import board_manager, broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
@@ -234,6 +235,45 @@ async def send_provisional_idea_blocks_update(
             "client_segment_ids": client_segment_ids or [],
             "generation_complete": False,
         },
+    )
+
+
+async def send_board_idea_blocks_update(
+    *,
+    session_name: str,
+    participant_id: str,
+    idea_blocks: list[Any],
+    duplicate_idea_blocks: list[Any],
+) -> None:
+    sent_count = 0
+    for idea_block in idea_blocks:
+        if await board_manager.send_to(
+            session_name,
+            participant_id,
+            {
+                "type": "new_idea_block",
+                "payload": serialize_frontend_board_idea_block(idea_block),
+            },
+        ):
+            sent_count += 1
+
+    for duplicate_idea_block in duplicate_idea_blocks:
+        await board_manager.send_to(
+            session_name,
+            participant_id,
+            {
+                "type": "update_idea_block",
+                "payload": serialize_frontend_board_idea_block_update(duplicate_idea_block),
+            },
+        )
+
+    logger.info(
+        "pipeline_board_idea_blocks_update_sent session_name=%s participant_id=%s idea_blocks=%s duplicate_idea_blocks=%s sent=%s",
+        session_name,
+        participant_id,
+        len(idea_blocks),
+        len(duplicate_idea_blocks),
+        sent_count,
     )
 
 
@@ -673,6 +713,13 @@ async def handle_audio_stream_websocket(
                         participant_id=participant_id,
                         idea_blocks=idea_blocks_payload,
                     )
+                    if pipeline_result is not None:
+                        await send_board_idea_blocks_update(
+                            session_name=session_name,
+                            participant_id=participant_id,
+                            idea_blocks=pipeline_result.idea_blocks,
+                            duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                        )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -1213,6 +1260,13 @@ async def handle_transcript_segments_websocket(
                     participant_id=participant_id,
                     idea_blocks=serialized_result["idea_blocks"],
                 )
+                if pipeline_result is not None:
+                    await send_board_idea_blocks_update(
+                        session_name=session_name,
+                        participant_id=participant_id,
+                        idea_blocks=pipeline_result.idea_blocks,
+                        duplicate_idea_blocks=pipeline_result.duplicate_idea_blocks,
+                    )
                 logger.info(
                     "pipeline_ws_send_task_items_update session_name=%s participant_id=%s task_items=%s",
                     session_name,
