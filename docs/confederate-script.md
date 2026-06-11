@@ -1,6 +1,6 @@
 # 暗樁參與者發言提綱索引
 
-本文件是暗樁稿的總入口，和目前系統支援的 task prompt list 對齊。舊版英文 Lost-at-Sea only 暗樁稿已由下列兩份正式中文內部稿取代。
+本文件是暗樁稿的總入口，和目前系統支援的 task prompt list 對齊。目前正式使用的是下列兩份中文內部稿，分別對應兩個不同 task；兩份都是現行版本，沒有新舊或取代關係。
 
 本文件與所有暗樁稿都僅供研究團隊內部準備使用，請勿提供給一般參與者。
 
@@ -8,12 +8,12 @@
 
 目前後端 task prompt list 來源為 `backend/app/task_config/registry.py`，支援兩個 task：
 
-| task_id | 系統任務名稱 | 暗樁稿 |
+| task_id | 系統任務名稱 | 正式中文暗樁稿 |
 | --- | --- | --- |
 | `lost-at-sea` | Lost at Sea | [Lost-at-Sea 暗樁發言提綱](confederate-script.zh.md) |
 | `enhance-the-poster` | Enhance the Poster | [Enhance-the-Poster 暗樁發言提綱](confederate-script-enhance-the-poster.zh.md) |
 
-正式實驗同一組會連續完成兩個 task，因此暗樁應在實驗前讀完兩份稿，並依當輪 task 使用對應立場。
+正式實驗同一組會連續完成兩個 task，因此暗樁應在實驗前讀完兩份稿，並依當輪 task 使用對應立場。若仍看到英文 Lost-at-Sea-only 草稿，僅視為歷史參考，不列入正式實驗使用文件。
 
 ## 共通原則
 
