@@ -40,6 +40,10 @@ from .public_context_matching import (
     find_public_context_task_item_matches,
 )
 from .phase_task_item_snapshot_service import initialize_phase_rankings
+from .ranking_phase_snapshot_service import (
+    create_phase_boundary_ranking_snapshots,
+    create_reflect_ranking_move_snapshot,
+)
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
 from .ranking_cutoff import (
     build_ranking_items_with_cutoff,
@@ -1230,9 +1234,10 @@ async def handle_board_websocket(
                     next_revision = state["revision"] + 1
                     next_real_items, _ = split_ranking_items(next_items)
                     final_to_index = next_real_items.index(item_id)
+                    saved_ranking_move_id: int | None = None
                     async with SessionLocal() as db:
                         try:
-                            await create_ranking_move(
+                            saved_ranking_move = await create_ranking_move(
                                 session_name=session_id,
                                 participant_id=participant_id,
                                 scope=scope,
@@ -1247,6 +1252,18 @@ async def handle_board_websocket(
                                 items=next_items,
                                 db=db,
                             )
+                            saved_ranking_move_id = saved_ranking_move.id
+                            if _get_session_phase(session_id) == "reflect" and scope == "private":
+                                await create_reflect_ranking_move_snapshot(
+                                    db,
+                                    session_name=session_id,
+                                    condition=session_cue_conditions[session_id],
+                                    cue_enabled=is_similarity_cue_enabled(session_id),
+                                    participant_id=participant_id,
+                                    state={"items": next_items, "revision": next_revision},
+                                    ranking_move_id=saved_ranking_move_id,
+                                    ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
+                                )
                         except Exception as exc:
                             await db.rollback()
                             logger.warning(
@@ -1271,13 +1288,14 @@ async def handle_board_websocket(
                     state["items"] = next_items
                     state["revision"] = next_revision
                     logger.info(
-                        "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s",
+                        "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s ranking_move_id=%s",
                         session_id,
                         state["revision"],
                         participant_id,
                         scope,
                         state["items"],
                         board_manager.get_participants(session_id),
+                        saved_ranking_move_id,
                     )
                     ranking_payload = _ranking_payload(session_id, state)
                     message = {
@@ -1457,8 +1475,26 @@ async def handle_admin_websocket(
                             *private_ranking_state[session_id].keys(),
                         }
                     )
+                    ranking_initialization = None
                     async with SessionLocal() as db:
                         try:
+                            if new_phase != previous_phase:
+                                await create_phase_boundary_ranking_snapshots(
+                                    db,
+                                    session_name=session_id,
+                                    from_phase=previous_phase,
+                                    to_phase=new_phase,
+                                    condition=session_cue_conditions[session_id],
+                                    cue_enabled=is_similarity_cue_enabled(session_id),
+                                    participant_ids=[
+                                        participant_id
+                                        for participant_id in participant_ids
+                                        if not _is_admin_participant_id(participant_id)
+                                    ],
+                                    private_ranking_states=private_ranking_state[session_id],
+                                    public_ranking_state=public_ranking_state.get(session_id),
+                                    ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
+                                )
                             if new_phase == "group" and previous_phase != "group":
                                 for checkpoint_participant_id in [
                                     participant_id
@@ -1526,7 +1562,17 @@ async def handle_admin_websocket(
                                 new_phase,
                                 exc,
                             )
-                            ranking_initialization = None
+                            await admin_manager.send_to(
+                                session_id,
+                                admin_id,
+                                {
+                                    "type": "phase_transition_error",
+                                    "reason": "failed to save phase ranking snapshot",
+                                    "from_phase": previous_phase,
+                                    "to_phase": new_phase,
+                                },
+                            )
+                            continue
 
                     if ranking_initialization is not None:
                         session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items

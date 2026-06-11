@@ -1,4 +1,4 @@
-export type SessionPhase = "private" | "private_phase_1" | "private_phase_2" | "group";
+export type SessionPhase = "private" | "private_phase_1" | "private_phase_2" | "group" | "reflect";
 
 export interface SessionPhaseOption {
 	id: SessionPhase;
@@ -31,6 +31,9 @@ export function normalizeSessionPhase(value: unknown): SessionPhase | null {
 	}
 	if (phase === "group" || phase === "group_phase" || phase === "public" || phase === "public_phase") {
 		return "group";
+	}
+	if (phase === "reflect" || phase === "reflect_phase" || phase === "reflection" || phase === "reflection_phase") {
+		return "reflect";
 	}
 	return null;
 }
@@ -68,6 +71,9 @@ export function getSessionPhaseLabel(phase: SessionPhase, phases?: SessionPhaseO
 	if (phase === "private_phase_2") {
 		return "Private Phase 2";
 	}
+	if (phase === "reflect") {
+		return "Reflect Phase";
+	}
 	return "Public Phase";
 }
 
@@ -81,4 +87,8 @@ export function isPrivatePhase1(phase: SessionPhase): boolean {
 
 export function isPrivatePhase2(phase: SessionPhase): boolean {
 	return phase === "private_phase_2";
+}
+
+export function isReflectPhase(phase: SessionPhase): boolean {
+	return phase === "reflect";
 }
