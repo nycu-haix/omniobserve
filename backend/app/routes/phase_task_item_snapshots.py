@@ -41,7 +41,7 @@ async def read_latest_phase_task_item_snapshot(
     description=(
         "Convenience read for the latest deduplicated poster task item candidates. "
         "Each item has a ranking_item_id like snapshot-item:{id}; strip the prefix to join back to "
-        "phase_task_item_snapshot_items. Deduplication is by component_id + action_id + statement."
+        "phase_task_item_snapshot_items. Deduplication is by component_id + action_id + detail."
     ),
 )
 async def read_latest_phase_task_item_snapshot_items(

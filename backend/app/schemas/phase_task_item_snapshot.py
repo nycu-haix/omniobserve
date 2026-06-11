@@ -13,6 +13,7 @@ class PhaseTaskItemSnapshotItemResponse(BaseModel):
     component_label: str
     action_id: str
     action_label: str
+    detail: str
     statement: str
     source_user_ids: list[int]
     source_priorities: list[dict[str, Any]]
@@ -28,4 +29,3 @@ class PhaseTaskItemSnapshotResponse(BaseModel):
     shuffle_seed: str
     created_at: datetime
     items: list[PhaseTaskItemSnapshotItemResponse]
-

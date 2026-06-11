@@ -35,7 +35,7 @@ def snapshot_item_id(item_id: int) -> str:
 
 
 def _snapshot_dedupe_key(item: PrivatePhaseTaskItem) -> tuple[str, str, str]:
-    return (item.component_id, item.action_id, item.statement)
+    return (item.component_id, item.action_id, item.detail or "")
 
 
 async def initialize_phase_rankings(
@@ -186,6 +186,7 @@ async def get_or_create_phase_snapshot(
                 component_label=item.component_label,
                 action_id=item.action_id,
                 action_label=item.action_label,
+                detail=item.detail or "",
                 statement=item.statement,
                 source_user_ids=source_user_ids,
                 source_priorities=source_priorities,
@@ -267,11 +268,11 @@ def deduplicate_private_phase_items(items: list[PrivatePhaseTaskItem]) -> list[P
         key = _snapshot_dedupe_key(item)
         if key in seen:
             logger.info(
-                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s statement=%s user_id=%s priority=%s",
+                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s detail=%s user_id=%s priority=%s",
                 item.id,
                 item.component_id,
                 item.action_id,
-                item.statement,
+                item.detail,
                 item.user_id,
                 item.priority,
             )

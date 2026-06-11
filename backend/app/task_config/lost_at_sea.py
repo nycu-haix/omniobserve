@@ -280,6 +280,13 @@ PRIVATE_RANKING_LAYOUT = {
     "type": "leaf",
     "content": "private-ranking",
 }
+PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 58,
+    "first": {"type": "leaf", "content": "private-ranking"},
+    "second": {"type": "leaf", "content": "task-instructions"},
+}
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
@@ -289,7 +296,7 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
 }
 
 TASK_PHASES = [
-    {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
+    {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
 ]
 
