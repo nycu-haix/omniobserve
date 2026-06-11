@@ -20,6 +20,7 @@ REFERENCE_IMAGE_SRC = "/task-assets/beach-cleanup-poster.png"
 REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
+CUSTOM_DETAIL_ACTION_ID = "custom_detail"
 
 TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
 
@@ -357,7 +358,20 @@ PHASE1_ACTION_ITEMS = [
         "label_en": "Adjust transparency",
         "template_zh": "調整「{component}」透明度",
     },
+    {
+        "id": CUSTOM_DETAIL_ACTION_ID,
+        "label_zh": "自訂動作",
+        "label_en": "Custom action",
+        "description_zh": "用自己的文字描述要怎麼調整這個元件。",
+        "template_zh": "自訂調整「{component}」",
+        "requires_detail": True,
+    },
 ]
+
+for component in PHASE1_POSTER_COMPONENTS:
+    allowed_action_ids = component.get("allowed_action_ids")
+    if isinstance(allowed_action_ids, list) and CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(CUSTOM_DETAIL_ACTION_ID)
 
 PHASE1_BUILDER_CONFIG = {
     "enabled": True,

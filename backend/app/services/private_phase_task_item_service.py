@@ -34,6 +34,11 @@ def _build_statement(component: dict[str, Any], action: dict[str, Any], detail: 
     return statement
 
 
+def _validate_action_detail(action: dict[str, Any], detail: str) -> None:
+    if action.get("requires_detail") and not detail:
+        raise HTTPException(status_code=422, detail="Custom action detail is required")
+
+
 def _resolve_builder_options(
     *,
     session_name: str,
@@ -107,6 +112,7 @@ async def create_private_phase_task_item(
         component_id=payload.component_id,
         action_id=payload.action_id,
     )
+    _validate_action_detail(action, detail)
 
     max_priority = await db.scalar(
         select(func.max(PrivatePhaseTaskItem.priority)).where(
@@ -159,6 +165,7 @@ async def update_private_phase_task_item(
         component_id=component_id,
         action_id=action_id,
     )
+    _validate_action_detail(action, detail)
 
     item.component_id = str(component["id"])
     item.component_label = _option_label(component)

@@ -28,6 +28,7 @@ export interface Phase1BuilderOption {
 	description_zh?: string;
 	template_zh?: string;
 	allowed_action_ids?: string[];
+	requires_detail?: boolean | null;
 }
 
 export interface Phase1BuilderConfig {

@@ -23,6 +23,7 @@ interface PrivatePhaseTaskItemsPanelProps {
 interface PhaseTaskFormState {
 	componentId: string;
 	actionId: string;
+	detail: string;
 }
 
 type KeywordKind = "component" | "action";
@@ -30,7 +31,8 @@ type KeywordKind = "component" | "action";
 function createPhaseTaskForm(): PhaseTaskFormState {
 	return {
 		componentId: "",
-		actionId: ""
+		actionId: "",
+		detail: ""
 	};
 }
 
@@ -39,13 +41,15 @@ function getParticipantUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined): string {
+function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined, detail = ""): string {
 	if (!component || !action) {
 		return "";
 	}
 
 	const template = action.template_zh?.trim();
-	return template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
+	const statement = template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
+	const normalizedDetail = detail.trim();
+	return normalizedDetail ? `${statement}：${normalizedDetail}` : statement;
 }
 
 function getAllowedActionsForComponent(component: Phase1BuilderOption | undefined, actions: Phase1BuilderOption[]): Phase1BuilderOption[] {
@@ -185,8 +189,10 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
 	const availableActions = getAllowedActionsForComponent(selectedComponent, builder.actions);
 	const selectedAction = availableActions.find(item => item.id === form.actionId);
-	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
-	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
+	const selectedActionRequiresDetail = !!selectedAction?.requires_detail;
+	const normalizedDetail = form.detail.trim();
+	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
+	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving;
 	const requiredItemCount = minimumItemCount(builder);
 
 	const resetForm = useCallback(() => {
@@ -199,10 +205,12 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		const timer = window.setTimeout(() => {
 			setForm(current => {
 				const component = builder.components.find(item => item.id === current.componentId);
-				const hasAction = getAllowedActionsForComponent(component, builder.actions).some(item => item.id === current.actionId);
+				const availableActionsForComponent = getAllowedActionsForComponent(component, builder.actions);
+				const action = availableActionsForComponent.find(item => item.id === current.actionId);
 				return {
 					componentId: component ? current.componentId : "",
-					actionId: component && hasAction ? current.actionId : ""
+					actionId: component && action ? current.actionId : "",
+					detail: component && action?.requires_detail ? current.detail : ""
 				};
 			});
 		}, 0);
@@ -247,10 +255,12 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setIsSaving(true);
 		setError(null);
 		try {
+			const detail = selectedActionRequiresDetail ? normalizedDetail : "";
 			if (editingItemId !== null) {
 				const updatedItem = await updatePrivatePhaseTaskItem(sessionId, participantUserId, editingItemId, {
 					component_id: selectedComponent.id,
-					action_id: selectedAction.id
+					action_id: selectedAction.id,
+					detail
 				});
 				setItems(current => sortPrivatePhaseTaskItems(current.map(item => (item.id === updatedItem.id ? updatedItem : item))));
 			} else {
@@ -258,7 +268,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					task_id: taskId,
 					component_id: selectedComponent.id,
 					action_id: selectedAction.id,
-					detail: ""
+					detail
 				});
 				setItems(current => sortPrivatePhaseTaskItems([...current, createdItem]));
 			}
@@ -274,16 +284,20 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setForm(current => {
 			if (kind === "component") {
 				const component = builder.components.find(item => item.id === id);
-				const canKeepAction = getAllowedActionsForComponent(component, builder.actions).some(action => action.id === current.actionId);
+				const availableActionsForComponent = getAllowedActionsForComponent(component, builder.actions);
+				const action = availableActionsForComponent.find(action => action.id === current.actionId);
 				return {
 					componentId: id,
-					actionId: canKeepAction ? current.actionId : ""
+					actionId: action ? current.actionId : "",
+					detail: action?.requires_detail ? current.detail : ""
 				};
 			}
 
+			const action = availableActions.find(action => action.id === id);
 			return {
 				...current,
-				actionId: id
+				actionId: id,
+				detail: action?.requires_detail ? current.detail : ""
 			};
 		});
 		setError(null);
@@ -293,7 +307,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setEditingItemId(item.id);
 		setForm({
 			componentId: item.component_id,
-			actionId: item.action_id
+			actionId: item.action_id,
+			detail: item.detail
 		});
 		setError(null);
 	};
@@ -380,7 +395,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						selectedOption={selectedComponent}
 						isActive={!!selectedComponent}
 						onClear={() => {
-							setForm(current => ({ ...current, componentId: "" }));
+							setForm(current => ({ ...current, componentId: "", actionId: "", detail: "" }));
 							setError(null);
 						}}
 					/>
@@ -389,7 +404,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						selectedOption={selectedAction}
 						isActive={!!selectedAction}
 						onClear={() => {
-							setForm(current => ({ ...current, actionId: "" }));
+							setForm(current => ({ ...current, actionId: "", detail: "" }));
 							setError(null);
 						}}
 					/>
@@ -431,6 +446,22 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 							</div>
 						) : (
 							<div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">先選擇海報元件</div>
+						)}
+						{selectedActionRequiresDetail && (
+							<label className="grid gap-1.5">
+								<span className="text-xs font-medium text-muted-foreground">自訂動作內容</span>
+								<textarea
+									value={form.detail}
+									maxLength={280}
+									className="min-h-20 resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-ring"
+									placeholder="例如：改成更有活動邀請感的語氣"
+									onChange={event => {
+										setForm(current => ({ ...current, detail: event.target.value }));
+										setError(null);
+									}}
+								/>
+								<span className="text-xs text-muted-foreground">{normalizedDetail.length === 0 ? "請輸入自訂動作內容" : `${form.detail.length} / 280`}</span>
+							</label>
 						)}
 					</div>
 				</div>
