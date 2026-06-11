@@ -515,22 +515,12 @@ SIMILARITY_TASK_CONTEXT = (
 )
 
 PHASE1_TASK_ITEM_BUILDER_LAYOUT = {
-    "type": "split",
-    "direction": "horizontal",
-    "ratio": 58,
-    "first": {"type": "leaf", "content": "phase-task-items"},
-    "second": {"type": "leaf", "content": "task-instructions"},
+    "type": "leaf",
+    "content": "phase-task-items",
 }
 PRIVATE_RANKING_LAYOUT = {
     "type": "leaf",
     "content": "private-ranking",
-}
-PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT = {
-    "type": "split",
-    "direction": "horizontal",
-    "ratio": 58,
-    "first": {"type": "leaf", "content": "private-ranking"},
-    "second": {"type": "leaf", "content": "task-instructions"},
 }
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
@@ -542,7 +532,7 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
 
 TASK_PHASES = [
     {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PHASE1_TASK_ITEM_BUILDER_LAYOUT},
-    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
+    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
 ]
 
