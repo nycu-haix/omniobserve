@@ -18,6 +18,8 @@ interface ActiveAudioMeta {
 
 const TARGET_SAMPLE_RATE = 16000;
 const OUTPUT_CHUNK_SIZE = 512;
+const FINAL_AUDIO_DRAIN_MS = 150;
+const FINAL_AUDIO_PADDING_SAMPLES = OUTPUT_CHUNK_SIZE;
 const LOCAL_SPEAKING_RMS_THRESHOLD = 0.012;
 const LOCAL_SPEAKING_RELEASE_MS = 650;
 
@@ -260,6 +262,8 @@ export function useAudioStream(
 						socket.send(chunk.buffer);
 					}
 
+					socket.send(new Float32Array(FINAL_AUDIO_PADDING_SAMPLES).buffer);
+
 					if (meta) {
 						const stopMessage = {
 							type: "stop",
@@ -294,26 +298,46 @@ export function useAudioStream(
 		[waitForAudioStopAck]
 	);
 
-	const drainActiveAudioSocket = useCallback((): Promise<void> => {
+	const releaseActiveAudioSocketForDrain = useCallback(async (): Promise<{ drainPromise: Promise<void> }> => {
 		const socket = socketRef.current;
 		const meta = activeMetaRef.current;
-		const pendingSamples = pendingSamplesRef.current;
 
-		socketRef.current = null;
-		activeMetaRef.current = null;
+		if (socket?.readyState === WebSocket.OPEN && audioContextRef.current?.state === "running") {
+			await new Promise(resolve => window.setTimeout(resolve, FINAL_AUDIO_DRAIN_MS));
+		}
+
+		const pendingSamples = pendingSamplesRef.current;
+		if (socketRef.current === socket) {
+			socketRef.current = null;
+		}
+		if (activeMetaRef.current === meta) {
+			activeMetaRef.current = null;
+		}
 		pendingSamplesRef.current = new Float32Array(0);
 
 		if (!socket) {
-			return Promise.resolve();
+			return { drainPromise: Promise.resolve() };
 		}
 
-		return drainAudioSocket(socket, meta, pendingSamples);
+		return { drainPromise: drainAudioSocket(socket, meta, pendingSamples) };
 	}, [drainAudioSocket]);
+
+	const drainActiveAudioSocket = useCallback(
+		async (waitForCompletion = true): Promise<void> => {
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
+			if (waitForCompletion) {
+				await drainPromise;
+			} else {
+				void drainPromise;
+			}
+		},
+		[releaseActiveAudioSocketForDrain]
+	);
 
 	const stopAudioStream = useCallback(
 		async (keepAudioResources = false) => {
 			stoppingRef.current = true;
-			const drainPromise = drainActiveAudioSocket();
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
 
 			if (!keepAudioResources) {
 				cleanupAudioResources();
@@ -325,7 +349,7 @@ export function useAudioStream(
 			setLocalSpeakingState(false);
 			await drainPromise;
 		},
-		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, drainActiveAudioSocket, setLocalSpeakingState]
+		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, releaseActiveAudioSocketForDrain, setLocalSpeakingState]
 	);
 
 	const sendAudioSamples = useCallback(
@@ -389,7 +413,7 @@ export function useAudioStream(
 			}
 
 			const hasExistingAudio = !!mediaStreamRef.current;
-			void drainActiveAudioSocket();
+			await drainActiveAudioSocket(false);
 
 			stoppingRef.current = false;
 			setAudioError(null);
