@@ -25,6 +25,7 @@ from .ranking_cutoff import split_ranking_items
 
 MAX_SNAPSHOT_LIST_LIMIT = 1000
 PRIVATE_PHASE_TASK_ITEM_ID_PREFIX = "private-phase-task-item:"
+REFLECT_PHASE = "reflect"
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,20 @@ async def create_phase_boundary_ranking_snapshots(
                 change_count=state.change_count,
                 ranking_move_id=state.ranking_move_id,
                 ordered_items=_items_for_ranking_order(state.items, catalog_by_id),
+            )
+        )
+
+    if to_phase == REFLECT_PHASE:
+        snapshots.extend(
+            await _snapshot_reflect_phase_entry_rankings(
+                db,
+                session_name=session_name,
+                task_id=task_id,
+                condition=normalized_condition,
+                cue_enabled=normalized_cue_enabled,
+                participant_ids=known_participant_ids,
+                private_ranking_states=private_ranking_states,
+                catalog_by_id=catalog_by_id,
             )
         )
 
@@ -316,6 +331,52 @@ async def _snapshot_private_phase_task_items(
                 change_count=None,
                 ranking_move_id=None,
                 ordered_items=ordered_items,
+            )
+        )
+    return snapshots
+
+
+async def _snapshot_reflect_phase_entry_rankings(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_id: str,
+    condition: str,
+    cue_enabled: bool,
+    participant_ids: list[str],
+    private_ranking_states: Mapping[str, Mapping[str, Any]] | None,
+    catalog_by_id: Mapping[str, dict[str, Any]],
+) -> list[RankingPhaseSnapshot]:
+    snapshots: list[RankingPhaseSnapshot] = []
+    for participant_id in participant_ids:
+        state = await _resolve_private_ranking_state(
+            db,
+            session_name=session_name,
+            task_id=task_id,
+            participant_id=participant_id,
+            phase=REFLECT_PHASE,
+            private_ranking_states=private_ranking_states,
+        )
+        snapshots.append(
+            await _create_ranking_snapshot(
+                db,
+                session_name=session_name,
+                task_id=task_id,
+                condition=condition,
+                cue_enabled=cue_enabled,
+                phase=REFLECT_PHASE,
+                scope="private",
+                subject_type="participant",
+                subject_id=participant_id,
+                participant_id=participant_id,
+                group_id=session_name,
+                source=_reflect_phase_entry_source(state.source),
+                source_phase=REFLECT_PHASE,
+                next_phase=None,
+                revision=state.revision,
+                change_count=state.change_count,
+                ranking_move_id=state.ranking_move_id,
+                ordered_items=_items_for_ranking_order(state.items, catalog_by_id),
             )
         )
     return snapshots
@@ -600,6 +661,10 @@ def _state_from_ranking_move(ranking_move: RankingMove) -> RankingStateSnapshotI
         ranking_move_id=ranking_move.id,
         source=f"ranking_move:{ranking_move.move_type}",
     )
+
+
+def _reflect_phase_entry_source(source: str) -> str:
+    return f"reflect_phase_entry:{source}"[:80]
 
 
 def _items_for_ranking_order(
