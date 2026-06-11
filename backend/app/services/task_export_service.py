@@ -28,6 +28,7 @@ from ..models import (
 from ..task_config import get_task_phases_for_session, resolve_task_id
 
 TASK_EXPORT_SCHEMA_VERSION = 1
+APP_VERSION = "0.1.0"
 TASK_TOKEN_BY_ID = {
     "lost-at-sea": "lost_at_sea",
     "enhance-the-poster": "enhance_poster",
@@ -1565,9 +1566,10 @@ def _system_version_metadata() -> dict[str, Any]:
         if os.getenv(key)
     }
     git_commit = _local_git_commit()
-    version = next(iter(env_values.values()), None) or git_commit
+    version = next(iter(env_values.values()), None) or git_commit or APP_VERSION
     return {
         "version": version,
+        "app_version": APP_VERSION,
         "git_commit": git_commit,
         "env": env_values,
     }
