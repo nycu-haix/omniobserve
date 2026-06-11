@@ -1,169 +1,57 @@
-# Confederate Participant Talking Guide: Lost at Sea
+# 暗樁參與者發言提綱索引
 
-This document is for internal research team preparation only. Do not share it with participants.
+本文件是暗樁稿的總入口，和目前系統支援的 task prompt list 對齊。舊版英文 Lost-at-Sea only 暗樁稿已由下列兩份正式中文內部稿取代。
 
-## 1. Role
+本文件與所有暗樁稿都僅供研究團隊內部準備使用，請勿提供給一般參與者。
 
-The confederate participates as a normal group member. His speaking style should be:
+## 目前系統 task prompt list
 
-- Has a clear personal ranking logic.
-- Listens to other participants' reasons.
-- Raises different opinions without dominating the whole discussion.
-- Sounds natural, not scripted.
-- Does not mention the research goal, system cue, study condition, or relationship with the research team.
+目前後端 task prompt list 來源為 `backend/app/task_config/registry.py`，支援兩個 task：
 
-The confederate's main discussion stance:
+| task_id | 系統任務名稱 | 暗樁稿 |
+| --- | --- | --- |
+| `lost-at-sea` | Lost at Sea | [Lost-at-Sea 暗樁發言提綱](confederate-script.zh.md) |
+| `enhance-the-poster` | Enhance the Poster | [Enhance-the-Poster 暗樁發言提綱](confederate-script-enhance-the-poster.zh.md) |
 
-The confederate's research role is not simply to push the group toward an incorrect answer. The role is to create a plausible but debatable public position that may produce "privately disagree, publicly hesitate" moments among real participants. Researchers should observe:
+正式實驗同一組會連續完成兩個 task，因此暗樁應在實驗前讀完兩份稿，並依當輪 task 使用對應立場。
 
-- Whether participants first record doubts or counterarguments in the private channel.
-- Whether multiple participants form shared unspoken disagreement.
-- Whether system cues help those unspoken disagreements enter public discussion.
-- Whether the group accepts, ignores, or resists those disagreements once voiced.
+## 共通原則
 
-> I would prioritize direction, basic information, and long-term survival tools. The prompt says our position is uncertain and land is far away, so I would not rely on only one type of item.
+暗樁在兩個 task 中都應扮演一般參與者。核心任務不是讓小組得到特定答案，而是提出合理但可被討論的公開立場，讓真實參與者有機會出現 private disagreement、shared unspoken thought 或公開反駁。
 
-## 2. Suggested Initial Ranking
+暗樁應該：
 
-The confederate can use this as his initial ranking in the individual thinking phase. This ranking intentionally leaves room for debate and is not the standard answer. During group discussion, he can make small adjustments if others provide convincing reasons.
+- 有清楚但不絕對的判斷邏輯。
+- 自然發言，不像在背稿。
+- 在提出強立場後停頓，讓其他人有空間回應。
+- 在小地方讓步，避免把討論壓成單一路線。
+- 詢問其他人的理由，讓真實參與者有機會說明不同觀點。
+- 只使用任務內可見資訊，不假裝有外部專業權威。
 
-| Rank | Item |
-| ---: | --- |
-| 1 | Maps of the Pacific Ocean |
-| 2 | Transistor radio |
-| 3 | Fishing kit |
-| 4 | 5m nylon rope |
-| 5 | Mosquito netting |
-| 6 | 20L drinking water |
-| 7 | One case of emergency rations |
-| 8 | 2m² opaque plastic sheet |
-| 9 | Two boxes of chocolate bars |
-| 10 | Flotation cushion |
-| 11 | Shark repellent |
-| 12 | Sextant |
-| 13 | Shaving mirror / small mirror |
-| 14 | 8L oil-gas mixture |
-| 15 | 1L 80% rum |
+暗樁不應該：
 
-## 3. Individual Thinking Phase Notes
+- 提到研究目的、系統提示、cue、backchannel、實驗條件或暗樁身分。
+- 暗示自己是研究團隊安排的人。
+- 攻擊或嘲笑其他參與者。
+- 在小組已清楚拒絕某立場後仍反覆壓迫討論。
+- 在三位真實參與者的 Debrief 前個別訪談中受訪。
 
-During the 5-minute private thinking phase, the confederate can record thoughts like these. He does not need to use all of them.
+## 兩個 task 的公開立場
 
-1. "I would initially put the map and radio fairly high because information and direction may matter when our position is uncertain."
-2. "The sextant is a navigation tool, but I am not sure we have enough knowledge and data to use it well."
-3. "The mirror and fuel may be useful, but both seem dependent on timing and conditions."
-4. "The fishing kit may matter for a long drift because current food supplies are limited."
-5. "Rope, plastic sheet, and mosquito netting are material-like items. Their value depends on how many uses the group can think of."
-6. "Water is definitely important, but for longer survival we also need to discuss food and tools."
+### Lost-at-Sea
 
-## 4. Public Discussion Talking Flow
+暗樁立場偏向「方向感、基本資訊、長期生存工具」。這會和標準答案中更重視求救訊號的排序形成張力。
 
-Use these points naturally during the 15-minute discussion. Do not read every line word-for-word.
+使用文件：[confederate-script.zh.md](confederate-script.zh.md)
 
-### Minute 0-2: Explain Ranking Logic
+### Enhance-the-Poster
 
-> I can explain my ranking logic first. I think this task is not only about whether one item is useful by itself. I am also thinking about direction, information, and whether we can last for a longer time.
->
-> So I would initially put the Pacific maps, radio, fishing kit, and rope fairly high. The map and radio are information-related, while the fishing kit and rope are more about long-term survival and tools.
+暗樁立場偏向「資訊清楚、報名轉換、掃讀效率、QR Code 和底部資訊整合」。這會和其他可能重視活潑感、視覺新鮮度、圖片替換或標語創意的方向形成張力。
 
-If someone says the radio cannot transmit:
+使用文件：[confederate-script-enhance-the-poster.zh.md](confederate-script-enhance-the-poster.zh.md)
 
-> Right, it cannot transmit, so I would not treat it as a rescue-calling tool. But it is still a possible source of information, and I think that is worth discussing.
+## 維護規則
 
-### Minute 2-5: Discuss Mirror and Fuel
-
-> I know the mirror may be useful, but I worry that it depends on conditions. We need sunlight, the angle has to be right, and someone has to be within visible range.
->
-> I am also hesitant about fuel. It may be very visible, but it is flammable, using it near a life raft has risk, and once it is used, it is gone.
-
-If others strongly support the mirror:
-
-> I agree the mirror has value. I just want to compare it with water or tools: the mirror may have high impact, but it seems more timing-dependent.
-
-If others strongly support fuel:
-
-> I agree fuel may be highly visible, but I would want to clarify timing and safety before ranking it at the very top.
-
-### Minute 5-8: Emphasize Long-Term Survival Tools
-
-> I would rank the fishing kit fairly high because if we drift for many days, existing rations and chocolate are limited.
->
-> Rope should also not be too low. We may need to secure items, hold the plastic sheet, or build simple temporary structures.
-
-If someone says water matters more than food:
-
-> Water definitely matters, and I would not put it very low. I just think we should also discuss how to keep surviving after the current supplies are used.
-
-### Minute 8-11: Discuss Netting, Plastic Sheet, Map, and Sextant
-
-> I do not think mosquito netting and the plastic sheet should be judged only by their original uses. They are materials, so they may have alternative uses.
->
-> I would rank the map fairly high because the prompt says our position is uncertain. For the sextant, I know it is a navigation instrument, but people without experience may not use it well, so I hesitate to rank it too high.
-
-If others say the raft cannot navigate to land:
-
-> I agree we should not assume we can row to land. When I talk about direction, I do not mean we can definitely navigate there. I just think some information is better than no information.
-
-### Minute 11-13: Try to Organize the Top Five
-
-> Maybe we can first decide what types of items should be in the top five. My view is that the top group should include some information, water, food, or long-term tools.
->
-> If the group thinks the mirror or fuel should be top five, I can discuss that. I just do not want us to ignore water, food, and tools completely.
-
-### Minute 13-15: Closing Push
-
-> Since time is almost up, I suggest we settle on a direction: place the items that stabilize survival near the top, put timing-dependent or use-dependent items in the middle, and put harder-to-use or riskier items later.
->
-> I can accept a final ranking that is not exactly mine, but I hope everyone's reasons are considered.
-
-## 5. Response Bank
-
-### If someone strongly supports mirror
-
-> I understand the mirror logic, and I agree it may be useful. I just want to compare how high it should be relative to water, food, and tools.
-
-### If someone strongly supports fuel
-
-> Fuel may be effective, but it also has safety risk. I would treat it as something that needs careful use.
-
-### If someone says sextant is important
-
-> I agree the sextant is a navigation instrument, but I am not sure we can use it fully on a life raft. It depends on what assumptions the group makes.
-
-### If someone says the map is useless
-
-> I agree the map does not tell us exactly where we are. But it still gives ocean and direction information, so I am not sure it should go near the very bottom.
-
-### If someone says mosquito netting is useless at sea
-
-> I agree it is probably not mainly for mosquitoes here, but the material itself may still have other uses. I would not put it top five, but I also would not put it last.
-
-### If someone says the radio cannot transmit
-
-> Right, it cannot call for help. I am thinking of it as a possible information source, not a communication device.
-
-### If someone says the strategy should focus on rescue signaling
-
-> I agree being seen matters, but I am worried about relying on only one strategy. Maybe the top items should include signaling, survival, and tool-like items.
-
-## 6. Speaking Style Reminders
-
-The confederate should:
-
-- Discuss naturally like a regular participant.
-- Occasionally ask others for their rankings or reasons.
-- Concede small points so the discussion can continue.
-- Pause or invite responses after making a strong claim, so others have space to disagree.
-- If someone challenges the claim, ask them to explain the reason before pushing back.
-- Keep explaining his ranking through information, direction, and long-term survival tools.
-- Avoid saying he knows the answer.
-- Leave room for other people to speak.
-
-The confederate should not:
-
-- Attack or mock other participants.
-- Say obviously unreasonable claims, such as "a mirror cannot reflect light."
-- Pretend to have maritime expertise.
-- Repeat a point endlessly after the group clearly rejects it.
-- Reveal that he is part of the research team.
-- Mention Similarity Cue, backchannel, or the research hypothesis.
+- 若 `backend/app/task_config/registry.py` 新增或移除 task，這份索引必須同步更新。
+- 若 task id 改名，更新本文件、兩份暗樁稿與 [Similarity Detection Eval Prompt](similarity_eval_prompt.md)。
+- 若只調整暗樁話術，不需要改系統 prompt；但要在 session summary 記錄實驗當天實際使用的暗樁稿版本。
