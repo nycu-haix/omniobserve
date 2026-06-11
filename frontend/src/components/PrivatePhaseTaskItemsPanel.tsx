@@ -500,9 +500,9 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 										setError(null);
 									}}
 								/>
-								<span className={cn("text-xs text-muted-foreground", isLibraryNumberInvalid && "text-destructive")}>
-									{isLibraryNumberInvalid ? "請輸入正整數" : normalizedDetail.length === 0 ? "請輸入編號" : `編號 ${normalizedDetail}`}
-								</span>
+								{(isLibraryNumberInvalid || normalizedDetail.length > 0) && (
+									<span className={cn("text-xs text-muted-foreground", isLibraryNumberInvalid && "text-destructive")}>{isLibraryNumberInvalid ? "請輸入正整數" : `編號 ${normalizedDetail}`}</span>
+								)}
 							</label>
 						)}
 						{selectedActionRequiresDetail && !selectedActionUsesLibraryNumber && (

@@ -287,19 +287,31 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "qr_code_group",
         "label_zh": "QR 碼+說明",
         "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing"]
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "left_align", "center_align", "distribute", "collect"]
     },
     {
         "id": "title_group",
-        "label_zh": "主標題+副標題+說明文字",
+        "label_zh": "主標題+副標題+說明",
         "label_en": "Title group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify", "left_align", "center_align", "distribute", "collect"],
     },
     {
         "id": "info_group",
         "label_zh": "下方資訊",
         "label_en": "Info group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify", "left_align", "center_align", "distribute", "collect"],
+    },
+    {
+        "id": "date_location_cta_group",
+        "label_zh": "日期時間+地點+行動呼籲",
+        "label_en": "Date, location, and CTA group",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify", "left_align", "center_align", "distribute", "collect"],
+    },
+    {
+        "id": "background",
+        "label_zh": "背景",
+        "label_en": "Background",
+        "allowed_action_ids": ["move", "change_color", "transparency"],
     },
 ]
 
@@ -360,9 +372,33 @@ PHASE1_ACTION_ITEMS = [
     },
     {
         "id": "unify",
-        "label_zh": "統一字型/顏色",
-        "label_en": "Unify",
-        "template_zh": "統一「{component}」字型/顏色",
+        "label_zh": "統一字型",
+        "label_en": "Unify font",
+        "template_zh": "統一「{component}」字型",
+    },
+    {
+        "id": "left_align",
+        "label_zh": "向左對齊",
+        "label_en": "Left align",
+        "template_zh": "將「{component}」向左對齊",
+    },
+    {
+        "id": "center_align",
+        "label_zh": "置中對齊",
+        "label_en": "Center align",
+        "template_zh": "將「{component}」置中對齊",
+    },
+    {
+        "id": "distribute",
+        "label_zh": "分散",
+        "label_en": "Distribute",
+        "template_zh": "分散「{component}」",
+    },
+    {
+        "id": "collect",
+        "label_zh": "集合",
+        "label_en": "Collect",
+        "template_zh": "集合「{component}」",
     },
     {
         "id": "transparency",
