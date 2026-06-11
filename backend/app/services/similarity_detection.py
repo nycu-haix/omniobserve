@@ -530,6 +530,7 @@ async def _replace_similarity_pairs(
                 is_same_reason=similarity.is_same_reason,
                 idea_a=idea_block,
                 idea_b=similar_idea_block,
+                reason=similarity.reason,
             )
         except Exception as exc:
             logger.warning(

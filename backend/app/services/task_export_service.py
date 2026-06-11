@@ -23,6 +23,7 @@ from ..models import (
     PhaseTaskItemSnapshot,
     RankingPhaseSnapshot,
     Similarity,
+    SimilarityCueEvent,
     Transcript,
 )
 from ..task_config import get_task_phases_for_session, resolve_task_id
@@ -134,6 +135,12 @@ async def build_task_export_bundle(
         task_id=resolved_task_id,
     )
     similarities = await _load_task_similarities(db, idea_blocks=idea_blocks)
+    cue_events = await _load_task_cue_events(
+        db,
+        session_name=session_name,
+        task_id=resolved_task_id,
+        similarities=similarities,
+    )
 
     phase_windows = _build_phase_windows(
         context=context,
@@ -153,6 +160,7 @@ async def build_task_export_bundle(
         chat_messages=chat_messages,
         idea_blocks=idea_blocks,
         similarities=similarities,
+        cue_events=cue_events,
         ranking_snapshots=ranking_snapshots,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
@@ -186,6 +194,7 @@ async def build_task_export_bundle(
         chat_messages=chat_messages,
         idea_blocks=idea_blocks,
         similarities=similarities,
+        cue_events=cue_events,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
     )
@@ -303,6 +312,29 @@ async def _load_task_similarities(
     return list(result.scalars().all())
 
 
+async def _load_task_cue_events(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_id: str,
+    similarities: list[Similarity],
+) -> list[SimilarityCueEvent]:
+    similarity_ids = [similarity.id for similarity in similarities]
+    stmt = select(SimilarityCueEvent).where(
+        SimilarityCueEvent.session_name == session_name,
+        SimilarityCueEvent.task_id == task_id,
+    )
+    if similarity_ids:
+        stmt = stmt.where(
+            (SimilarityCueEvent.similarity_id.is_(None))
+            | (SimilarityCueEvent.similarity_id.in_(similarity_ids))
+        )
+    result = await db.execute(
+        stmt.order_by(SimilarityCueEvent.created_at.asc(), SimilarityCueEvent.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 def _build_data_files(
     *,
     context: ExportContext,
@@ -311,6 +343,7 @@ def _build_data_files(
     chat_messages: list[ChatMessage],
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
+    cue_events: list[SimilarityCueEvent],
     ranking_snapshots: list[RankingPhaseSnapshot],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
@@ -322,7 +355,7 @@ def _build_data_files(
     files.extend(_transcript_files(context, participants, transcripts, phase_windows))
     files.append(_idea_blocks_file(context, idea_blocks, phase_windows))
     files.append(_public_chat_file(context, chat_messages, phase_windows))
-    files.extend(_cue_files(context, idea_blocks, similarities, phase_windows))
+    files.extend(_cue_files(context, idea_blocks, similarities, cue_events, phase_windows))
     files.append(_phase_timestamps_file(context, phase_windows))
     return files
 
@@ -651,12 +684,15 @@ def _cue_files(
     context: ExportContext,
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
+    cue_events: list[SimilarityCueEvent],
     phase_windows: list[dict[str, Any]],
 ) -> list[TaskExportFile]:
     idea_by_id = {block.id: block for block in idea_blocks}
     headers = [
         "event_id",
+        "cue_id",
         "event_type",
+        "source",
         "session_name",
         "group_id",
         "task",
@@ -664,50 +700,71 @@ def _cue_files(
         "cue_enabled",
         "phase",
         "cue_type",
+        "sender_participant_id",
+        "sender_code",
+        "recipient_participant_id",
+        "recipient_code",
         "similarity_id",
-        "idea_block_id_1",
-        "participant_id_1",
-        "participant_code_1",
-        "idea_block_id_2",
-        "participant_id_2",
-        "participant_code_2",
+        "own_idea_block_id",
+        "own_participant_id",
+        "own_participant_code",
+        "other_idea_block_id",
+        "other_participant_id",
+        "other_participant_code",
         "reason",
-        "shown_at",
         "delivery_status",
         "response_status",
+        "created_at",
+        "delivered_at",
+        "shown_at",
+        "responded_at",
+        "accepted_at",
+        "ignored_at",
+        "dismissed_at",
+        "shared_at",
+        "updated_at",
+        "metadata",
         "notes",
     ]
     rows = []
-    if context.condition.cue_enabled:
-        for similarity in similarities:
-            block_1 = idea_by_id.get(similarity.idea_block_id_1)
-            block_2 = idea_by_id.get(similarity.idea_block_id_2)
-            phase = _infer_similarity_phase(block_1, block_2, phase_windows)
-            rows.append(
-                {
-                    "event_id": f"similarity:{similarity.id}",
-                    "event_type": "similarity_pair",
-                    "session_name": context.session_name,
-                    "group_id": context.group_id,
-                    "task": context.task_token,
-                    "condition": context.condition.token,
-                    "cue_enabled": context.condition.cue_enabled,
-                    "phase": phase,
-                    "cue_type": "same_reason" if similarity.is_same_reason else "different_reason",
-                    "similarity_id": similarity.id,
-                    "idea_block_id_1": similarity.idea_block_id_1,
-                    "participant_id_1": block_1.user_id if block_1 else "",
-                    "participant_code_1": _participant_code(context.group_id, str(block_1.user_id)) if block_1 else "",
-                    "idea_block_id_2": similarity.idea_block_id_2,
-                    "participant_id_2": block_2.user_id if block_2 else "",
-                    "participant_code_2": _participant_code(context.group_id, str(block_2.user_id)) if block_2 else "",
-                    "reason": similarity.reason,
-                    "shown_at": "",
-                    "delivery_status": "not_persisted",
-                    "response_status": "not_persisted",
-                    "notes": "Similarity pair is durable, but cue delivery/response lifecycle logs are pending issue #39.",
-                }
-            )
+    if context.condition.cue_enabled or cue_events:
+        if cue_events:
+            rows.extend(_cue_event_row(context, event, idea_by_id) for event in cue_events)
+        else:
+            for similarity in similarities:
+                block_1 = idea_by_id.get(similarity.idea_block_id_1)
+                block_2 = idea_by_id.get(similarity.idea_block_id_2)
+                phase = _infer_similarity_phase(block_1, block_2, phase_windows)
+                rows.append(
+                    {
+                        "event_id": f"similarity:{similarity.id}",
+                        "cue_id": "",
+                        "event_type": "similarity_pair",
+                        "source": "similarity_pair_fallback",
+                        "session_name": context.session_name,
+                        "group_id": context.group_id,
+                        "task": context.task_token,
+                        "condition": context.condition.token,
+                        "cue_enabled": context.condition.cue_enabled,
+                        "phase": phase,
+                        "cue_type": "same_reason" if similarity.is_same_reason else "different_reason",
+                        "sender_participant_id": "",
+                        "sender_code": "",
+                        "recipient_participant_id": "",
+                        "recipient_code": "",
+                        "similarity_id": similarity.id,
+                        "own_idea_block_id": similarity.idea_block_id_1,
+                        "own_participant_id": block_1.user_id if block_1 else "",
+                        "own_participant_code": _participant_code(context.group_id, str(block_1.user_id)) if block_1 else "",
+                        "other_idea_block_id": similarity.idea_block_id_2,
+                        "other_participant_id": block_2.user_id if block_2 else "",
+                        "other_participant_code": _participant_code(context.group_id, str(block_2.user_id)) if block_2 else "",
+                        "reason": similarity.reason,
+                        "delivery_status": "not_persisted",
+                        "response_status": "not_persisted",
+                        "notes": "Similarity pair predates durable cue lifecycle logs; no delivery/response row exists.",
+                    }
+                )
 
     cue_summary = {
         "session_name": context.session_name,
@@ -717,13 +774,21 @@ def _cue_files(
         "cue_enabled": context.condition.cue_enabled,
         "condition_source": context.condition.source,
         "similarity_pair_count": len(similarities),
+        "durable_cue_event_count": len(cue_events),
         "exported_cue_log_rows": len(rows),
-        "zero_event_marker": not context.condition.cue_enabled,
-        "durable_lifecycle_logs_available": False,
+        "zero_event_marker": not context.condition.cue_enabled and not cue_events,
+        "durable_lifecycle_logs_available": bool(cue_events),
+        "delivery_status_counts": _count_values(event.delivery_status for event in cue_events),
+        "response_status_counts": _count_values(event.response_status or "none" for event in cue_events),
         "notes": (
+            "cue_enabled=false, but durable cue events were found and exported for audit."
+            if not context.condition.cue_enabled and cue_events
+            else
             "cue_enabled=false; no cue events should exist for this task."
             if not context.condition.cue_enabled
-            else "Similarity pairs are exported as the durable cue-related data currently available. Delivery/response lifecycle logs require issue #39."
+            else "Durable cue lifecycle logs exported."
+            if cue_events
+            else "No durable cue lifecycle rows found; exported similarity pairs are partial legacy cue evidence."
         ),
     }
     return [
@@ -746,6 +811,65 @@ def _cue_files(
             content=_json_dumps(cue_summary),
         ),
     ]
+
+
+def _cue_event_row(
+    context: ExportContext,
+    event: SimilarityCueEvent,
+    idea_by_id: dict[int, IdeaBlock],
+) -> dict[str, Any]:
+    own_block = idea_by_id.get(event.own_idea_block_id or -1)
+    other_block = idea_by_id.get(event.other_idea_block_id or -1)
+    sender_participant_id = str(event.sender_participant_id or "")
+    recipient_participant_id = str(event.recipient_participant_id or "")
+    own_participant_id = str(own_block.user_id) if own_block else recipient_participant_id
+    other_participant_id = str(other_block.user_id) if other_block else sender_participant_id
+    return {
+        "event_id": event.id,
+        "cue_id": event.cue_id,
+        "event_type": event.event_type,
+        "source": event.source,
+        "session_name": event.session_name,
+        "group_id": event.group_id or context.group_id,
+        "task": TASK_TOKEN_BY_ID.get(event.task_id, _file_token(event.task_id)),
+        "condition": "with_cue" if event.cue_enabled else "no_cue",
+        "cue_enabled": event.cue_enabled,
+        "phase": event.phase,
+        "cue_type": event.cue_type,
+        "sender_participant_id": sender_participant_id,
+        "sender_code": _participant_code(context.group_id, sender_participant_id) if sender_participant_id else "",
+        "recipient_participant_id": recipient_participant_id,
+        "recipient_code": _participant_code(context.group_id, recipient_participant_id) if recipient_participant_id else "",
+        "similarity_id": event.similarity_id,
+        "own_idea_block_id": event.own_idea_block_id,
+        "own_participant_id": own_participant_id,
+        "own_participant_code": _participant_code(context.group_id, own_participant_id) if own_participant_id else "",
+        "other_idea_block_id": event.other_idea_block_id,
+        "other_participant_id": other_participant_id,
+        "other_participant_code": _participant_code(context.group_id, other_participant_id) if other_participant_id else "",
+        "reason": event.reason,
+        "delivery_status": event.delivery_status,
+        "response_status": event.response_status or "",
+        "created_at": event.created_at,
+        "delivered_at": event.delivered_at,
+        "shown_at": event.shown_at,
+        "responded_at": event.responded_at,
+        "accepted_at": event.accepted_at,
+        "ignored_at": event.ignored_at,
+        "dismissed_at": event.dismissed_at,
+        "shared_at": event.shared_at,
+        "updated_at": event.updated_at,
+        "metadata": event.event_metadata,
+        "notes": "",
+    }
+
+
+def _count_values(values: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value or "none")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def _phase_timestamps_file(
@@ -1105,6 +1229,7 @@ def _build_manifest(
     chat_messages: list[ChatMessage],
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
+    cue_events: list[SimilarityCueEvent],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -1117,6 +1242,7 @@ def _build_manifest(
         chat_messages=chat_messages,
         idea_blocks=idea_blocks,
         similarities=similarities,
+        cue_events=cue_events,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
     )
@@ -1162,11 +1288,14 @@ def _build_manifest(
             "idea_blocks": len(idea_blocks),
             "public_chat_messages": len(chat_messages),
             "cue_similarity_pairs": len(similarities),
+            "cue_events": len(cue_events),
+            "cue_events_delivered": sum(1 for event in cue_events if event.delivery_status == "delivered"),
+            "cue_events_with_response": sum(1 for event in cue_events if event.response_status),
         },
         "scope_notes": [
             "Transcripts and public chat are session-scoped because those tables do not store task_id; this export assumes one task run per session URL.",
             "Idea block phase is inferred from persisted phase-boundary snapshot timestamps when available.",
-            "Cue delivery and response lifecycle fields are marked not_persisted until issue #39 adds durable cue event logs.",
+            "Cue lifecycle export uses similarity_cue_events when available; older runs without durable event rows fall back to similarity-pair evidence.",
         ],
     }
 
@@ -1181,6 +1310,7 @@ def _build_checklist(
     chat_messages: list[ChatMessage],
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
+    cue_events: list[SimilarityCueEvent],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -1273,13 +1403,15 @@ def _build_checklist(
         _checklist_item(
             "cue_logs",
             "Cue logs / no-cue marker",
-            _cue_log_status(context, similarities),
+            _cue_log_status(context, similarities, cue_events),
             _files_for_artifacts(files, {"cue_logs", "cue_summary"}),
-            len(similarities),
+            len(cue_events),
             (
                 "cue_enabled=false marker included."
                 if not context.condition.cue_enabled
-                else "Durable cue lifecycle logs are pending issue #39; exported similarity pairs are partial cue evidence."
+                else "Durable cue lifecycle logs are included."
+                if cue_events
+                else "No durable cue lifecycle logs found; exported similarity pairs are partial legacy cue evidence."
             ),
         ),
         _checklist_item(
@@ -1333,8 +1465,14 @@ def _participant_status(found_count: int, participant_count: int) -> str:
     return "missing"
 
 
-def _cue_log_status(context: ExportContext, similarities: list[Similarity]) -> str:
+def _cue_log_status(
+    context: ExportContext,
+    similarities: list[Similarity],
+    cue_events: list[SimilarityCueEvent],
+) -> str:
     if not context.condition.cue_enabled:
+        return "present"
+    if cue_events:
         return "present"
     return "partial" if similarities else "missing"
 

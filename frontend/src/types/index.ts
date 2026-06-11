@@ -50,7 +50,11 @@ export interface TranscriptLine {
 export interface SimilarityPairCueData {
 	kind?: "pair";
 	id: string;
+	cueId?: string;
+	similarityId?: number;
 	blockId: string;
+	ownBlockId?: string;
+	otherBlockId?: string;
 	blockSummary: string;
 	isSameReason?: boolean;
 	hasSameReason?: boolean;
@@ -67,6 +71,8 @@ export interface SimilaritySummaryCueData {
 export type SimilarityCueData = SimilarityPairCueData | SimilaritySummaryCueData;
 
 export interface SimilarityReasonSharedData extends SharedSimilarityReason {
+	cueId?: string;
+	similarityId?: number;
 	blockId: string;
 }
 

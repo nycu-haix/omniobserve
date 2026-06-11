@@ -140,6 +140,8 @@ interface SimilarityReasonShareErrorMessage {
 	block_id?: string | number | null;
 }
 
+type SimilarityCueResponseStatus = "shown" | "accepted" | "ignored" | "dismissed" | "shared";
+
 interface IdeaBlockNotice {
 	id: string;
 	blockId?: string;
@@ -1544,6 +1546,22 @@ export function PrivateBoard({
 		ideablock: true,
 		"public-chat": true
 	});
+	const sendSimilarityCueResponse = useCallback(
+		(cue: { id?: string; cueId?: string; blockId?: string | number | null }, response: SimilarityCueResponseStatus) => {
+			const cueId = cue.cueId || cue.id;
+			if (!cueId) {
+				return;
+			}
+			onSendBoardMessage({
+				type: "similarity_cue_response",
+				cueId,
+				blockId: cue.blockId ?? null,
+				response,
+				timestampMs: Date.now()
+			});
+		},
+		[onSendBoardMessage]
+	);
 	const queueSimilarityCueFromBlock = useCallback(
 		(block: IdeaBlock) => {
 			if (!canShowSimilarityCues) {
@@ -2250,6 +2268,7 @@ export function PrivateBoard({
 					hasDifferentReason,
 					isSameReason: resolveSimilarityCueReasonType(hasSameReason, hasDifferentReason, lastMessage.payload.isSameReason)
 				};
+				sendSimilarityCueResponse(incomingCue, "shown");
 				if (!cueTargetBlock?.expanded) {
 					unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.blockId);
 				}
@@ -2301,6 +2320,7 @@ export function PrivateBoard({
 				}
 				const sharedReason = lastMessage.payload;
 				const sharedIsSameReason = sharedReason.isSameReason === true;
+				sendSimilarityCueResponse(sharedReason, "shown");
 				console.info("[private-board] similarity_reason_shared received", {
 					sessionId,
 					participantId,
@@ -2378,6 +2398,7 @@ export function PrivateBoard({
 		participantId,
 		queueSimilarityCueFromBlock,
 		resolveActiveCompletionSegmentKeys,
+		sendSimilarityCueResponse,
 		sessionId,
 		takeVoiceGeneratingBlockIds,
 		visibleActiveTab,
@@ -3293,13 +3314,18 @@ export function PrivateBoard({
 		onSendBoardMessage({
 			type: "share_similarity_reason",
 			blockId: cue.blockId,
-			cueId: cue.id
+			cueId: cue.cueId || cue.id
 		});
 		setCues(prev => {
 			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId);
 			cuesRef.current = nextCues;
 			return nextCues;
 		});
+	};
+
+	const viewSimilarityCue = (cue: SimilarityPairCueData) => {
+		sendSimilarityCueResponse(cue, "accepted");
+		jumpToBlock(cue.blockId);
 	};
 
 	const shareSimilarityReasonFromBlock = useCallback(
@@ -3315,9 +3341,12 @@ export function PrivateBoard({
 		[canShowSimilarityCues, onSendBoardMessage, visiblePhase]
 	);
 
-	const dismissSimilarityCue = (cueId: string) => {
+	const dismissSimilarityCue = (cue: SimilarityCueData, status: "dismissed" | "ignored") => {
+		if (isSimilarityPairCue(cue)) {
+			sendSimilarityCueResponse(cue, status);
+		}
 		setCues(prev => {
-			const nextCues = prev.filter(cue => cue.id !== cueId);
+			const nextCues = prev.filter(item => item.id !== cue.id);
 			cuesRef.current = nextCues;
 			return nextCues;
 		});
@@ -3570,7 +3599,7 @@ export function PrivateBoard({
 				)}
 			</section>
 
-			<SimilarityCue cues={visibleSimilarityCues} onJump={jumpToBlock} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={notificationCueContent} />
+			<SimilarityCue cues={visibleSimilarityCues} onJump={viewSimilarityCue} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={notificationCueContent} />
 		</>
 	);
 }

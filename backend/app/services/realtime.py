@@ -51,6 +51,11 @@ from .ranking_cutoff import (
     split_ranking_items,
 )
 from .ranking_state_query_service import get_effective_ranking_state
+from .similarity_cue_event_service import (
+    mark_latest_similarity_cue_shared,
+    record_similarity_reason_share_delivery,
+    safe_record_similarity_cue_response,
+)
 from .transcripts import save_ws_transcript_segment
 
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
@@ -241,6 +246,14 @@ def _normalize_cue_condition(value: Any) -> str:
 
 def is_similarity_cue_enabled(session_id: str) -> bool:
     return session_cue_conditions[session_id] == "experimental"
+
+
+def get_session_cue_condition(session_id: str) -> str:
+    return session_cue_conditions[session_id]
+
+
+def get_session_phase(session_id: str) -> str:
+    return _get_session_phase(session_id)
 
 
 def _phase_state_message(session_id: str) -> dict[str, Any]:
@@ -725,6 +738,7 @@ async def _handle_similarity_reason_share(
     session_id: str, participant_id: str, payload: dict[str, Any]
 ) -> None:
     block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
+    source_cue_id = str(payload.get("cueId") or payload.get("cue_id") or "").strip()
     if not is_similarity_cue_enabled(session_id):
         await _send_similarity_reason_share_error(
             session_id,
@@ -775,7 +789,7 @@ async def _handle_similarity_reason_share(
             )
         )
         similarities = result.scalars().all()
-        targets: list[tuple[str, dict[str, Any], int, int]] = []
+        targets: list[tuple[str, dict[str, Any], int, int, str, bool, str]] = []
         received_at_ms = _now_ms()
         for similarity in similarities:
             other_block_id = (
@@ -793,17 +807,20 @@ async def _handle_similarity_reason_share(
                 continue
 
             target_participant_id = str(other_block.user_id)
+            share_cue_id = _anonymous_shared_reason_id(
+                session_id,
+                similarity.id,
+                other_block.id,
+            )
             targets.append(
                 (
                     target_participant_id,
                     {
                         "type": "similarity_reason_shared",
                         "payload": {
-                            "id": _anonymous_shared_reason_id(
-                                session_id,
-                                similarity.id,
-                                other_block.id,
-                            ),
+                            "id": share_cue_id,
+                            "cueId": share_cue_id,
+                            "similarityId": similarity.id,
                             "blockId": str(other_block.id),
                             "title": own_block.title,
                             "summary": own_block.summary,
@@ -813,6 +830,9 @@ async def _handle_similarity_reason_share(
                     },
                     similarity.id,
                     other_block.id,
+                    share_cue_id,
+                    similarity.is_same_reason,
+                    similarity.reason,
                 )
             )
 
@@ -832,15 +852,76 @@ async def _handle_similarity_reason_share(
             target_participant_id,
             similarity_id,
             target_block_id,
+            share_cue_id,
+            is_same_reason,
+            reason,
             await board_manager.send_to(session_id, target_participant_id, message),
         )
-        for target_participant_id, message, similarity_id, target_block_id in targets
+        for target_participant_id, message, similarity_id, target_block_id, share_cue_id, is_same_reason, reason in targets
     ]
     delivered_count = sum(
         1
-        for _, _, _, sent in delivery_results
+        for _, _, _, _, _, _, sent in delivery_results
         if sent
     )
+    try:
+        async with SessionLocal() as db:
+            if source_cue_id or own_block_id:
+                await mark_latest_similarity_cue_shared(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    cue_id=source_cue_id or None,
+                    own_idea_block_id=own_block_id,
+                    phase=_get_session_phase(session_id),
+                    condition=session_cue_conditions[session_id],
+                    cue_enabled=is_similarity_cue_enabled(session_id),
+                    timestamp_ms=received_at_ms,
+                    event_metadata={
+                        "source": "share_similarity_reason",
+                        "delivered_count": delivered_count,
+                        "recipient_count": len(delivery_results),
+                    },
+                )
+            for (
+                target_participant_id,
+                similarity_id,
+                target_block_id,
+                share_cue_id,
+                is_same_reason,
+                reason,
+                sent,
+            ) in delivery_results:
+                await record_similarity_reason_share_delivery(
+                    db,
+                    cue_id=share_cue_id,
+                    session_name=session_id,
+                    phase=_get_session_phase(session_id),
+                    condition=session_cue_conditions[session_id],
+                    cue_enabled=is_similarity_cue_enabled(session_id),
+                    sender_participant_id=participant_id,
+                    recipient_participant_id=target_participant_id,
+                    sender_idea_block_id=own_block_id,
+                    recipient_idea_block_id=target_block_id,
+                    similarity_id=similarity_id,
+                    is_same_reason=is_same_reason,
+                    reason=reason,
+                    delivery_status="delivered" if sent else "failed",
+                    event_metadata={
+                        "source": "share_similarity_reason",
+                        "source_cue_id": source_cue_id,
+                        "received_at_ms": received_at_ms,
+                    },
+                )
+    except Exception as exc:
+        logger.warning(
+            "similarity_reason_share_persist_failed session_id=%s participant_id=%s block_id=%s error_type=%s error=%s",
+            session_id,
+            participant_id,
+            own_block_id,
+            exc.__class__.__name__,
+            exc,
+        )
     await board_manager.send_to(
         session_id,
         participant_id,
@@ -848,6 +929,7 @@ async def _handle_similarity_reason_share(
             "type": "similarity_reason_share_sent",
             "payload": {
                 "blockId": str(own_block_id),
+                "cueId": source_cue_id or None,
                 "recipientCount": len(delivery_results),
                 "deliveredCount": delivered_count,
             },
@@ -1178,6 +1260,23 @@ async def handle_board_websocket(
 
             if message_type == "share_similarity_reason":
                 await _handle_similarity_reason_share(session_id, participant_id, payload)
+                continue
+
+            if message_type == "similarity_cue_response":
+                async with SessionLocal() as db:
+                    await safe_record_similarity_cue_response(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        cue_id=payload.get("cueId") or payload.get("cue_id"),
+                        response_status=str(payload.get("response") or payload.get("status") or "unknown"),
+                        timestamp_ms=_normalize_optional_int(payload.get("timestampMs") or payload.get("timestamp_ms")),
+                        phase=_get_session_phase(session_id),
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        block_id=_normalize_optional_int(payload.get("blockId") or payload.get("block_id")),
+                        event_metadata={"source": "board_ws"},
+                    )
                 continue
 
             if message_type == "ranking_move":
@@ -1879,6 +1978,20 @@ async def handle_cue_websocket(
                         "timestamp_ms": payload.get("timestamp_ms", _now_ms()),
                     }
                 )
+                async with SessionLocal() as db:
+                    await safe_record_similarity_cue_response(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        cue_id=payload.get("cue_id") or payload.get("cueId"),
+                        response_status=str(payload.get("response") or payload.get("status") or "unknown"),
+                        timestamp_ms=_normalize_optional_int(payload.get("timestamp_ms") or payload.get("timestampMs")),
+                        phase=_get_session_phase(session_id),
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        block_id=_normalize_optional_int(payload.get("block_id") or payload.get("blockId")),
+                        event_metadata={"source": "cue_ws"},
+                    )
                 await cue_manager.send_to(
                     session_id,
                     participant_id,
