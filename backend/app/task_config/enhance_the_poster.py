@@ -34,11 +34,13 @@ SLOGAN_LIBRARY_COMPONENT_IDS = {
 }
 IMAGE_LIBRARY_COMPONENT_IDS = {"icon"}
 
-TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
+TOPIC_DESCRIPTION = """你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，我們將目前的設計交給 reviewer 閱讀，並收集了一些關於資訊清楚度、文字內容與視覺呈現的改善建議。請綜合目前的海報內容與 reviewer feedback，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。
+
+每位參與者收到的 Canva 材料包含：初版淨灘活動招募海報、任務說明與任務需求、reviewer feedback 摘要、圖床、可替換的文字與 slogan library，以及海報元件和改善動作的 library。海報目前包含：淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6（四）15:00-18:00」、地點、活動說明，以及報名 QR Code。
 
 你們的任務是：**先各自建立最值得優先改善的 task items，再於小組討論時整合成共同優先順序。**
 
-Private Phase 1 請從預設的海報元件與改善動作中組合至少 4 個 task items，沒有數量上限，並依照優先改善順序排列。進入 Private Phase 2 後，所有成員建立的 task items 會集中在一起；Private Phase 2 與 Public Phase 都只需要排序前 15 個最重要的改善項目，排在第 16 個之後的項目表示不會改動。
+Private Phase 1 請從預設的海報元件與改善動作中組合至少 4 個 task items，沒有數量上限，並依照優先改善順序排列。進入 Private Phase 2 後，所有成員建立的 task items 會集中在一起；Private Phase 2 與 Public Phase 都只需要排序前 15 個最重要的改善項目，排在第 16 個之後的項目表示不會改動。Public Phase 可以開啟公開麥克風與其他人討論，且每位參與者請至少公開發言兩次。
 
 排序時請考慮：路過的人能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易被注意並掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。"""
 
@@ -517,10 +519,10 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 """
 
 TASK_TOPIC_DETAIL = (
-    "你們正在檢視一張淨灘活動招募海報。海報目前包含淨灘插圖、主標語「一起來淨灘吧!」、"
-    "日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、用品說明與報名 QR Code。"
+    "你們正在檢視一張淨灘活動招募海報初稿，並綜合 reviewer feedback 改善資訊清楚度、文字內容與視覺呈現。"
+    "Canva 材料包含初版海報、任務說明與需求、reviewer feedback 摘要、圖床、可替換的文字與 slogan library，以及海報元件和改善動作的 library。"
     "Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將最應該優先改善的項目排在前面。"
-    "Private Phase 2 與 Public Phase 只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。"
+    "Private Phase 2 與 Public Phase 只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。Public Phase 每位參與者請至少公開發言兩次。"
     "建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、"
     "視覺層次是否有效，以及資訊是否足以讓人安心參與。"
 )
