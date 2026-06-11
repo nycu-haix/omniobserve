@@ -34,6 +34,10 @@ def snapshot_item_id(item_id: int) -> str:
     return f"{SNAPSHOT_ITEM_ID_PREFIX}{item_id}"
 
 
+def _snapshot_dedupe_key(item: PrivatePhaseTaskItem) -> tuple[str, str, str]:
+    return (item.component_id, item.action_id, item.statement)
+
+
 async def initialize_phase_rankings(
     db: AsyncSession,
     *,
@@ -167,10 +171,11 @@ async def get_or_create_phase_snapshot(
         len(deduplicated_items),
     )
     for position, item in enumerate(deduplicated_items, start=1):
+        item_dedupe_key = _snapshot_dedupe_key(item)
         source_priorities = [
             {"user_id": source.user_id, "priority": source.priority, "private_phase_task_item_id": source.id}
             for source in source_items
-            if source.component_id == item.component_id and source.action_id == item.action_id
+            if _snapshot_dedupe_key(source) == item_dedupe_key
         ]
         source_user_ids = sorted({int(source["user_id"]) for source in source_priorities})
         db.add(
@@ -256,16 +261,17 @@ async def load_private_phase_items(
 
 
 def deduplicate_private_phase_items(items: list[PrivatePhaseTaskItem]) -> list[PrivatePhaseTaskItem]:
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     deduplicated: list[PrivatePhaseTaskItem] = []
     for item in items:
-        key = (item.component_id, item.action_id)
+        key = _snapshot_dedupe_key(item)
         if key in seen:
             logger.info(
-                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s user_id=%s priority=%s",
+                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s statement=%s user_id=%s priority=%s",
                 item.id,
                 item.component_id,
                 item.action_id,
+                item.statement,
                 item.user_id,
                 item.priority,
             )

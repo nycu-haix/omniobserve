@@ -21,6 +21,18 @@ REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
 CUSTOM_DETAIL_ACTION_ID = "custom_detail"
+REPLACE_SLOGAN_LIBRARY_ACTION_ID = "replace_slogan_library"
+REPLACE_IMAGE_LIBRARY_ACTION_ID = "replace_image_library"
+SLOGAN_LIBRARY_COMPONENT_IDS = {
+    "main_title",
+    "subtitle",
+    "description",
+    "cta",
+    "qr_caption",
+    "reminder",
+    "contact_info",
+}
+IMAGE_LIBRARY_COMPONENT_IDS = {"icon"}
 
 TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
 
@@ -359,6 +371,34 @@ PHASE1_ACTION_ITEMS = [
         "template_zh": "調整「{component}」透明度",
     },
     {
+        "id": REPLACE_SLOGAN_LIBRARY_ACTION_ID,
+        "label_zh": "替換成 Slogan",
+        "label_en": "Replace with slogan",
+        "description_zh": "輸入 Canva Slogan Library 的編號，將這個文字元件替換成指定 slogan。",
+        "template_zh": "將「{component}」替換成 Slogan {detail}",
+        "requires_detail": True,
+        "detail_input": {
+            "kind": "library_number",
+            "label_zh": "Slogan 編號",
+            "placeholder_zh": "例如：7",
+            "min": 1,
+        },
+    },
+    {
+        "id": REPLACE_IMAGE_LIBRARY_ACTION_ID,
+        "label_zh": "替換成圖片",
+        "label_en": "Replace with image",
+        "description_zh": "輸入 Canva 圖片 Library 的編號，將這個圖示替換成指定圖片。",
+        "template_zh": "將「{component}」替換成圖片 {detail}",
+        "requires_detail": True,
+        "detail_input": {
+            "kind": "library_number",
+            "label_zh": "圖片編號",
+            "placeholder_zh": "例如：2",
+            "min": 1,
+        },
+    },
+    {
         "id": CUSTOM_DETAIL_ACTION_ID,
         "label_zh": "自訂動作",
         "label_en": "Custom action",
@@ -370,7 +410,13 @@ PHASE1_ACTION_ITEMS = [
 
 for component in PHASE1_POSTER_COMPONENTS:
     allowed_action_ids = component.get("allowed_action_ids")
-    if isinstance(allowed_action_ids, list) and CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
+    if not isinstance(allowed_action_ids, list):
+        continue
+    if component.get("id") in SLOGAN_LIBRARY_COMPONENT_IDS and REPLACE_SLOGAN_LIBRARY_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(REPLACE_SLOGAN_LIBRARY_ACTION_ID)
+    if component.get("id") in IMAGE_LIBRARY_COMPONENT_IDS and REPLACE_IMAGE_LIBRARY_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(REPLACE_IMAGE_LIBRARY_ACTION_ID)
+    if CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
         allowed_action_ids.append(CUSTOM_DETAIL_ACTION_ID)
 
 PHASE1_BUILDER_CONFIG = {

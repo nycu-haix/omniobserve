@@ -47,9 +47,10 @@ function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, act
 	}
 
 	const template = action.template_zh?.trim();
-	const statement = template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
 	const normalizedDetail = detail.trim();
-	return normalizedDetail ? `${statement}：${normalizedDetail}` : statement;
+	const hasDetailPlaceholder = !!template?.includes("{detail}");
+	const statement = template ? template.replace("{component}", component.label_zh).replace("{detail}", normalizedDetail).trim() : `${action.label_zh}「${component.label_zh}」`;
+	return normalizedDetail && !hasDetailPlaceholder ? `${statement}：${normalizedDetail}` : statement;
 }
 
 function getAllowedActionsForComponent(component: Phase1BuilderOption | undefined, actions: Phase1BuilderOption[]): Phase1BuilderOption[] {
@@ -63,6 +64,42 @@ function getAllowedActionsForComponent(component: Phase1BuilderOption | undefine
 
 	const allowedActionIds = new Set(component.allowed_action_ids);
 	return actions.filter(action => allowedActionIds.has(action.id));
+}
+
+function getDetailInputKind(action: Phase1BuilderOption | undefined): string {
+	return action?.detail_input?.kind ?? "";
+}
+
+function isLibraryNumberAction(action: Phase1BuilderOption | undefined): boolean {
+	return getDetailInputKind(action) === "library_number";
+}
+
+function normalizeLibraryNumberDetail(value: string): string {
+	const trimmed = value.trim();
+	if (!/^0*[1-9]\d*$/.test(trimmed)) {
+		return "";
+	}
+	return trimmed.replace(/^0+/, "");
+}
+
+function normalizeDetailForAction(action: Phase1BuilderOption | undefined, value: string): string {
+	if (!action?.requires_detail) {
+		return "";
+	}
+	if (isLibraryNumberAction(action)) {
+		return normalizeLibraryNumberDetail(value);
+	}
+	return value.trim();
+}
+
+function shouldKeepDetailForActionChange(currentAction: Phase1BuilderOption | undefined, nextAction: Phase1BuilderOption | undefined): boolean {
+	if (!nextAction?.requires_detail) {
+		return false;
+	}
+	if (currentAction?.id === nextAction.id) {
+		return true;
+	}
+	return getDetailInputKind(currentAction) === getDetailInputKind(nextAction);
 }
 
 function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
@@ -190,7 +227,10 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const availableActions = getAllowedActionsForComponent(selectedComponent, builder.actions);
 	const selectedAction = availableActions.find(item => item.id === form.actionId);
 	const selectedActionRequiresDetail = !!selectedAction?.requires_detail;
-	const normalizedDetail = form.detail.trim();
+	const selectedActionUsesLibraryNumber = isLibraryNumberAction(selectedAction);
+	const normalizedDetail = normalizeDetailForAction(selectedAction, form.detail);
+	const hasDetailValue = form.detail.trim().length > 0;
+	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
 	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving;
 	const requiredItemCount = minimumItemCount(builder);
@@ -286,18 +326,20 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 				const component = builder.components.find(item => item.id === id);
 				const availableActionsForComponent = getAllowedActionsForComponent(component, builder.actions);
 				const action = availableActionsForComponent.find(action => action.id === current.actionId);
+				const currentAction = availableActions.find(action => action.id === current.actionId);
 				return {
 					componentId: id,
 					actionId: action ? current.actionId : "",
-					detail: action?.requires_detail ? current.detail : ""
+					detail: shouldKeepDetailForActionChange(currentAction, action) ? current.detail : ""
 				};
 			}
 
 			const action = availableActions.find(action => action.id === id);
+			const currentAction = availableActions.find(action => action.id === current.actionId);
 			return {
 				...current,
 				actionId: id,
-				detail: action?.requires_detail ? current.detail : ""
+				detail: shouldKeepDetailForActionChange(currentAction, action) ? current.detail : ""
 			};
 		});
 		setError(null);
@@ -447,7 +489,26 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						) : (
 							<div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">先選擇海報元件</div>
 						)}
-						{selectedActionRequiresDetail && (
+						{selectedActionRequiresDetail && selectedActionUsesLibraryNumber && (
+							<label className="grid max-w-56 gap-1.5">
+								<span className="text-xs font-medium text-muted-foreground">{selectedAction?.detail_input?.label_zh || "Library 編號"}</span>
+								<input
+									value={form.detail}
+									inputMode="numeric"
+									pattern="[0-9]*"
+									className="h-10 rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-ring"
+									placeholder={selectedAction?.detail_input?.placeholder_zh || "例如：7"}
+									onChange={event => {
+										setForm(current => ({ ...current, detail: event.target.value }));
+										setError(null);
+									}}
+								/>
+								<span className={cn("text-xs text-muted-foreground", isLibraryNumberInvalid && "text-destructive")}>
+									{isLibraryNumberInvalid ? "請輸入正整數" : normalizedDetail.length === 0 ? "請輸入編號" : `編號 ${normalizedDetail}`}
+								</span>
+							</label>
+						)}
+						{selectedActionRequiresDetail && !selectedActionUsesLibraryNumber && (
 							<label className="grid gap-1.5">
 								<span className="text-xs font-medium text-muted-foreground">自訂動作內容</span>
 								<textarea

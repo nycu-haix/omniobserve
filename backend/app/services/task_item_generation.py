@@ -363,7 +363,11 @@ async def build_poster_component_action_mappings_with_llm(
     task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
     builder = task_config.get("phase1_builder") or {}
     components = [item for item in builder.get("components", []) if item.get("id")]
-    actions = [item for item in builder.get("actions", []) if item.get("id") and not item.get("requires_detail")]
+    actions = [
+        item
+        for item in builder.get("actions", [])
+        if item.get("id") and not item.get("requires_detail") and not item.get("detail_input")
+    ]
     if not components or not actions:
         return []
 

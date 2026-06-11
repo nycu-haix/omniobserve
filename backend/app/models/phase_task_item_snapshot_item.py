@@ -17,6 +17,7 @@ class PhaseTaskItemSnapshotItem(Base):
             "snapshot_id",
             "component_id",
             "action_id",
+            "statement",
             name="uq_phase_task_item_snapshot_items_dedupe_key",
         ),
         Index("idx_phase_task_item_snapshot_items_snapshot_position", "snapshot_id", "position"),

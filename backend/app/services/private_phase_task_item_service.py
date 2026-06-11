@@ -17,6 +17,31 @@ def _normalize_detail(value: str | None) -> str:
     return " ".join((value or "").strip().split())
 
 
+def _detail_input_kind(action: dict[str, Any]) -> str:
+    detail_input = action.get("detail_input")
+    if not isinstance(detail_input, dict):
+        return ""
+    return str(detail_input.get("kind") or "")
+
+
+def _is_library_number_action(action: dict[str, Any]) -> bool:
+    return _detail_input_kind(action) == "library_number"
+
+
+def _normalize_detail_for_action(action: dict[str, Any], value: str | None) -> str:
+    detail = _normalize_detail(value)
+    if not _is_library_number_action(action):
+        return detail
+
+    if not detail or not detail.isascii() or not detail.isdigit():
+        raise HTTPException(status_code=422, detail="Library number must be a positive integer")
+
+    normalized_number = detail.lstrip("0")
+    if not normalized_number:
+        raise HTTPException(status_code=422, detail="Library number must be a positive integer")
+    return normalized_number
+
+
 def _option_label(option: dict[str, Any]) -> str:
     return str(option.get("label_zh") or option.get("label") or option.get("id") or "")
 
@@ -26,10 +51,12 @@ def _build_statement(component: dict[str, Any], action: dict[str, Any], detail: 
     action_label = _option_label(action)
     template = str(action.get("template_zh") or "").strip()
     if template:
-        statement = template.replace("{component}", component_label)
+        has_detail_placeholder = "{detail}" in template
+        statement = template.replace("{component}", component_label).replace("{detail}", detail).strip()
     else:
+        has_detail_placeholder = False
         statement = f"{action_label}「{component_label}」"
-    if detail:
+    if detail and not has_detail_placeholder:
         statement = f"{statement}：{detail}"
     return statement
 
@@ -105,13 +132,13 @@ async def create_private_phase_task_item(
     user_id: int,
     db: AsyncSession,
 ) -> PrivatePhaseTaskItem:
-    detail = _normalize_detail(payload.detail)
     resolved_task_id, component, action = _resolve_component_action(
         session_name=session_name,
         task_id=payload.task_id,
         component_id=payload.component_id,
         action_id=payload.action_id,
     )
+    detail = _normalize_detail_for_action(action, payload.detail)
     _validate_action_detail(action, detail)
 
     max_priority = await db.scalar(
@@ -158,13 +185,13 @@ async def update_private_phase_task_item(
     item = await get_private_phase_task_item(item_id, session_name=session_name, user_id=user_id, db=db)
     component_id = payload.component_id if payload.component_id is not None else item.component_id
     action_id = payload.action_id if payload.action_id is not None else item.action_id
-    detail = _normalize_detail(payload.detail if payload.detail is not None else item.detail)
     _, component, action = _resolve_component_action(
         session_name=session_name,
         task_id=item.task_id,
         component_id=component_id,
         action_id=action_id,
     )
+    detail = _normalize_detail_for_action(action, payload.detail if payload.detail is not None else item.detail)
     _validate_action_detail(action, detail)
 
     item.component_id = str(component["id"])
