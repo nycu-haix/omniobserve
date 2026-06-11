@@ -20,6 +20,19 @@ REFERENCE_IMAGE_SRC = "/task-assets/beach-cleanup-poster.png"
 REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
+CUSTOM_DETAIL_ACTION_ID = "custom_detail"
+REPLACE_SLOGAN_LIBRARY_ACTION_ID = "replace_slogan_library"
+REPLACE_IMAGE_LIBRARY_ACTION_ID = "replace_image_library"
+SLOGAN_LIBRARY_COMPONENT_IDS = {
+    "main_title",
+    "subtitle",
+    "description",
+    "cta",
+    "qr_caption",
+    "reminder",
+    "contact_info",
+}
+IMAGE_LIBRARY_COMPONENT_IDS = {"icon"}
 
 TOPIC_DESCRIPTION = """你們正在共同檢視一張淨灘活動招募海報。海報目前包含：上半部的淨灘插圖、主標語「一起來淨灘吧!」、日期時間「3/6 15:00」、地點「臺中市南屯區黎明路二段497號」、活動說明「所有用具皆已備妥--只需帶上你的活力與熱情!」，以及底部的報名 QR Code。
 
@@ -31,169 +44,169 @@ Private Phase 1 請從預設的海報元件與改善動作中組合至少 4 個 
 
 TASK_ITEMS: list[TaskItemConfig] = [
     {
-        "id": "headline_message",
-        "label_zh": "主標語與活動主題",
-        "label_en": "headline and event theme",
-        "description_zh": "改善「一起來淨灘吧!」等主標語，讓活動主題更醒目、更有吸引力。",
-        "aliases": ["主標語", "標語", "活動主題", "標題", "headline", "title", "event theme", "slogan"],
-        "image_title": "Headline",
-        "image_bg": "#ecfeff",
-        "image_fg": "#0e7490",
+        "id": "mock_main_title_enlarge",
+        "label_zh": "放大「主標題」",
+        "label_en": "Enlarge the main title",
+        "description_zh": "主標題 / 放大",
+        "aliases": ["主標題", "標題", "放大", "主標題 放大", "main title", "enlarge"],
+        "image_title": "主標題",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
         "image_mark": "TITLE",
     },
     {
-        "id": "event_datetime",
-        "label_zh": "日期與時間",
-        "label_en": "date and time",
-        "description_zh": "改善「3/6 15:00」的呈現，讓活動日期、時間與是否需要提前集合更清楚。",
-        "aliases": ["日期", "時間", "3/6", "15:00", "活動時間", "date", "time", "schedule"],
-        "image_title": "Date Time",
-        "image_bg": "#dbeafe",
-        "image_fg": "#1d4ed8",
-        "image_mark": "TIME",
-    },
-    {
-        "id": "location_address",
-        "label_zh": "地點與集合資訊",
-        "label_en": "location and meeting point",
-        "description_zh": "改善地址與集合點資訊，讓參與者知道去哪裡、如何抵達、是否需要地圖或地標。",
-        "aliases": ["地點", "地址", "集合", "集合點", "黎明路", "location", "address", "meeting point", "map"],
-        "image_title": "Location",
-        "image_bg": "#dcfce7",
-        "image_fg": "#15803d",
-        "image_mark": "MAP",
-    },
-    {
-        "id": "signup_qr_code",
-        "label_zh": "報名 QR Code",
-        "label_en": "registration QR code",
-        "description_zh": "改善 QR Code 的大小、位置、留白與標示，讓觀眾知道它是報名入口並容易掃描。",
-        "aliases": ["QR", "QR Code", "報名碼", "掃碼", "registration QR", "signup QR", "scan"],
-        "image_title": "QR Code",
-        "image_bg": "#f1f5f9",
-        "image_fg": "#475569",
-        "image_mark": "QR",
-    },
-    {
-        "id": "call_to_action",
-        "label_zh": "報名與行動指引",
-        "label_en": "call to action",
-        "description_zh": "加入或強化立即報名、掃描 QR Code、截止時間等明確行動指引。",
-        "aliases": ["報名", "行動指引", "立即報名", "掃描報名", "CTA", "call to action", "signup", "register"],
-        "image_title": "Call To Action",
-        "image_bg": "#fef3c7",
-        "image_fg": "#b45309",
-        "image_mark": "CTA",
-    },
-    {
-        "id": "supplies_notice",
-        "label_zh": "用品準備說明",
-        "label_en": "supplies and preparation note",
-        "description_zh": "改善「所有用具皆已備妥」等說明，讓參與者知道需要帶什麼、不需要帶什麼。",
-        "aliases": ["用具", "用品", "準備", "自備", "所有用具", "supplies", "equipment", "preparation"],
-        "image_title": "Supplies",
-        "image_bg": "#ffedd5",
-        "image_fg": "#c2410c",
-        "image_mark": "BAG",
-    },
-    {
-        "id": "motivation_value",
-        "label_zh": "淨灘動機與價值",
-        "label_en": "motivation and value",
-        "description_zh": "補強為什麼要參加淨灘，例如環境影響、社群感、活動意義或參與後能帶來的改變。",
-        "aliases": ["動機", "價值", "環保", "意義", "為什麼", "motivation", "value", "impact", "environment"],
-        "image_title": "Motivation",
-        "image_bg": "#ccfbf1",
-        "image_fg": "#0f766e",
-        "image_mark": "WHY",
-    },
-    {
-        "id": "organizer_contact",
-        "label_zh": "主辦與聯絡資訊",
-        "label_en": "organizer and contact information",
-        "description_zh": "加入或改善主辦單位、聯絡方式、社群帳號等資訊，提升可信度並方便詢問。",
-        "aliases": ["主辦", "聯絡", "聯絡資訊", "社群", "organizer", "contact", "host", "social"],
-        "image_title": "Contact",
-        "image_bg": "#e0f2fe",
-        "image_fg": "#075985",
-        "image_mark": "INFO",
-    },
-    {
-        "id": "illustration_focus",
-        "label_zh": "主視覺插圖",
-        "label_en": "main illustration",
-        "description_zh": "改善淨灘人物插圖的大小、位置、情緒、與文字資訊之間的關係。",
-        "aliases": ["插圖", "圖片", "人物", "主視覺", "illustration", "image", "visual", "people"],
-        "image_title": "Illustration",
-        "image_bg": "#fae8ff",
-        "image_fg": "#a21caf",
-        "image_mark": "IMG",
-    },
-    {
-        "id": "visual_hierarchy",
-        "label_zh": "視覺層次",
-        "label_en": "visual hierarchy",
-        "description_zh": "調整資訊優先順序，讓觀眾先看到活動主題，再看到時間地點與報名方式。",
-        "aliases": ["視覺層次", "資訊層次", "重點", "hierarchy", "priority", "emphasis"],
-        "image_title": "Hierarchy",
-        "image_bg": "#ede9fe",
-        "image_fg": "#6d28d9",
-        "image_mark": "RANK",
-    },
-    {
-        "id": "whitespace_layout",
-        "label_zh": "版面留白與對齊",
-        "label_en": "spacing and alignment",
-        "description_zh": "改善整體留白、上下比例、文字對齊與 QR Code 區域配置，讓版面更平衡。",
-        "aliases": ["留白", "對齊", "版面", "排版", "spacing", "alignment", "layout", "balance"],
-        "image_title": "Layout",
-        "image_bg": "#f5f5f4",
-        "image_fg": "#78716c",
-        "image_mark": "GRID",
-    },
-    {
-        "id": "typography_readability",
-        "label_zh": "字體與可讀性",
-        "label_en": "typography and readability",
-        "description_zh": "改善字體大小、字重、行距、段落分組，讓文字在遠距離或手機上也容易閱讀。",
-        "aliases": ["字體", "字太小", "可讀性", "行距", "typography", "font", "readability", "legibility"],
-        "image_title": "Typography",
-        "image_bg": "#fce7f3",
-        "image_fg": "#be185d",
-        "image_mark": "TEXT",
-    },
-    {
-        "id": "color_contrast",
-        "label_zh": "色彩與對比",
-        "label_en": "color and contrast",
-        "description_zh": "改善文字、插圖與背景的色彩對比，讓重點更醒目且符合淨灘活動氣氛。",
-        "aliases": ["顏色", "色彩", "對比", "藍色", "contrast", "color", "palette", "background"],
-        "image_title": "Color",
-        "image_bg": "#ecfccb",
-        "image_fg": "#4d7c0f",
+        "id": "mock_main_title_change_color",
+        "label_zh": "改「主標題」顏色",
+        "label_en": "Change the main title color",
+        "description_zh": "主標題 / 改顏色",
+        "aliases": ["主標題", "標題", "改顏色", "顏色", "main title", "change color"],
+        "image_title": "主標題",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
         "image_mark": "COLOR",
     },
     {
-        "id": "mobile_accessibility",
-        "label_zh": "手機閱讀與無障礙",
-        "label_en": "mobile readability and accessibility",
-        "description_zh": "改善手機截圖、投影、遠距離觀看、色弱或低視力觀眾的閱讀與掃碼體驗。",
-        "aliases": ["手機", "無障礙", "可及性", "掃讀", "mobile", "accessibility", "a11y", "responsive"],
-        "image_title": "Accessibility",
-        "image_bg": "#e5e7eb",
-        "image_fg": "#374151",
-        "image_mark": "A11Y",
+        "id": "mock_title_group_move",
+        "label_zh": "移動「主標題+副標題+說明」",
+        "label_en": "Move the title group",
+        "description_zh": "主標題+副標題+說明 / 移動",
+        "aliases": ["主標題+副標題+說明", "標題組", "移動", "title group", "move"],
+        "image_title": "主標題+副標題+說明",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "GROUP",
     },
     {
-        "id": "safety_weather",
-        "label_zh": "注意事項與安全提醒",
-        "label_en": "instructions and safety reminders",
-        "description_zh": "補充天候、穿著、防曬、飲水、交通或安全注意事項，降低參與者的不確定感。",
-        "aliases": ["注意事項", "安全", "天氣", "穿著", "防曬", "instructions", "safety", "weather", "reminder"],
-        "image_title": "Safety",
-        "image_bg": "#fee2e2",
-        "image_fg": "#b91c1c",
-        "image_mark": "SAFE",
+        "id": "mock_title_group_unify_font",
+        "label_zh": "統一「主標題+副標題+說明」字型",
+        "label_en": "Unify the title group font",
+        "description_zh": "主標題+副標題+說明 / 統一字型",
+        "aliases": ["主標題+副標題+說明", "標題組", "統一字型", "字型", "title group", "unify font"],
+        "image_title": "主標題+副標題+說明",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "FONT",
+    },
+    {
+        "id": "mock_title_group_left_align",
+        "label_zh": "將「主標題+副標題+說明」向左對齊",
+        "label_en": "Left-align the title group",
+        "description_zh": "主標題+副標題+說明 / 向左對齊",
+        "aliases": ["主標題+副標題+說明", "標題組", "向左對齊", "左對齊", "title group", "left align"],
+        "image_title": "主標題+副標題+說明",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "LEFT",
+    },
+    {
+        "id": "mock_title_group_center_align",
+        "label_zh": "將「主標題+副標題+說明」置中對齊",
+        "label_en": "Center-align the title group",
+        "description_zh": "主標題+副標題+說明 / 置中對齊",
+        "aliases": ["主標題+副標題+說明", "標題組", "置中對齊", "置中", "title group", "center align"],
+        "image_title": "主標題+副標題+說明",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "CENTER",
+    },
+    {
+        "id": "mock_description_change_color",
+        "label_zh": "改「說明文字」顏色",
+        "label_en": "Change the description color",
+        "description_zh": "說明文字 / 改顏色",
+        "aliases": ["說明文字", "說明", "改顏色", "顏色", "description", "change color"],
+        "image_title": "說明文字",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "DESC",
+    },
+    {
+        "id": "mock_qr_code_group_shrink",
+        "label_zh": "縮小「QR 碼+說明」",
+        "label_en": "Shrink the QR code group",
+        "description_zh": "QR 碼+說明 / 縮小",
+        "aliases": ["QR 碼+說明", "QR code", "QR", "縮小", "qr code group", "shrink"],
+        "image_title": "QR 碼+說明",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "QR",
+    },
+    {
+        "id": "mock_info_group_adjust_spacing",
+        "label_zh": "調整「下方資訊」間距",
+        "label_en": "Adjust the bottom information spacing",
+        "description_zh": "下方資訊 / 調整間距",
+        "aliases": ["下方資訊", "底部資訊", "調整間距", "間距", "info group", "spacing"],
+        "image_title": "下方資訊",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "SPACE",
+    },
+    {
+        "id": "mock_info_group_move",
+        "label_zh": "移動「下方資訊」",
+        "label_en": "Move the bottom information",
+        "description_zh": "下方資訊 / 移動",
+        "aliases": ["下方資訊", "底部資訊", "移動", "info group", "move"],
+        "image_title": "下方資訊",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "INFO",
+    },
+    {
+        "id": "mock_info_group_left_align",
+        "label_zh": "將「下方資訊」向左對齊",
+        "label_en": "Left-align the bottom information",
+        "description_zh": "下方資訊 / 向左對齊",
+        "aliases": ["下方資訊", "底部資訊", "向左對齊", "左對齊", "info group", "left align"],
+        "image_title": "下方資訊",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "LEFT",
+    },
+    {
+        "id": "mock_info_group_enlarge",
+        "label_zh": "放大「下方資訊」",
+        "label_en": "Enlarge the bottom information",
+        "description_zh": "下方資訊 / 放大",
+        "aliases": ["下方資訊", "底部資訊", "放大", "info group", "enlarge"],
+        "image_title": "下方資訊",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "INFO",
+    },
+    {
+        "id": "mock_date_location_cta_left_align",
+        "label_zh": "將「日期時間+地點+行動呼籲」向左對齊",
+        "label_en": "Left-align the date, location, and call to action",
+        "description_zh": "日期時間+地點+行動呼籲 / 向左對齊",
+        "aliases": ["日期時間+地點+行動呼籲", "時間地點行動呼籲", "CTA", "向左對齊", "left align"],
+        "image_title": "日期時間+地點+行動呼籲",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "DTC",
+    },
+    {
+        "id": "mock_cta_shrink",
+        "label_zh": "縮小「行動呼籲」",
+        "label_en": "Shrink the call to action",
+        "description_zh": "行動呼籲 / 縮小",
+        "aliases": ["行動呼籲", "CTA", "縮小", "call to action", "shrink"],
+        "image_title": "行動呼籲",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "CTA",
+    },
+    {
+        "id": "mock_background_move",
+        "label_zh": "移動「背景」",
+        "label_en": "Move the background",
+        "description_zh": "背景 / 移動",
+        "aliases": ["背景", "移動", "background", "move"],
+        "image_title": "背景",
+        "image_bg": "#f8fafc",
+        "image_fg": "#334155",
+        "image_mark": "BG",
     },
 ]
 
@@ -290,14 +303,14 @@ PHASE1_POSTER_COMPONENTS = [
     },
     {
         "id": "title_group",
-        "label_zh": "主標題+副標題+說明文字",
+        "label_zh": "主標題+副標題+說明",
         "label_en": "Title group",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
     {
         "id": "info_group2",
         "label_zh": "日期時間+地點+行動呼籲",
-        "label_en": "Info group2",
+        "label_en": "Date, location, and CTA group",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
     },
     {
@@ -411,7 +424,54 @@ PHASE1_ACTION_ITEMS = [
         "label_en": "Align center",
         "template_zh": "將「{component}」置中對齊",
     },
+    {
+        "id": REPLACE_SLOGAN_LIBRARY_ACTION_ID,
+        "label_zh": "替換成 Slogan",
+        "label_en": "Replace with slogan",
+        "description_zh": "輸入 Canva Slogan Library 的編號，將這個文字元件替換成指定 slogan。",
+        "template_zh": "將「{component}」替換成 Slogan {detail}",
+        "requires_detail": True,
+        "detail_input": {
+            "kind": "library_number",
+            "label_zh": "Slogan 編號",
+            "placeholder_zh": "例如：7",
+            "min": 1,
+        },
+    },
+    {
+        "id": REPLACE_IMAGE_LIBRARY_ACTION_ID,
+        "label_zh": "替換成圖片",
+        "label_en": "Replace with image",
+        "description_zh": "輸入 Canva 圖片 Library 的編號，將這個圖示替換成指定圖片。",
+        "template_zh": "將「{component}」替換成圖片 {detail}",
+        "requires_detail": True,
+        "detail_input": {
+            "kind": "library_number",
+            "label_zh": "圖片編號",
+            "placeholder_zh": "例如：2",
+            "min": 1,
+        },
+    },
+    {
+        "id": CUSTOM_DETAIL_ACTION_ID,
+        "label_zh": "自訂動作",
+        "label_en": "Custom action",
+        "description_zh": "用自己的文字描述要怎麼調整這個元件。",
+        "template_zh": "自訂調整「{component}」",
+        "requires_detail": True,
+    },
 ]
+
+for component in PHASE1_POSTER_COMPONENTS:
+    allowed_action_ids = component.get("allowed_action_ids")
+    if not isinstance(allowed_action_ids, list):
+        continue
+    if component.get("id") in SLOGAN_LIBRARY_COMPONENT_IDS and REPLACE_SLOGAN_LIBRARY_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(REPLACE_SLOGAN_LIBRARY_ACTION_ID)
+    if component.get("id") in IMAGE_LIBRARY_COMPONENT_IDS and REPLACE_IMAGE_LIBRARY_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(REPLACE_IMAGE_LIBRARY_ACTION_ID)
+    if CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
+        allowed_action_ids.append(CUSTOM_DETAIL_ACTION_ID)
 
 PHASE1_BUILDER_CONFIG = {
     "enabled": True,
@@ -452,7 +512,7 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 
 ---
 
-# 改善面向清單
+# 預設改善項目清單
 {chr(10).join(item["label_zh"] for item in TASK_ITEMS)}
 """
 
@@ -473,22 +533,12 @@ SIMILARITY_TASK_CONTEXT = (
 )
 
 PHASE1_TASK_ITEM_BUILDER_LAYOUT = {
-    "type": "split",
-    "direction": "horizontal",
-    "ratio": 58,
-    "first": {"type": "leaf", "content": "phase-task-items"},
-    "second": {"type": "leaf", "content": "task-instructions"},
+    "type": "leaf",
+    "content": "phase-task-items",
 }
 PRIVATE_RANKING_LAYOUT = {
     "type": "leaf",
     "content": "private-ranking",
-}
-PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT = {
-    "type": "split",
-    "direction": "horizontal",
-    "ratio": 58,
-    "first": {"type": "leaf", "content": "private-ranking"},
-    "second": {"type": "leaf", "content": "task-instructions"},
 }
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
@@ -500,7 +550,7 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
 
 TASK_PHASES = [
     {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PHASE1_TASK_ITEM_BUILDER_LAYOUT},
-    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
+    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
 ]
 

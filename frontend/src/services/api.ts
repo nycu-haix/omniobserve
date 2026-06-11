@@ -28,6 +28,15 @@ export interface Phase1BuilderOption {
 	description_zh?: string;
 	template_zh?: string;
 	allowed_action_ids?: string[];
+	requires_detail?: boolean | null;
+	detail_input?: Phase1BuilderDetailInput | null;
+}
+
+export interface Phase1BuilderDetailInput {
+	kind: "library_number" | string;
+	label_zh?: string | null;
+	placeholder_zh?: string | null;
+	min?: number | null;
 }
 
 export interface Phase1BuilderConfig {

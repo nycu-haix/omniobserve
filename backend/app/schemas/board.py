@@ -126,6 +126,13 @@ class TaskConfigItemResponse(BaseModel):
     image_mark: str
 
 
+class Phase1BuilderDetailInputResponse(BaseModel):
+    kind: str
+    label_zh: str | None = None
+    placeholder_zh: str | None = None
+    min: int | None = None
+
+
 class Phase1BuilderOptionResponse(BaseModel):
     id: str
     label_zh: str
@@ -133,6 +140,8 @@ class Phase1BuilderOptionResponse(BaseModel):
     description_zh: str | None = None
     template_zh: str | None = None
     allowed_action_ids: list[str] | None = None
+    requires_detail: bool | None = None
+    detail_input: Phase1BuilderDetailInputResponse | None = None
 
 
 class Phase1BuilderResponse(BaseModel):

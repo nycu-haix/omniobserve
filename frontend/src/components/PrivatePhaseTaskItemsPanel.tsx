@@ -23,6 +23,7 @@ interface PrivatePhaseTaskItemsPanelProps {
 interface PhaseTaskFormState {
 	componentId: string;
 	actionId: string;
+	detail: string;
 }
 
 type KeywordKind = "component" | "action";
@@ -30,7 +31,8 @@ type KeywordKind = "component" | "action";
 function createPhaseTaskForm(): PhaseTaskFormState {
 	return {
 		componentId: "",
-		actionId: ""
+		actionId: "",
+		detail: ""
 	};
 }
 
@@ -39,13 +41,16 @@ function getParticipantUserId(participantId: string): number {
 	return Number.isInteger(userId) ? userId : 0;
 }
 
-function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined): string {
+function buildPhaseTaskStatement(component: Phase1BuilderOption | undefined, action: Phase1BuilderOption | undefined, detail = ""): string {
 	if (!component || !action) {
 		return "";
 	}
 
 	const template = action.template_zh?.trim();
-	return template ? template.replace("{component}", component.label_zh) : `${action.label_zh}「${component.label_zh}」`;
+	const normalizedDetail = detail.trim();
+	const hasDetailPlaceholder = !!template?.includes("{detail}");
+	const statement = template ? template.replace("{component}", component.label_zh).replace("{detail}", normalizedDetail).trim() : `${action.label_zh}「${component.label_zh}」`;
+	return normalizedDetail && !hasDetailPlaceholder ? `${statement}：${normalizedDetail}` : statement;
 }
 
 function getAllowedActionsForComponent(component: Phase1BuilderOption | undefined, actions: Phase1BuilderOption[]): Phase1BuilderOption[] {
@@ -59,6 +64,42 @@ function getAllowedActionsForComponent(component: Phase1BuilderOption | undefine
 
 	const allowedActionIds = new Set(component.allowed_action_ids);
 	return actions.filter(action => allowedActionIds.has(action.id));
+}
+
+function getDetailInputKind(action: Phase1BuilderOption | undefined): string {
+	return action?.detail_input?.kind ?? "";
+}
+
+function isLibraryNumberAction(action: Phase1BuilderOption | undefined): boolean {
+	return getDetailInputKind(action) === "library_number";
+}
+
+function normalizeLibraryNumberDetail(value: string): string {
+	const trimmed = value.trim();
+	if (!/^0*[1-9]\d*$/.test(trimmed)) {
+		return "";
+	}
+	return trimmed.replace(/^0+/, "");
+}
+
+function normalizeDetailForAction(action: Phase1BuilderOption | undefined, value: string): string {
+	if (!action?.requires_detail) {
+		return "";
+	}
+	if (isLibraryNumberAction(action)) {
+		return normalizeLibraryNumberDetail(value);
+	}
+	return value.trim();
+}
+
+function shouldKeepDetailForActionChange(currentAction: Phase1BuilderOption | undefined, nextAction: Phase1BuilderOption | undefined): boolean {
+	if (!nextAction?.requires_detail) {
+		return false;
+	}
+	if (currentAction?.id === nextAction.id) {
+		return true;
+	}
+	return getDetailInputKind(currentAction) === getDetailInputKind(nextAction);
 }
 
 function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
@@ -89,22 +130,19 @@ function PhaseTaskItemThresholdSeparator({ label }: { label: string }) {
 
 function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: string; selectedOption?: Phase1BuilderOption; isActive: boolean; onClear: () => void }) {
 	return (
-		<div className={cn("grid min-h-24 gap-2 rounded-lg border border-dashed bg-card p-3 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
-			<div className="flex items-center justify-between gap-2">
-				<span className="text-xs font-semibold text-muted-foreground">{label}</span>
-				{selectedOption && (
-					<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="清除" aria-label={`清除${label}`} onClick={onClear}>
-						<X className="h-3.5 w-3.5" />
-					</Button>
+		<div className={cn("flex min-h-12 items-center justify-between gap-3 rounded-md border border-dashed bg-card px-3 py-2 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
+			<div className="flex min-w-0 items-baseline gap-2">
+				<span className="shrink-0 text-xs font-semibold text-muted-foreground">{label}</span>
+				{selectedOption ? (
+					<span className="min-w-0 truncate text-sm font-semibold leading-6">{selectedOption.label_zh}</span>
+				) : (
+					<span className="text-sm leading-6 text-muted-foreground">尚未選擇</span>
 				)}
 			</div>
-			{selectedOption ? (
-				<div className="grid gap-1">
-					<div className="break-words text-sm font-semibold leading-6">{selectedOption.label_zh}</div>
-					{selectedOption.description_zh && <div className="break-words text-xs leading-5 text-muted-foreground">{selectedOption.description_zh}</div>}
-				</div>
-			) : (
-				<div className="grid min-h-10 place-items-center rounded-md bg-muted/50 px-2 text-center text-sm text-muted-foreground">尚未選擇</div>
+			{selectedOption && (
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="清除" aria-label={`清除${label}`} onClick={onClear}>
+					<X className="h-3.5 w-3.5" />
+				</Button>
 			)}
 		</div>
 	);
@@ -185,8 +223,13 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
 	const availableActions = getAllowedActionsForComponent(selectedComponent, builder.actions);
 	const selectedAction = availableActions.find(item => item.id === form.actionId);
-	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction);
-	const canSave = !!selectedComponent && !!selectedAction && !isSaving;
+	const selectedActionRequiresDetail = !!selectedAction?.requires_detail;
+	const selectedActionUsesLibraryNumber = isLibraryNumberAction(selectedAction);
+	const normalizedDetail = normalizeDetailForAction(selectedAction, form.detail);
+	const hasDetailValue = form.detail.trim().length > 0;
+	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
+	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
+	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving;
 	const requiredItemCount = minimumItemCount(builder);
 
 	const resetForm = useCallback(() => {
@@ -199,10 +242,12 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		const timer = window.setTimeout(() => {
 			setForm(current => {
 				const component = builder.components.find(item => item.id === current.componentId);
-				const hasAction = getAllowedActionsForComponent(component, builder.actions).some(item => item.id === current.actionId);
+				const availableActionsForComponent = getAllowedActionsForComponent(component, builder.actions);
+				const action = availableActionsForComponent.find(item => item.id === current.actionId);
 				return {
 					componentId: component ? current.componentId : "",
-					actionId: component && hasAction ? current.actionId : ""
+					actionId: component && action ? current.actionId : "",
+					detail: component && action?.requires_detail ? current.detail : ""
 				};
 			});
 		}, 0);
@@ -247,10 +292,12 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setIsSaving(true);
 		setError(null);
 		try {
+			const detail = selectedActionRequiresDetail ? normalizedDetail : "";
 			if (editingItemId !== null) {
 				const updatedItem = await updatePrivatePhaseTaskItem(sessionId, participantUserId, editingItemId, {
 					component_id: selectedComponent.id,
-					action_id: selectedAction.id
+					action_id: selectedAction.id,
+					detail
 				});
 				setItems(current => sortPrivatePhaseTaskItems(current.map(item => (item.id === updatedItem.id ? updatedItem : item))));
 			} else {
@@ -258,7 +305,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					task_id: taskId,
 					component_id: selectedComponent.id,
 					action_id: selectedAction.id,
-					detail: ""
+					detail
 				});
 				setItems(current => sortPrivatePhaseTaskItems([...current, createdItem]));
 			}
@@ -274,16 +321,22 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setForm(current => {
 			if (kind === "component") {
 				const component = builder.components.find(item => item.id === id);
-				const canKeepAction = getAllowedActionsForComponent(component, builder.actions).some(action => action.id === current.actionId);
+				const availableActionsForComponent = getAllowedActionsForComponent(component, builder.actions);
+				const action = availableActionsForComponent.find(action => action.id === current.actionId);
+				const currentAction = availableActions.find(action => action.id === current.actionId);
 				return {
 					componentId: id,
-					actionId: canKeepAction ? current.actionId : ""
+					actionId: action ? current.actionId : "",
+					detail: shouldKeepDetailForActionChange(currentAction, action) ? current.detail : ""
 				};
 			}
 
+			const action = availableActions.find(action => action.id === id);
+			const currentAction = availableActions.find(action => action.id === current.actionId);
 			return {
 				...current,
-				actionId: id
+				actionId: id,
+				detail: shouldKeepDetailForActionChange(currentAction, action) ? current.detail : ""
 			};
 		});
 		setError(null);
@@ -293,7 +346,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 		setEditingItemId(item.id);
 		setForm({
 			componentId: item.component_id,
-			actionId: item.action_id
+			actionId: item.action_id,
+			detail: item.detail
 		});
 		setError(null);
 	};
@@ -380,7 +434,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						selectedOption={selectedComponent}
 						isActive={!!selectedComponent}
 						onClear={() => {
-							setForm(current => ({ ...current, componentId: "" }));
+							setForm(current => ({ ...current, componentId: "", actionId: "", detail: "" }));
 							setError(null);
 						}}
 					/>
@@ -389,7 +443,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						selectedOption={selectedAction}
 						isActive={!!selectedAction}
 						onClear={() => {
-							setForm(current => ({ ...current, actionId: "" }));
+							setForm(current => ({ ...current, actionId: "", detail: "" }));
 							setError(null);
 						}}
 					/>
@@ -431,6 +485,41 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 							</div>
 						) : (
 							<div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">先選擇海報元件</div>
+						)}
+						{selectedActionRequiresDetail && selectedActionUsesLibraryNumber && (
+							<label className="grid max-w-56 gap-1.5">
+								<span className="text-xs font-medium text-muted-foreground">{selectedAction?.detail_input?.label_zh || "Library 編號"}</span>
+								<input
+									value={form.detail}
+									inputMode="numeric"
+									pattern="[0-9]*"
+									className="h-10 rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-ring"
+									placeholder={selectedAction?.detail_input?.placeholder_zh || "例如：7"}
+									onChange={event => {
+										setForm(current => ({ ...current, detail: event.target.value }));
+										setError(null);
+									}}
+								/>
+								{(isLibraryNumberInvalid || normalizedDetail.length > 0) && (
+									<span className={cn("text-xs text-muted-foreground", isLibraryNumberInvalid && "text-destructive")}>{isLibraryNumberInvalid ? "請輸入正整數" : `編號 ${normalizedDetail}`}</span>
+								)}
+							</label>
+						)}
+						{selectedActionRequiresDetail && !selectedActionUsesLibraryNumber && (
+							<label className="grid gap-1.5">
+								<span className="text-xs font-medium text-muted-foreground">自訂動作內容</span>
+								<textarea
+									value={form.detail}
+									maxLength={280}
+									className="min-h-20 resize-y rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground shadow-sm outline-none transition focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-ring"
+									placeholder="例如：改成更有活動邀請感的語氣"
+									onChange={event => {
+										setForm(current => ({ ...current, detail: event.target.value }));
+										setError(null);
+									}}
+								/>
+								{normalizedDetail.length > 0 && <span className="text-xs text-muted-foreground">{form.detail.length} / 280</span>}
+							</label>
 						)}
 					</div>
 				</div>
