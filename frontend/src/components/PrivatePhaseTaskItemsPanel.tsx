@@ -130,22 +130,19 @@ function PhaseTaskItemThresholdSeparator({ label }: { label: string }) {
 
 function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: string; selectedOption?: Phase1BuilderOption; isActive: boolean; onClear: () => void }) {
 	return (
-		<div className={cn("grid min-h-24 gap-2 rounded-lg border border-dashed bg-card p-3 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
-			<div className="flex items-center justify-between gap-2">
-				<span className="text-xs font-semibold text-muted-foreground">{label}</span>
-				{selectedOption && (
-					<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="清除" aria-label={`清除${label}`} onClick={onClear}>
-						<X className="h-3.5 w-3.5" />
-					</Button>
+		<div className={cn("flex min-h-12 items-center justify-between gap-3 rounded-md border border-dashed bg-card px-3 py-2 transition-colors", isActive && "border-primary/60 bg-primary/5")}>
+			<div className="flex min-w-0 items-baseline gap-2">
+				<span className="shrink-0 text-xs font-semibold text-muted-foreground">{label}</span>
+				{selectedOption ? (
+					<span className="min-w-0 truncate text-sm font-semibold leading-6">{selectedOption.label_zh}</span>
+				) : (
+					<span className="text-sm leading-6 text-muted-foreground">尚未選擇</span>
 				)}
 			</div>
-			{selectedOption ? (
-				<div className="grid gap-1">
-					<div className="break-words text-sm font-semibold leading-6">{selectedOption.label_zh}</div>
-					{selectedOption.description_zh && <div className="break-words text-xs leading-5 text-muted-foreground">{selectedOption.description_zh}</div>}
-				</div>
-			) : (
-				<div className="grid min-h-10 place-items-center rounded-md bg-muted/50 px-2 text-center text-sm text-muted-foreground">尚未選擇</div>
+			{selectedOption && (
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="清除" aria-label={`清除${label}`} onClick={onClear}>
+					<X className="h-3.5 w-3.5" />
+				</Button>
 			)}
 		</div>
 	);
@@ -521,7 +518,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 										setError(null);
 									}}
 								/>
-								<span className="text-xs text-muted-foreground">{normalizedDetail.length === 0 ? "請輸入自訂動作內容" : `${form.detail.length} / 280`}</span>
+								{normalizedDetail.length > 0 && <span className="text-xs text-muted-foreground">{form.detail.length} / 280</span>}
 							</label>
 						)}
 					</div>
