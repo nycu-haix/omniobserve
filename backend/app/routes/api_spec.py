@@ -10,6 +10,7 @@ from .ranking_moves import router as ranking_moves_router
 from .ranking_phase_snapshots import router as ranking_phase_snapshots_router
 from .ranking_states import router as ranking_states_router
 from .similarities import router as similarities_router
+from .task_exports import router as task_exports_router
 from .task_items import router as task_items_router
 from .transcripts import router as transcripts_router
 
@@ -26,4 +27,5 @@ router.include_router(private_phase_task_items_router)
 router.include_router(phase_task_item_snapshots_router)
 router.include_router(poster_idea_block_task_items_router)
 router.include_router(task_items_router)
+router.include_router(task_exports_router)
 router.include_router(idea_block_to_transcript_router)

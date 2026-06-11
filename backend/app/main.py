@@ -29,6 +29,7 @@ OPENAPI_TAGS = [
     {"name": "Chat Messages", "description": "Public text chat messages for a session."},
     {"name": "Ranking Moves", "description": "Read ranking move history for a session."},
     {"name": "Ranking Phase Snapshots", "description": "Read durable phase-boundary ranking snapshots for task exports."},
+    {"name": "Task Exports", "description": "Download task-scoped formal-study export packages."},
 ]
 
 app = FastAPI(title="OmniObserve API", version="0.1.0", openapi_tags=OPENAPI_TAGS)

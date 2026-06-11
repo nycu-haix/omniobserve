@@ -1,8 +1,10 @@
 import time
 
 from ..config import logger
+from ..db import SessionLocal
 from ..models import IdeaBlock, Similarity
-from .realtime import board_manager, is_similarity_cue_enabled
+from .realtime import board_manager, get_session_cue_condition, get_session_phase, is_similarity_cue_enabled
+from .similarity_cue_event_service import record_similarity_cue_delivery
 
 
 async def notify_similarity_cue(similarity: Similarity) -> None:
@@ -11,6 +13,7 @@ async def notify_similarity_cue(similarity: Similarity) -> None:
     await notify_similarity_cue_for_blocks(
         similarity_id=similarity.id,
         is_same_reason=similarity.is_same_reason,
+        reason=similarity.reason,
         idea_a=idea_a,
         idea_b=idea_b,
     )
@@ -22,6 +25,7 @@ async def notify_similarity_cue_for_blocks(
     is_same_reason: bool,
     idea_a: IdeaBlock,
     idea_b: IdeaBlock,
+    reason: str = "",
 ) -> None:
     if idea_a.session_name != idea_b.session_name:
         return
@@ -33,6 +37,7 @@ async def notify_similarity_cue_for_blocks(
         other_block=idea_b,
         similarity_id=similarity_id,
         is_same_reason=is_same_reason,
+        reason=reason,
     )
     await send_similarity_cue(
         session_name=idea_b.session_name,
@@ -41,6 +46,7 @@ async def notify_similarity_cue_for_blocks(
         other_block=idea_a,
         similarity_id=similarity_id,
         is_same_reason=is_same_reason,
+        reason=reason,
     )
 
 
@@ -52,6 +58,7 @@ async def send_similarity_cue(
     other_block: IdeaBlock,
     similarity_id: int,
     is_same_reason: bool,
+    reason: str = "",
 ) -> None:
     if not is_similarity_cue_enabled(session_name):
         logger.info(
@@ -64,6 +71,7 @@ async def send_similarity_cue(
         )
         return
 
+    cue_id = f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}"
     update_sent = await board_manager.send_to(
         session_name,
         participant_id,
@@ -78,13 +86,49 @@ async def send_similarity_cue(
         {
             "type": "similarity_cue",
             "payload": {
-                "id": f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}",
+                "id": cue_id,
+                "cueId": cue_id,
+                "similarityId": similarity_id,
                 "blockId": str(own_block.id),
+                "ownBlockId": str(own_block.id),
+                "otherBlockId": str(other_block.id),
                 "blockSummary": other_block.title or other_block.summary,
                 "isSameReason": is_same_reason,
             },
         },
     )
+    async with SessionLocal() as db:
+        try:
+            await record_similarity_cue_delivery(
+                db,
+                cue_id=cue_id,
+                session_name=session_name,
+                phase=get_session_phase(session_name),
+                condition=get_session_cue_condition(session_name),
+                cue_enabled=is_similarity_cue_enabled(session_name),
+                recipient_participant_id=participant_id,
+                own_block=own_block,
+                other_block=other_block,
+                similarity_id=similarity_id,
+                is_same_reason=is_same_reason,
+                reason=reason,
+                delivery_status="delivered" if cue_sent else "failed",
+                event_metadata={
+                    "update_sent": update_sent,
+                    "board_participants": board_manager.get_participants(session_name),
+                },
+            )
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(
+                "similarity_cue_delivery_persist_failed session_name=%s participant_id=%s cue_id=%s similarity_id=%s error_type=%s error=%s",
+                session_name,
+                participant_id,
+                cue_id,
+                similarity_id,
+                exc.__class__.__name__,
+                exc,
+            )
     logger.info(
         "similarity_cue_notify session_name=%s participant_id=%s own_block_id=%s other_block_id=%s similarity_id=%s is_same_reason=%s update_sent=%s cue_sent=%s board_participants=%s",
         session_name,

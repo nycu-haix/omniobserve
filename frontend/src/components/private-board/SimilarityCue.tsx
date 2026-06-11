@@ -1,12 +1,12 @@
 import { Eye, Lightbulb, UserRound, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
-import type { SimilarityCueData } from "../../types";
+import type { SimilarityCueData, SimilarityPairCueData } from "../../types";
 import { Button } from "../ui/Button";
 
 interface SimilarityCueProps {
 	cues: SimilarityCueData[];
-	onJump: (blockId: string) => void;
-	onDismiss: (cueId: string) => void;
+	onJump: (cue: SimilarityPairCueData) => void;
+	onDismiss: (cue: SimilarityCueData, status: "dismissed" | "ignored") => void;
 	onShareReason: (cue: SimilarityCueData) => void;
 	topContent?: ReactNode;
 }
@@ -34,7 +34,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 			return;
 		}
 
-		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue.id), getCueAutoDismissMs(cue)));
+		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), getCueAutoDismissMs(cue)));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
@@ -60,7 +60,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 								</div>
 							</div>
 							<div className="flex justify-end">
-								<Button aria-label="Dismiss similarity cue summary" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
+								<Button aria-label="Dismiss similarity cue summary" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
 									<X className="h-4 w-4" />
 								</Button>
 							</div>
@@ -84,11 +84,11 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 								<UserRound className="h-3.5 w-3.5" />
 								分享我的理由
 							</Button>
-							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue.blockId)}>
+							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue)}>
 								<Eye className="h-3.5 w-3.5" />
 								查看想法
 							</Button>
-							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
+							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
 								<X className="h-4 w-4" />
 							</Button>
 						</div>

@@ -10,6 +10,7 @@ from .ranking_move import RankingMove
 from .ranking_phase_snapshot import RankingPhaseSnapshot
 from .ranking_phase_snapshot_item import RankingPhaseSnapshotItem
 from .similarity import Similarity
+from .similarity_cue_event import SimilarityCueEvent
 from .task_item import TaskItem
 from .transcript import Transcript
 from .visibility import Visibility
@@ -27,6 +28,7 @@ __all__ = [
     "RankingPhaseSnapshot",
     "RankingPhaseSnapshotItem",
     "Similarity",
+    "SimilarityCueEvent",
     "TaskItem",
     "Transcript",
     "Visibility",
