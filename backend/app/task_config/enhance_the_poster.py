@@ -552,6 +552,7 @@ TASK_PHASES = [
     {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PHASE1_TASK_ITEM_BUILDER_LAYOUT},
     {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
+    {"id": "reflect", "label": "Reflect Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
 ]
 
 TASK_CONFIG = {
