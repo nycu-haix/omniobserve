@@ -947,7 +947,15 @@ async def _handle_similarity_reason_share(
                 "similarity_id": similarity_id,
                 "delivered": sent,
             }
-            for target_participant_id, similarity_id, target_block_id, sent in delivery_results
+            for (
+                target_participant_id,
+                similarity_id,
+                target_block_id,
+                _share_cue_id,
+                _is_same_reason,
+                _reason,
+                sent,
+            ) in delivery_results
         ],
         delivered_count,
     )
