@@ -197,20 +197,22 @@ Enhance-the-Poster 固定 32 分鐘。
 
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
-| Private phase 1 | 5 分鐘 | 看 Canva 海報與 component library，建立至少 4 個 component + action items，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
+| Private phase 1 | 5 分鐘 | 看 Canva 海報、reviewer feedback 摘要、圖床、文字 / slogan library 與 component library，建立至少 4 個 component + action items，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
 | Private phase 2 | 5 分鐘 | 對整理後的 items 做個人排序 | 鎖定 item 內容，產生可排序列表 | initial personal ranking |
-| Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
+| Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
 
 Host 說明：
 
-> 接下來是 Enhance-the-Poster 任務。你們會看到一份 Canva 海報，以及可以更動的 component library。請不要直接修改海報。你的任務是用文字建立 component + action item，也就是「對哪個 component 做什麼修改」。
+> 接下來是 Enhance-the-Poster 任務。你們會看到一份 Canva 材料，裡面包含淨灘活動招募海報、任務說明與需求、reviewer feedback 摘要、圖床、可替換的文字與 slogan library，以及可以更動的 component library。Reviewer feedback 不需要逐字朗讀，請把它當作判斷改善方向的參考。
 >
-> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、component library，或你自己的設計判斷來建立。
+> 請不要直接修改 Canva 海報。你的任務是用文字建立 component + action item，也就是「對哪個 component 做什麼修改」。
+>
+> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、reviewer feedback 摘要、圖床、文字 / slogan library、component library，或你自己的設計判斷來建立。
 >
 > Private phase 2 有 5 分鐘，系統會整理大家建立的 items，請你先做自己的排序。
 >
-> Public phase 有 20 分鐘，你們要一起討論，最多選 15 個 items，並從最重要到最不重要排序。
+> Public phase 有 20 分鐘，你們要一起討論，最多選 15 個 items，並從最重要到最不重要排序。這個階段可以開啟公開麥克風和其他人討論；每位參與者請至少公開發言兩次，口頭或聊天室都算公開發言。
 >
 > Reflect phase 有 2 分鐘，請根據討論調整你自己的個人排序。
 

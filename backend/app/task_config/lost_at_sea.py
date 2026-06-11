@@ -298,6 +298,7 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
 TASK_PHASES = [
     {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
+    {"id": "reflect", "label": "Reflect Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
 ]
 
 TASK_CONFIG = {
