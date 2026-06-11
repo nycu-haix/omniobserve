@@ -280,6 +280,16 @@ function buildSessionApiUrl(roomName: string, path: string) {
 	return apiUrl(`/api/sessions/${encodeURIComponent(roomName)}${path}`);
 }
 
+function getDownloadFilename(response: Response, fallback: string) {
+	const contentDisposition = response.headers.get("content-disposition") || "";
+	const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+	if (utf8Match?.[1]) {
+		return decodeURIComponent(utf8Match[1].replace(/^"|"$/g, ""));
+	}
+	const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+	return filenameMatch?.[1] || fallback;
+}
+
 function formatApiTime(value: string | number | null | undefined) {
 	if (!value) {
 		return "-";
@@ -825,6 +835,9 @@ export function AdminPage() {
 	const [isApiLoading, setIsApiLoading] = useState(false);
 	const [apiError, setApiError] = useState<string | null>(null);
 	const [lastApiLoadedAt, setLastApiLoadedAt] = useState<string | null>(null);
+	const [isExportingTaskPackage, setIsExportingTaskPackage] = useState(false);
+	const [taskPackageError, setTaskPackageError] = useState<string | null>(null);
+	const [lastTaskPackageDownloadedAt, setLastTaskPackageDownloadedAt] = useState<string | null>(null);
 	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [phase1Components, setPhase1Components] = useState<Phase1BuilderOption[]>([]);
@@ -1374,6 +1387,37 @@ export function AdminPage() {
 		URL.revokeObjectURL(url);
 	};
 
+	const downloadTaskPackage = async () => {
+		if (isExportingTaskPackage) {
+			return;
+		}
+
+		setIsExportingTaskPackage(true);
+		setTaskPackageError(null);
+		try {
+			const params = new URLSearchParams({ cue_condition: cueCondition });
+			const response = await fetch(buildSessionApiUrl(roomName, `/task-package.zip?${params.toString()}`));
+			if (!response.ok) {
+				const detail = await response.text();
+				throw new Error(detail || `Task package export failed (${response.status})`);
+			}
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = getDownloadFilename(response, `${roomName}-task-package.zip`);
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+			setLastTaskPackageDownloadedAt(formatApiTime(Date.now()));
+		} catch (error) {
+			setTaskPackageError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setIsExportingTaskPackage(false);
+		}
+	};
+
 	const isExperimentalCondition = cueCondition === "experimental";
 	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
 	const activePublicNowComponents = publicNowComponentIds.map(componentId => phase1ComponentById.get(componentId)).filter((component): component is Phase1BuilderOption => !!component);
@@ -1903,6 +1947,33 @@ export function AdminPage() {
 								Refresh similarities
 							</Button>
 							{apiError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{apiError}</p>}
+						</div>
+					</section>
+
+					<section className="rounded-lg border bg-card p-4 text-card-foreground">
+						<header className="mb-3 flex items-center gap-2">
+							<Download className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+							<h2 className="text-sm font-semibold">Task package</h2>
+						</header>
+						<div className="grid gap-3 text-sm">
+							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
+								<div className="min-w-0">
+									<div className="truncate font-medium">{isExperimentalCondition ? "with_cue" : "no_cue"}</div>
+									<div className="text-xs text-muted-foreground">{getSessionPhaseLabel(currentPhase, taskPhases)}</div>
+								</div>
+								<Badge variant={isExperimentalCondition ? "secondary" : "outline"}>{isExperimentalCondition ? "cue on" : "cue off"}</Badge>
+							</div>
+							<Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => void downloadTaskPackage()} disabled={isExportingTaskPackage}>
+								<Download className="h-3.5 w-3.5" aria-hidden="true" />
+								{isExportingTaskPackage ? "Exporting" : "Export this task"}
+							</Button>
+							{lastTaskPackageDownloadedAt && (
+								<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+									<span>Last export</span>
+									<span className="font-medium">{lastTaskPackageDownloadedAt}</span>
+								</div>
+							)}
+							{taskPackageError && <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{taskPackageError}</p>}
 						</div>
 					</section>
 				</div>
