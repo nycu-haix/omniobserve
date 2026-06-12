@@ -18,3 +18,14 @@ export function isObserverRole(value: unknown): boolean {
 export function isParticipantAnalysisRole(value: unknown): boolean {
 	return !isObserverRole(value);
 }
+
+export function isAdminParticipantId(participantId: string | number | null | undefined): boolean {
+	const normalizedParticipantId = String(participantId ?? "")
+		.trim()
+		.toLowerCase();
+	return normalizedParticipantId === "0" || normalizedParticipantId === "admin" || normalizedParticipantId.startsWith("admin-");
+}
+
+export function filterAdminPresenceRows<T extends { id: string | number | null | undefined }>(participants: T[]): T[] {
+	return participants.filter(participant => !isAdminParticipantId(participant.id));
+}
