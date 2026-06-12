@@ -1428,7 +1428,7 @@ export default function MeetingRoom() {
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(260px,1fr)_auto_var(--jitsi-height)_2.5rem] gap-y-0.5 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2.5rem] gap-y-0.5 text-card-foreground xl:min-h-0">
 				<TaskWorkspace
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
@@ -1524,27 +1524,30 @@ export default function MeetingRoom() {
 							roomName={roomName}
 							displayName={displayName}
 							micMode={micMode}
+							allowInteraction={isJitsiFocused}
 							onStatusChange={handleJitsiStatusChange}
 							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
 						/>
 					</div>
 					{!isJitsiCollapsed && (
 						<>
-							<Button
-								type="button"
-								variant="outline"
-								size="icon"
-								className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
-								aria-label="收合 Jitsi"
-								title="收合 Jitsi"
-								aria-expanded="true"
-								onClick={() => {
-									setIsJitsiFocused(false);
-									setIsJitsiCollapsed(true);
-								}}
-							>
-								<ChevronDown className="h-4 w-4" />
-							</Button>
+							{!isJitsiFocused && (
+								<Button
+									type="button"
+									variant="outline"
+									size="icon"
+									className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+									aria-label="收合 Jitsi"
+									title="收合 Jitsi"
+									aria-expanded="true"
+									onClick={() => {
+										setIsJitsiFocused(false);
+										setIsJitsiCollapsed(true);
+									}}
+								>
+									<ChevronDown className="h-4 w-4" />
+								</Button>
+							)}
 							<Button
 								type="button"
 								variant="outline"
