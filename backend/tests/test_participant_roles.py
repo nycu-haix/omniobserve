@@ -2,7 +2,9 @@ from types import SimpleNamespace
 import unittest
 
 from app.schemas import ApiError
+from app.services.participant_status import sync_participant_roles
 from app.services.participant_roles import normalize_participant_role
+from app.services.realtime import _is_participant_ranking_subject, _phase_snapshot_participant_ids
 from app.services.task_export_service import _ranking_artifact_name, _snapshot_subject_token
 
 
@@ -45,6 +47,17 @@ class ParticipantRoleTests(unittest.TestCase):
             _snapshot_subject_token(context, snapshot, {"7": "observer"}),
             "observer_G2P7",
         )
+
+    def test_observer_is_kept_for_phase_snapshot_diagnostics(self) -> None:
+        session_name = "test-observer-phase-snapshot"
+        sync_participant_roles(session_name, {"1": "observer", "2": "participant"})
+
+        self.assertEqual(
+            _phase_snapshot_participant_ids(["1", "2", "admin", "admin-reviewer"]),
+            ["1", "2"],
+        )
+        self.assertFalse(_is_participant_ranking_subject(session_name, "1"))
+        self.assertTrue(_is_participant_ranking_subject(session_name, "2"))
 
 
 if __name__ == "__main__":
