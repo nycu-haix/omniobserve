@@ -1263,6 +1263,7 @@ function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMa
 		}
 		return {
 			...block,
+			isUnread: true,
 			publicContextRelevant: true,
 			publicContextScore: typeof match.score === "number" ? match.score : null,
 			publicContextReason: typeof match.reason === "string" ? match.reason : undefined,
@@ -2386,6 +2387,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			if (lastMessage.type === "public_context_matches") {
 				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
 				if (matchedIds.size > 0 || lastMessage.payload.replaceExisting === true) {
+					matchedIds.forEach(blockId => {
+						unreadIdeaBlockIdsFromRefreshRef.current.add(blockId);
+					});
 					setIdeaBlocks(prev => {
 						const nextBlocks = applyPublicContextMatches(prev, lastMessage.payload);
 						ideaBlocksRef.current = nextBlocks;
@@ -2407,21 +2411,25 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 					blockId: sharedReason.blockId,
 					isSameReason: sharedReason.isSameReason
 				});
-				setIdeaBlocks(prev =>
-					prev.map(block =>
+				unreadIdeaBlockIdsFromRefreshRef.current.add(sharedReason.blockId);
+				setIdeaBlocks(prev => {
+					const nextBlocks = prev.map(block =>
 						block.id === sharedReason.blockId
 							? {
 									...block,
 									expanded: true,
 									hasCue: true,
+									isUnread: true,
 									similarityIsSameReason: sharedIsSameReason,
 									similarityHasSameReason: block.similarityHasSameReason || sharedIsSameReason,
 									similarityHasDifferentReason: block.similarityHasDifferentReason || !sharedIsSameReason,
 									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
 								}
 							: block
-					)
-				);
+					);
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
 				setHighlightedBlockId(sharedReason.blockId);
 			}
 
