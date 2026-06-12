@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -14,7 +14,8 @@ import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type Ta
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
-import { PrivateBoard } from "./private-board/PrivateBoard";
+import { PrivateBoard, type PrivateBoardHandle } from "./private-board/PrivateBoard";
+import { formatUnreadCount, type IdeaBlockUnreadState } from "./private-board/unreadIdeaBlocks";
 import { Button } from "./ui/Button";
 import { ShortcutKey } from "./ui/ShortcutKey";
 
@@ -862,6 +863,7 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
+	const [privateBoardIdeaBlockUnreadState, setPrivateBoardIdeaBlockUnreadState] = useState<IdeaBlockUnreadState>({ count: 0, latestBlockId: null });
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
@@ -874,6 +876,7 @@ export default function MeetingRoom() {
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
+	const privateBoardRef = useRef<PrivateBoardHandle | null>(null);
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1199,6 +1202,15 @@ export default function MeetingRoom() {
 		setPrivateBoardWidth(current => clampPrivateBoardWidth(current + direction * 24));
 	};
 
+	const openPrivateBoard = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+	}, []);
+
+	const openUnreadIdeaBlocks = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openLatestUnreadIdeaBlock(), 0);
+	}, []);
+
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
 		const resizeHandle = event.currentTarget;
@@ -1332,6 +1344,9 @@ export default function MeetingRoom() {
 			applyRankingSnapshot(scope, nextRanking);
 		}
 	}, [applyRankingSnapshot, lastMessage]);
+
+	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
+	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
 
 	if (!isParticipantIdValid) {
 		return (
@@ -1633,21 +1648,38 @@ export default function MeetingRoom() {
 					</button>
 				)}
 				{isPrivateBoardCollapsed && (
-					<Button
-						type="button"
-						variant="outline"
-						size="icon"
-						className="absolute -right-2 top-3 z-20 h-8 w-8 shadow-sm"
-						aria-label="展開 Private Board"
-						title="展開 Private Board"
-						aria-expanded="false"
-						onClick={() => setIsPrivateBoardCollapsed(false)}
-					>
-						<ChevronLeft className="h-4 w-4" />
-					</Button>
+					<div className="absolute -right-2 top-3 z-20 grid justify-items-end gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className="h-8 w-8 shadow-sm"
+							aria-label="展開 Private Board"
+							title="展開 Private Board"
+							aria-expanded="false"
+							onClick={openPrivateBoard}
+						>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						{privateBoardUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardUnreadCount} 個新的 Idea Blocks，開啟最新項目`}
+								title="開啟新的 Idea Blocks"
+								onClick={openUnreadIdeaBlocks}
+							>
+								<Bell className="h-3.5 w-3.5" />
+								{privateBoardUnreadCountLabel}
+							</Button>
+						)}
+					</div>
 				)}
 				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
 					<PrivateBoard
+						ref={privateBoardRef}
 						sessionId={sessionId}
 						participantId={participantId}
 						lastMessage={lastMessage}
@@ -1661,7 +1693,8 @@ export default function MeetingRoom() {
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
 						isCollapsed={isPrivateBoardCollapsed}
-						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
+						onRequestOpen={openPrivateBoard}
+						onIdeaBlockUnreadStateChange={setPrivateBoardIdeaBlockUnreadState}
 					/>
 				</div>
 			</aside>
