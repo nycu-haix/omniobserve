@@ -638,7 +638,7 @@ function SortableLostAtSeaItem({
 			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
-			<span className="min-w-0 flex-1">{item.label}</span>
+			<span className="min-w-0 flex-1 whitespace-normal break-words py-0.5 leading-5">{item.label}</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
@@ -662,7 +662,7 @@ function SortableLostAtSeaItem({
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+			<GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
 }
