@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { UIEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
@@ -13,6 +13,11 @@ import { IdeaBlockItem } from "./IdeaBlockItem";
 import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
+import { formatUnreadCount, getIdeaBlockUnreadState, type IdeaBlockUnreadState } from "./unreadIdeaBlocks";
+
+export interface PrivateBoardHandle {
+	openLatestUnreadIdeaBlock: () => void;
+}
 
 interface PrivateBoardProps {
 	sessionId: string;
@@ -29,6 +34,7 @@ interface PrivateBoardProps {
 	onCollapse?: () => void;
 	isCollapsed?: boolean;
 	onRequestOpen?: () => void;
+	onIdeaBlockUnreadStateChange?: (state: IdeaBlockUnreadState) => void;
 }
 
 type BoardMessage =
@@ -1257,6 +1263,7 @@ function applyPublicContextMatches(blocks: IdeaBlock[], payload: PublicContextMa
 		}
 		return {
 			...block,
+			isUnread: true,
 			publicContextRelevant: true,
 			publicContextScore: typeof match.score === "number" ? match.score : null,
 			publicContextReason: typeof match.reason === "string" ? match.reason : undefined,
@@ -1446,20 +1453,25 @@ function IdeaBlockChatShareCueContent({
 	);
 }
 
-export function PrivateBoard({
-	sessionId,
-	participantId,
-	lastMessage,
-	lastAudioMessage,
-	isConnected,
-	micMode,
-	onSendBoardMessage,
-	displayName,
-	currentPhase: controlledPhase,
-	timerEndTime: controlledTimerEndTime,
-	onCollapse,
-	onRequestOpen
-}: PrivateBoardProps) {
+export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(function PrivateBoard(
+	{
+		sessionId,
+		participantId,
+		lastMessage,
+		lastAudioMessage,
+		isConnected,
+		micMode,
+		onSendBoardMessage,
+		displayName,
+		currentPhase: controlledPhase,
+		timerEndTime: controlledTimerEndTime,
+		onCollapse,
+		isCollapsed = false,
+		onRequestOpen,
+		onIdeaBlockUnreadStateChange
+	},
+	ref
+) {
 	const [activeTab, setActiveTab] = useState<BoardTab>("ideablock");
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
@@ -1482,7 +1494,6 @@ export function PrivateBoard({
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
 	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
-	const [unreadIdeaBlockCount, setUnreadIdeaBlockCount] = useState(0);
 	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
 	const [whisperTransient, setWhisperTransient] = useState<WhisperTransient>({ status: "idle", text: "" });
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1582,6 +1593,9 @@ export function PrivateBoard({
 	);
 
 	const isIdeaBlocksTabActive = visibleActiveTab === "ideablock";
+	const ideaBlockUnreadState = useMemo(() => getIdeaBlockUnreadState(ideaBlocks), [ideaBlocks]);
+	const unreadIdeaBlockCount = ideaBlockUnreadState.count;
+	const latestUnreadIdeaBlockId = ideaBlockUnreadState.latestBlockId;
 
 	const captureIdeaBlockPositions = useCallback(() => {
 		const nextTops: Record<string, number> = {};
@@ -1664,10 +1678,31 @@ export function PrivateBoard({
 		[canShowSimilarityCues, clearCuesSoon, clearPhaseTransitionCueBatchTimer, startPhaseTransitionCueBatch]
 	);
 
-	const selectBoardTab = useCallback((tab: BoardTab) => {
-		if (tab === "ideablock") {
-			setUnreadIdeaBlockCount(0);
+	const markIdeaBlocksRead = useCallback((blockIds: Set<string>) => {
+		if (blockIds.size === 0) {
+			return;
 		}
+		blockIds.forEach(blockId => {
+			unreadIdeaBlockIdsFromRefreshRef.current.delete(blockId);
+		});
+		setIdeaBlocks(prev => {
+			let didChange = false;
+			const nextBlocks = prev.map(block => {
+				if (!blockIds.has(block.id) || !block.isUnread) {
+					return block;
+				}
+				didChange = true;
+				return { ...block, isUnread: false };
+			});
+			if (!didChange) {
+				return prev;
+			}
+			ideaBlocksRef.current = nextBlocks;
+			return nextBlocks;
+		});
+	}, []);
+
+	const selectBoardTab = useCallback((tab: BoardTab) => {
 		if (tab === "public-chat") {
 			setUnreadPublicChatCount(0);
 		}
@@ -1679,9 +1714,27 @@ export function PrivateBoard({
 			onRequestOpen?.();
 			selectBoardTab("ideablock");
 			setHighlightedBlockId(blockId);
+			markIdeaBlocksRead(new Set([blockId]));
 		},
-		[onRequestOpen, selectBoardTab]
+		[markIdeaBlocksRead, onRequestOpen, selectBoardTab]
 	);
+
+	const openLatestUnreadIdeaBlock = useCallback(() => {
+		const targetBlockId = latestUnreadIdeaBlockId ?? getIdeaBlockUnreadState(ideaBlocksRef.current).latestBlockId;
+		onRequestOpen?.();
+		selectBoardTab("ideablock");
+		if (!targetBlockId) {
+			return;
+		}
+		setHighlightedBlockId(targetBlockId);
+		markIdeaBlocksRead(new Set([targetBlockId]));
+	}, [latestUnreadIdeaBlockId, markIdeaBlocksRead, onRequestOpen, selectBoardTab]);
+
+	useImperativeHandle(ref, () => ({ openLatestUnreadIdeaBlock }), [openLatestUnreadIdeaBlock]);
+
+	useEffect(() => {
+		onIdeaBlockUnreadStateChange?.(ideaBlockUnreadState);
+	}, [ideaBlockUnreadState, onIdeaBlockUnreadStateChange]);
 
 	const dismissIdeaBlockChatShareNotice = useCallback((noticeId: string) => {
 		setIdeaBlockChatShareNotices(prev => prev.filter(notice => notice.id !== noticeId));
@@ -2218,12 +2271,7 @@ export function PrivateBoard({
 				unreadIdeaBlockIdsFromRefreshRef.current.add(nextBlock.id);
 				setIdeaBlocks(prev => {
 					const baseBlocks = removePendingVoiceBlocks(prev);
-					const existingActiveBlockIds = new Set(baseBlocks.filter(block => !block.isDeleted).map(block => block.id));
 					const nextBlocks = mergeIdeaBlocks(baseBlocks, [{ ...nextBlock, isUnread: true }], { markNewUnread: true });
-					const isNewActiveBlock = !nextBlock.isDeleted && !existingActiveBlockIds.has(nextBlock.id);
-					if (isNewActiveBlock && visibleActiveTab !== "ideablock") {
-						setUnreadIdeaBlockCount(current => current + 1);
-					}
 					ideaBlocksRef.current = nextBlocks;
 					return nextBlocks;
 				});
@@ -2339,15 +2387,14 @@ export function PrivateBoard({
 			if (lastMessage.type === "public_context_matches") {
 				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
 				if (matchedIds.size > 0 || lastMessage.payload.replaceExisting === true) {
-					const visibleMatchedIds = [...matchedIds].filter(id => ideaBlocksRef.current.some(block => block.id === id && !block.isDeleted));
+					matchedIds.forEach(blockId => {
+						unreadIdeaBlockIdsFromRefreshRef.current.add(blockId);
+					});
 					setIdeaBlocks(prev => {
 						const nextBlocks = applyPublicContextMatches(prev, lastMessage.payload);
 						ideaBlocksRef.current = nextBlocks;
 						return nextBlocks;
 					});
-					if (visibleMatchedIds.length > 0 && visibleActiveTab !== "ideablock") {
-						setUnreadIdeaBlockCount(current => current + visibleMatchedIds.length);
-					}
 				}
 			}
 
@@ -2364,25 +2411,26 @@ export function PrivateBoard({
 					blockId: sharedReason.blockId,
 					isSameReason: sharedReason.isSameReason
 				});
-				setIdeaBlocks(prev =>
-					prev.map(block =>
+				unreadIdeaBlockIdsFromRefreshRef.current.add(sharedReason.blockId);
+				setIdeaBlocks(prev => {
+					const nextBlocks = prev.map(block =>
 						block.id === sharedReason.blockId
 							? {
 									...block,
 									expanded: true,
 									hasCue: true,
+									isUnread: true,
 									similarityIsSameReason: sharedIsSameReason,
 									similarityHasSameReason: block.similarityHasSameReason || sharedIsSameReason,
 									similarityHasDifferentReason: block.similarityHasDifferentReason || !sharedIsSameReason,
 									sharedReasons: mergeSharedReasons(block.sharedReasons, [sharedReason])
 								}
 							: block
-					)
-				);
+					);
+					ideaBlocksRef.current = nextBlocks;
+					return nextBlocks;
+				});
 				setHighlightedBlockId(sharedReason.blockId);
-				if (visibleActiveTab !== "ideablock") {
-					setUnreadIdeaBlockCount(current => current + 1);
-				}
 			}
 
 			if (lastMessage.type === "similarity_reason_share_sent") {
@@ -2814,12 +2862,7 @@ export function PrivateBoard({
 				let mergedBlocksSnapshot: IdeaBlock[] = [];
 				setIdeaBlocks(prev => {
 					const baseBlocks = removePendingVoiceBlocks(prev);
-					const existingActiveBlockIds = new Set(baseBlocks.filter(block => !block.isDeleted).map(block => block.id));
 					mergedBlocksSnapshot = mergeIdeaBlocks(baseBlocks, updatedBlocks, { markNewUnread: true });
-					const newActiveBlockCount = mergedBlocksSnapshot.filter(block => !block.isDeleted && !existingActiveBlockIds.has(block.id)).length;
-					if (newActiveBlockCount > 0 && lastVisibleActiveTabRef.current !== "ideablock") {
-						setUnreadIdeaBlockCount(current => current + newActiveBlockCount);
-					}
 					ideaBlocksRef.current = mergedBlocksSnapshot;
 					return mergedBlocksSnapshot;
 				});
@@ -2936,9 +2979,44 @@ export function PrivateBoard({
 		shouldAutoScrollRef.current.transcript = isNearScrollBottom(event.currentTarget);
 	}, []);
 
-	const handleIdeaBlocksScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-		shouldAutoScrollRef.current.ideablock = isNearScrollBottom(event.currentTarget);
-	}, []);
+	const markVisibleUnreadIdeaBlocksRead = useCallback(() => {
+		if (!isIdeaBlocksTabActive || isCollapsed) {
+			return;
+		}
+		const viewport = ideaBlocksScrollViewportRef.current;
+		if (!viewport) {
+			return;
+		}
+		const viewportRect = viewport.getBoundingClientRect();
+		const visibleUnreadBlockIds = new Set<string>();
+		ideaBlocksRef.current.forEach(block => {
+			if (!block.isUnread || block.isDeleted || block.status === "generating") {
+				return;
+			}
+			const node = blockRefs.current[block.id];
+			if (!node) {
+				return;
+			}
+			const rect = node.getBoundingClientRect();
+			if (rect.height <= 0) {
+				return;
+			}
+			const visibleHeight = Math.min(rect.bottom, viewportRect.bottom) - Math.max(rect.top, viewportRect.top);
+			const minimumVisibleHeight = Math.min(rect.height, 64);
+			if (visibleHeight >= minimumVisibleHeight * 0.5) {
+				visibleUnreadBlockIds.add(block.id);
+			}
+		});
+		markIdeaBlocksRead(visibleUnreadBlockIds);
+	}, [isCollapsed, isIdeaBlocksTabActive, markIdeaBlocksRead]);
+
+	const handleIdeaBlocksScroll = useCallback(
+		(event: UIEvent<HTMLDivElement>) => {
+			shouldAutoScrollRef.current.ideablock = isNearScrollBottom(event.currentTarget);
+			window.requestAnimationFrame(markVisibleUnreadIdeaBlocksRead);
+		},
+		[markVisibleUnreadIdeaBlocksRead]
+	);
 
 	const handlePublicChatScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
 		shouldAutoScrollRef.current["public-chat"] = isNearScrollBottom(event.currentTarget);
@@ -3048,6 +3126,11 @@ export function PrivateBoard({
 			publicChatViewport.scrollTop = publicChatViewport.scrollHeight;
 		}
 	}, [isIdeaBlocksTabActive, visibleActiveTab, ideaBlocks, publicChatMessages, transcriptLines]);
+
+	useLayoutEffect(() => {
+		const frameId = window.requestAnimationFrame(markVisibleUnreadIdeaBlocksRead);
+		return () => window.cancelAnimationFrame(frameId);
+	}, [ideaBlocks, isCollapsed, isIdeaBlocksTabActive, markVisibleUnreadIdeaBlocksRead]);
 
 	const toggleBlock = (id: string) => {
 		setIdeaBlocks(prev => prev.map(block => (block.id === id && !block.isDeleted ? { ...block, expanded: !block.expanded, isUnread: false } : block)));
@@ -3200,7 +3283,8 @@ export function PrivateBoard({
 					aiSummary: normalizedContent,
 					transcript: "",
 					expanded: false,
-					isDraft: false
+					isDraft: false,
+					isUnread: true
 				};
 				setIdeaBlocks(prev => {
 					const nextBlocks = sortIdeaBlocks(prev.map(block => (block.id === generatingBlock.id ? newBlock : block)));
@@ -3209,8 +3293,6 @@ export function PrivateBoard({
 				});
 				if (lastVisibleActiveTabRef.current === "ideablock") {
 					setHighlightedBlockId(newBlock.id);
-				} else {
-					setUnreadIdeaBlockCount(current => current + 1);
 				}
 				return;
 			}
@@ -3230,7 +3312,6 @@ export function PrivateBoard({
 			const savedIdeaBlockResponse = (await response.json()) as IdeaBlockResponse;
 			const savedBlock = ideaBlockResponseToBlock(savedIdeaBlockResponse);
 			const isDuplicateBlock = isDuplicateIdeaBlockResponse(savedIdeaBlockResponse);
-			const isNewActiveBlock = !savedBlock.isDeleted && !ideaBlocksRef.current.some(block => !block.isDeleted && block.id === savedBlock.id);
 			setIdeaBlocks(prev => {
 				const withoutGeneratingBlock = prev.filter(block => block.id !== generatingBlock.id);
 				const nextBlocks = mergeIdeaBlocks(withoutGeneratingBlock, [{ ...savedBlock, isUnread: true }], { markNewUnread: true });
@@ -3242,8 +3323,6 @@ export function PrivateBoard({
 				jumpToBlock(savedBlock.id);
 			} else if (lastVisibleActiveTabRef.current === "ideablock") {
 				setHighlightedBlockId(savedBlock.id);
-			} else if (isNewActiveBlock) {
-				setUnreadIdeaBlockCount(current => current + 1);
 			}
 			setIdeaBlockRefreshKey(current => current + 1);
 		} catch (error) {
@@ -3390,7 +3469,7 @@ export function PrivateBoard({
 	const whisperStatusLabel = whisperTransient.status === "listening" ? "正在聽悄悄話" : whisperTransient.status === "generating" ? "正在生成" : null;
 	const whisperTransientText = whisperTransient.text.trim();
 	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status === "listening" && !!whisperTransientText;
-	const unreadIdeaBlockCountLabel = unreadIdeaBlockCount > 99 ? "99+" : String(unreadIdeaBlockCount);
+	const unreadIdeaBlockCountLabel = formatUnreadCount(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
 	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
 	const ideaBlockChatShareCueContent =
@@ -3455,7 +3534,13 @@ export function PrivateBoard({
 									visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
-								onClick={() => selectBoardTab("ideablock")}
+								onClick={() => {
+									if (unreadIdeaBlockCount > 0) {
+										openLatestUnreadIdeaBlock();
+										return;
+									}
+									selectBoardTab("ideablock");
+								}}
 							>
 								Idea Blocks
 								{unreadIdeaBlockCount > 0 && (
@@ -3634,7 +3719,7 @@ export function PrivateBoard({
 			<SimilarityCue cues={visibleSimilarityCues} onJump={viewSimilarityCue} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={notificationCueContent} />
 		</>
 	);
-}
+});
 
 function PhaseBadge({ phase }: { phase: SessionPhase }) {
 	const label = getSessionPhaseLabel(phase);
