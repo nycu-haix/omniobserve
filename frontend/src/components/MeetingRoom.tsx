@@ -74,14 +74,18 @@ function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 }
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
-const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
-const MIN_PRIVATE_BOARD_WIDTH = 520;
-const MIN_MEETING_COLUMN_WIDTH = 720;
+const DEFAULT_PRIVATE_BOARD_WIDTH = 500;
+const MIN_PRIVATE_BOARD_WIDTH = 420;
+const MIN_MEETING_COLUMN_WIDTH = 640;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
-const DEFAULT_JITSI_HEIGHT = 220;
 const MIN_JITSI_HEIGHT = 220;
-const MIN_RANKING_HEIGHT = 220;
-const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const MIN_TASK_WORKSPACE_HEIGHT = 260;
+const PREFERRED_JITSI_VIEWPORT_RATIO = 0.34;
+const EXPANDED_JITSI_VIEWPORT_RATIO = 0.58;
+const MEETING_VERTICAL_PADDING = 32;
+const JITSI_RESIZE_HANDLE_HEIGHT = 16;
+const MIC_CONTROLS_HEIGHT = 40;
+const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
 const MIN_TASK_PANE_RATIO = 24;
@@ -251,16 +255,33 @@ function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>,
 	event.currentTarget.src = taskItemFallbackImageSrc(item);
 }
 
+function getViewportWidth() {
+	return Math.floor(window.visualViewport?.width ?? window.innerWidth);
+}
+
+function getViewportHeight() {
+	return Math.floor(window.visualViewport?.height ?? window.innerHeight);
+}
+
 function clampPrivateBoardWidth(width: number) {
-	const availableWidth = window.innerWidth - 32 - 16;
-	const maxWidth = Math.max(MIN_PRIVATE_BOARD_WIDTH, availableWidth - MIN_MEETING_COLUMN_WIDTH);
-	return Math.min(Math.max(width, MIN_PRIVATE_BOARD_WIDTH), maxWidth);
+	const availableWidth = getViewportWidth() - 32 - 16;
+	const responsiveMinWidth = Math.min(MIN_PRIVATE_BOARD_WIDTH, Math.max(360, Math.floor(availableWidth * 0.38)));
+	const maxWidth = Math.max(responsiveMinWidth, availableWidth - MIN_MEETING_COLUMN_WIDTH);
+	return Math.min(Math.max(width, responsiveMinWidth), maxWidth);
 }
 
 function clampJitsiHeight(height: number) {
-	const availableHeight = window.innerHeight - 32 - 24 - 24 - 56;
-	const maxHeight = Math.max(MIN_JITSI_HEIGHT, availableHeight - MIN_RANKING_HEIGHT);
+	const fixedHeight = MEETING_VERTICAL_PADDING + JITSI_RESIZE_HANDLE_HEIGHT + MIC_CONTROLS_HEIGHT + MEETING_ROW_GAP_HEIGHT;
+	const maxHeight = Math.max(MIN_JITSI_HEIGHT, getViewportHeight() - fixedHeight - MIN_TASK_WORKSPACE_HEIGHT);
 	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
+}
+
+function getPreferredJitsiHeight() {
+	return clampJitsiHeight(Math.round(getViewportHeight() * PREFERRED_JITSI_VIEWPORT_RATIO));
+}
+
+function getExpandedJitsiHeight() {
+	return clampJitsiHeight(Math.round(getViewportHeight() * EXPANDED_JITSI_VIEWPORT_RATIO));
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -863,13 +884,13 @@ export default function MeetingRoom() {
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
+	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
 	});
 	const [jitsiHeight, setJitsiHeight] = useState(() => {
-		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
-		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
+		return getPreferredJitsiHeight();
 	});
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
@@ -1145,18 +1166,19 @@ export default function MeetingRoom() {
 			setPrivateBoardWidth(current => clampPrivateBoardWidth(current));
 			setJitsiHeight(current => clampJitsiHeight(current));
 		};
+		const visualViewport = window.visualViewport;
 
 		window.addEventListener("resize", handleResize);
-		return () => window.removeEventListener("resize", handleResize);
+		visualViewport?.addEventListener("resize", handleResize);
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			visualViewport?.removeEventListener("resize", handleResize);
+		};
 	}, []);
 
 	useEffect(() => {
 		window.localStorage.setItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY, String(privateBoardWidth));
 	}, [privateBoardWidth]);
-
-	useEffect(() => {
-		window.localStorage.setItem(JITSI_HEIGHT_STORAGE_KEY, String(jitsiHeight));
-	}, [jitsiHeight]);
 
 	const handlePrivateBoardResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
@@ -1201,6 +1223,7 @@ export default function MeetingRoom() {
 
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const resizeHandle = event.currentTarget;
 		resizeHandle.setPointerCapture(event.pointerId);
 		const startY = event.clientY;
@@ -1236,8 +1259,16 @@ export default function MeetingRoom() {
 		}
 
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const direction = event.key === "ArrowUp" ? 1 : -1;
 		setJitsiHeight(current => clampJitsiHeight(current + direction * 24));
+	};
+
+	const handleJitsiFocusToggle = () => {
+		const shouldFocusJitsi = !isJitsiFocused;
+		setIsJitsiCollapsed(false);
+		setIsJitsiFocused(shouldFocusJitsi);
+		setJitsiHeight(shouldFocusJitsi ? getExpandedJitsiHeight() : getPreferredJitsiHeight());
 	};
 
 	useEffect(() => {
@@ -1371,11 +1402,11 @@ export default function MeetingRoom() {
 
 	return (
 		<main
-			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
+			className="grid min-h-[100dvh] grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-[100dvh] xl:max-h-[100dvh] xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)] xl:overflow-hidden"
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-0.5 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(260px,1fr)_auto_var(--jitsi-height)_2.5rem] gap-y-0.5 text-card-foreground xl:min-h-0">
 				<TaskWorkspace
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
@@ -1475,9 +1506,24 @@ export default function MeetingRoom() {
 								aria-label="收合 Jitsi"
 								title="收合 Jitsi"
 								aria-expanded="true"
-								onClick={() => setIsJitsiCollapsed(true)}
+								onClick={() => {
+									setIsJitsiFocused(false);
+									setIsJitsiCollapsed(true);
+								}}
 							>
 								<ChevronDown className="h-4 w-4" />
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="icon"
+								className="absolute right-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+								aria-label={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								title={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								aria-pressed={isJitsiFocused}
+								onClick={handleJitsiFocusToggle}
+							>
+								{isJitsiFocused ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
 							</Button>
 						</>
 					)}
@@ -1553,7 +1599,11 @@ export default function MeetingRoom() {
 							aria-label="展開 Jitsi"
 							title="展開 Jitsi"
 							aria-expanded="false"
-							onClick={() => setIsJitsiCollapsed(current => !current)}
+							onClick={() => {
+								setIsJitsiFocused(false);
+								setIsJitsiCollapsed(false);
+								setJitsiHeight(getPreferredJitsiHeight());
+							}}
 						>
 							<ChevronUp className="h-4 w-4" />
 						</Button>
@@ -1616,7 +1666,7 @@ export default function MeetingRoom() {
 				</div>
 			)}
 
-			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
+			<aside className="relative min-h-0 min-w-0 xl:min-w-[var(--private-board-width)]">
 				{!isPrivateBoardCollapsed && (
 					<button
 						type="button"
