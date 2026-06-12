@@ -81,7 +81,6 @@ const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
 const MIN_JITSI_HEIGHT = 220;
 const MIN_TASK_WORKSPACE_HEIGHT = 260;
 const PREFERRED_JITSI_VIEWPORT_RATIO = 0.34;
-const EXPANDED_JITSI_VIEWPORT_RATIO = 0.58;
 const MEETING_VERTICAL_PADDING = 32;
 const JITSI_RESIZE_HANDLE_HEIGHT = 16;
 const MIC_CONTROLS_HEIGHT = 40;
@@ -278,10 +277,6 @@ function clampJitsiHeight(height: number) {
 
 function getPreferredJitsiHeight() {
 	return clampJitsiHeight(Math.round(getViewportHeight() * PREFERRED_JITSI_VIEWPORT_RATIO));
-}
-
-function getExpandedJitsiHeight() {
-	return clampJitsiHeight(Math.round(getViewportHeight() * EXPANDED_JITSI_VIEWPORT_RATIO));
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -1059,6 +1054,13 @@ export default function MeetingRoom() {
 				return;
 			}
 
+			if (isJitsiFocused && event.key === "Escape") {
+				event.preventDefault();
+				setIsJitsiFocused(false);
+				setJitsiHeight(getPreferredJitsiHeight());
+				return;
+			}
+
 			if (event.code === "Space") {
 				event.preventDefault();
 				void handleMic(micMode === "public" ? "private" : "public");
@@ -1067,7 +1069,19 @@ export default function MeetingRoom() {
 
 		window.addEventListener("keydown", handleMicShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
-	}, [handleMic, micMode]);
+	}, [handleMic, isJitsiFocused, micMode]);
+
+	useEffect(() => {
+		if (!isJitsiFocused) {
+			return;
+		}
+
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [isJitsiFocused]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -1268,7 +1282,9 @@ export default function MeetingRoom() {
 		const shouldFocusJitsi = !isJitsiFocused;
 		setIsJitsiCollapsed(false);
 		setIsJitsiFocused(shouldFocusJitsi);
-		setJitsiHeight(shouldFocusJitsi ? getExpandedJitsiHeight() : getPreferredJitsiHeight());
+		if (!shouldFocusJitsi) {
+			setJitsiHeight(getPreferredJitsiHeight());
+		}
 	};
 
 	useEffect(() => {
@@ -1485,7 +1501,17 @@ export default function MeetingRoom() {
 					<div />
 				</div>
 
-				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
+				<div
+					className={cn(
+						"relative min-h-0 overflow-hidden bg-muted",
+						!isJitsiFocused && "rounded-lg border",
+						isJitsiFocused && "fixed inset-0 z-[70] h-[100dvh] w-[100vw] bg-black",
+						isJitsiCollapsed && !isJitsiFocused && "border-transparent bg-transparent"
+					)}
+					role={isJitsiFocused ? "dialog" : undefined}
+					aria-label={isJitsiFocused ? "Jitsi 放大模式" : undefined}
+					aria-modal={isJitsiFocused ? "true" : undefined}
+				>
 					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
 						<JitsiRoom
 							meetingDomain={jitsiBaseUrl}
