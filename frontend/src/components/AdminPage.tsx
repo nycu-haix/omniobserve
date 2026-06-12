@@ -22,7 +22,7 @@ import {
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
-import { isObserverRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
+import { isAdminParticipantId, isObserverRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
 	DEFAULT_SESSION_PHASE,
 	DEFAULT_SESSION_PHASE_OPTIONS,
@@ -35,7 +35,7 @@ import {
 } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type Phase1BuilderOption, type TaskConfigItem } from "../services/api";
-import type { ParticipantPresence } from "../services/presence";
+import { normalizePresenceParticipantsPayload, type ParticipantPresence } from "../services/presence";
 import type { PublicChatMessage } from "../types";
 import { PublicChatComposer, PublicChatMessages } from "./private-board/PublicChatPanel";
 import { Badge } from "./ui/Badge";
@@ -462,36 +462,8 @@ function isPublicContextComponentStateMessage(message: RealtimeMessage | null): 
 	return message?.type === "public_context_component_state";
 }
 
-function normalizePresenceParticipant(item: unknown): ParticipantPresence | null {
-	if (typeof item === "string") {
-		return {
-			id: item,
-			participant_role: "participant",
-			mic_mode: "off",
-			audio_connected: false
-		};
-	}
-
-	if (!item || typeof item !== "object" || !("id" in item) || typeof item.id !== "string") {
-		return null;
-	}
-
-	const participant = item as Record<string, unknown>;
-	return {
-		id: item.id,
-		participant_role: normalizeParticipantRole(participant.participant_role),
-		mic_mode: typeof participant.mic_mode === "string" ? participant.mic_mode : "off",
-		audio_connected: typeof participant.audio_connected === "boolean" ? participant.audio_connected : false,
-		is_speaking: typeof participant.is_speaking === "boolean" ? participant.is_speaking : false,
-		display_name: typeof participant.display_name === "string" ? participant.display_name : null,
-		client_id: typeof participant.client_id === "string" ? participant.client_id : null,
-		updated_at: typeof participant.updated_at === "string" ? participant.updated_at : null
-	};
-}
-
 function normalizePresenceParticipants(message: PresenceStateMessage) {
-	const rawParticipants = Array.isArray(message.participants) ? message.participants : Array.isArray(message.participant_ids) ? message.participant_ids : [];
-	return rawParticipants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null && !isAdminParticipantId(item.id));
+	return normalizePresenceParticipantsPayload(message, { includeAdmin: false });
 }
 
 function participantIdToNumber(value: string | number | null | undefined) {
@@ -528,11 +500,6 @@ function upsertById<T extends { id: string | number }>(current: T[], nextItems: 
 		byId.set(item.id, { ...byId.get(item.id), ...item });
 	});
 	return Array.from(byId.values());
-}
-
-function isAdminParticipantId(participantId: string | number | null | undefined) {
-	const normalizedId = String(participantId ?? "").toLowerCase();
-	return normalizedId === ADMIN_PARTICIPANT_ID || normalizedId.startsWith(ADMIN_PARTICIPANT_ID_PREFIX);
 }
 
 function isOwnTranscriptUser(userId: string | number | null | undefined, participantId: string): boolean {

@@ -1,5 +1,5 @@
 import { getDefaultRoomName } from "../lib/defaultRoomName";
-import { normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
+import { filterAdminPresenceRows, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import { apiUrl } from "./api";
 
 export interface ParticipantPresence {
@@ -40,6 +40,13 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	};
 }
 
+export function normalizePresenceParticipantsPayload(payload: { participants?: unknown; participant_ids?: unknown }, options: { includeAdmin?: boolean } = {}): ParticipantPresence[] {
+	const includeAdmin = options.includeAdmin ?? true;
+	const rawParticipants = Array.isArray(payload.participants) ? payload.participants : Array.isArray(payload.participant_ids) ? payload.participant_ids : [];
+	const participants = rawParticipants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null);
+	return includeAdmin ? participants : filterAdminPresenceRows(participants);
+}
+
 export async function fetchSessionPresence(sessionName: string, signal?: AbortSignal): Promise<ParticipantPresence[]> {
 	const normalizedSessionName = sessionName.trim() || getDefaultRoomName();
 	const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(normalizedSessionName)}/presence`), { signal });
@@ -49,11 +56,7 @@ export async function fetchSessionPresence(sessionName: string, signal?: AbortSi
 	}
 
 	const payload = (await response.json()) as { participants?: unknown; participant_ids?: unknown };
-	if (Array.isArray(payload.participants)) {
-		return payload.participants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null);
-	}
-
-	return Array.isArray(payload.participant_ids) ? payload.participant_ids.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null) : [];
+	return normalizePresenceParticipantsPayload(payload);
 }
 
 export async function fetchSessionParticipants(sessionName: string, signal?: AbortSignal) {
