@@ -10,8 +10,8 @@
 
 | task_id | 系統任務名稱 | 正式中文暗樁稿 |
 | --- | --- | --- |
-| `lost-at-sea` | Lost at Sea | [Lost-at-Sea 暗樁發言提綱](confederate-script.zh.md) |
-| `enhance-the-poster` | Enhance the Poster | [Enhance-the-Poster 暗樁發言提綱](confederate-script-enhance-the-poster.zh.md) |
+| `lost-at-sea` | Lost at Sea | [Lost-at-Sea 暗樁發言提綱](confederate-sea.md) |
+| `enhance-the-poster` | Enhance the Poster | [Enhance-the-Poster 暗樁發言提綱](confederate-poster.md) |
 
 正式實驗同一組會連續完成兩個 task，因此暗樁應在實驗前讀完兩份稿，並依當輪 task 使用對應立場。若仍看到英文 Lost-at-Sea-only 草稿，僅視為歷史參考，不列入正式實驗使用文件。
 
@@ -42,13 +42,13 @@
 
 暗樁立場偏向「方向感、基本資訊、長期生存工具」。這會和標準答案中更重視求救訊號的排序形成張力。
 
-使用文件：[confederate-script.zh.md](confederate-script.zh.md)
+使用文件：[confederate-sea.md](confederate-sea.md)
 
 ### Enhance-the-Poster
 
 暗樁立場偏向「資訊清楚、報名轉換、掃讀效率、QR Code 和底部資訊整合」。這會和其他可能重視活潑感、視覺新鮮度、圖片替換或標語創意的方向形成張力。
 
-使用文件：[confederate-script-enhance-the-poster.zh.md](confederate-script-enhance-the-poster.zh.md)
+使用文件：[confederate-poster.md](confederate-poster.md)
 
 ## 維護規則
 
