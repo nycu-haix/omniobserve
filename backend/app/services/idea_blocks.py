@@ -14,6 +14,10 @@ from ..schemas import ApiError
 from ..task_config import get_llm_topic_description_for_session, resolve_task_id
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
+from .idea_block_generation_limits import (
+    MAX_IDEA_BLOCKS_PER_TRANSCRIPT_BATCH,
+    deduplicate_generated_idea_blocks,
+)
 from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
 
@@ -176,10 +180,25 @@ async def generate_and_save_idea_blocks(
     task_name: str | None = None,
 ) -> list[IdeaBlock]:
     resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
-    generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
+    user_id = _participant_id_to_int(participant_id)
+    raw_generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
+    deduplicated_generated_blocks = deduplicate_generated_idea_blocks(raw_generated_blocks)
+    generated_blocks = deduplicated_generated_blocks[:MAX_IDEA_BLOCKS_PER_TRANSCRIPT_BATCH]
+    logger.info(
+        (
+            "frontend_board_idea_llm_done session_name=%s user_id=%s visibility=%s "
+            "generated=%s displayed=%s deduped=%s capped=%s"
+        ),
+        session_name,
+        user_id,
+        visibility.value,
+        len(raw_generated_blocks),
+        len(generated_blocks),
+        max(0, len(raw_generated_blocks) - len(deduplicated_generated_blocks)),
+        max(0, len(deduplicated_generated_blocks) - len(generated_blocks)),
+    )
 
     idea_blocks: list[IdeaBlock] = []
-    user_id = _participant_id_to_int(participant_id)
 
     for block_data in generated_blocks:
         summary = block_data["summary"]

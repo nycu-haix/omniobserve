@@ -2,11 +2,12 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
@@ -14,7 +15,8 @@ import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type Ta
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
-import { PrivateBoard } from "./private-board/PrivateBoard";
+import { PrivateBoard, type PrivateBoardHandle } from "./private-board/PrivateBoard";
+import { formatUnreadCount, type IdeaBlockUnreadState } from "./private-board/unreadIdeaBlocks";
 import { Button } from "./ui/Button";
 import { ShortcutKey } from "./ui/ShortcutKey";
 
@@ -74,14 +76,17 @@ function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 }
 
 const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
-const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
-const MIN_PRIVATE_BOARD_WIDTH = 520;
-const MIN_MEETING_COLUMN_WIDTH = 720;
+const DEFAULT_PRIVATE_BOARD_WIDTH = 500;
+const MIN_PRIVATE_BOARD_WIDTH = 420;
+const MIN_MEETING_COLUMN_WIDTH = 640;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
-const DEFAULT_JITSI_HEIGHT = 220;
 const MIN_JITSI_HEIGHT = 220;
-const MIN_RANKING_HEIGHT = 220;
-const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const MIN_TASK_WORKSPACE_HEIGHT = 260;
+const PREFERRED_JITSI_VIEWPORT_RATIO = 0.34;
+const MEETING_VERTICAL_PADDING = 32;
+const JITSI_RESIZE_HANDLE_HEIGHT = 16;
+const MIC_CONTROLS_HEIGHT = 40;
+const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
 const MIN_TASK_PANE_RATIO = 24;
@@ -251,16 +256,29 @@ function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>,
 	event.currentTarget.src = taskItemFallbackImageSrc(item);
 }
 
+function getViewportWidth() {
+	return Math.floor(window.visualViewport?.width ?? window.innerWidth);
+}
+
+function getViewportHeight() {
+	return Math.floor(window.visualViewport?.height ?? window.innerHeight);
+}
+
 function clampPrivateBoardWidth(width: number) {
-	const availableWidth = window.innerWidth - 32 - 16;
-	const maxWidth = Math.max(MIN_PRIVATE_BOARD_WIDTH, availableWidth - MIN_MEETING_COLUMN_WIDTH);
-	return Math.min(Math.max(width, MIN_PRIVATE_BOARD_WIDTH), maxWidth);
+	const availableWidth = getViewportWidth() - 32 - 16;
+	const responsiveMinWidth = Math.min(MIN_PRIVATE_BOARD_WIDTH, Math.max(360, Math.floor(availableWidth * 0.38)));
+	const maxWidth = Math.max(responsiveMinWidth, availableWidth - MIN_MEETING_COLUMN_WIDTH);
+	return Math.min(Math.max(width, responsiveMinWidth), maxWidth);
 }
 
 function clampJitsiHeight(height: number) {
-	const availableHeight = window.innerHeight - 32 - 24 - 24 - 56;
-	const maxHeight = Math.max(MIN_JITSI_HEIGHT, availableHeight - MIN_RANKING_HEIGHT);
+	const fixedHeight = MEETING_VERTICAL_PADDING + JITSI_RESIZE_HANDLE_HEIGHT + MIC_CONTROLS_HEIGHT + MEETING_ROW_GAP_HEIGHT;
+	const maxHeight = Math.max(MIN_JITSI_HEIGHT, getViewportHeight() - fixedHeight - MIN_TASK_WORKSPACE_HEIGHT);
 	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
+}
+
+function getPreferredJitsiHeight() {
+	return clampJitsiHeight(Math.round(getViewportHeight() * PREFERRED_JITSI_VIEWPORT_RATIO));
 }
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -637,7 +655,7 @@ function SortableLostAtSeaItem({
 			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
-			<span className="min-w-0 flex-1">{item.label}</span>
+			<span className="min-w-0 flex-1 whitespace-normal break-words py-0.5 leading-5">{item.label}</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
@@ -661,7 +679,7 @@ function SortableLostAtSeaItem({
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+			<GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
 }
@@ -862,18 +880,20 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
+	const [privateBoardIdeaBlockUnreadState, setPrivateBoardIdeaBlockUnreadState] = useState<IdeaBlockUnreadState>({ count: 0, latestBlockId: null });
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
+	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
 	});
 	const [jitsiHeight, setJitsiHeight] = useState(() => {
-		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
-		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
+		return getPreferredJitsiHeight();
 	});
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
+	const privateBoardRef = useRef<PrivateBoardHandle | null>(null);
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -910,6 +930,7 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1017,6 +1038,10 @@ export default function MeetingRoom() {
 		[hasAudioConnectionError, micMode, startAudioStream]
 	);
 
+	const handlePublicMicActivation = useCallback(() => {
+		void handleMic(getNextMicModeAfterPublicActivation(micMode));
+	}, [handleMic, micMode]);
+
 	useEffect(() => {
 		if (!connectionParticipantId || joinRejectedMessage) {
 			return;
@@ -1038,15 +1063,34 @@ export default function MeetingRoom() {
 				return;
 			}
 
+			if (isJitsiFocused && event.key === "Escape") {
+				event.preventDefault();
+				setIsJitsiFocused(false);
+				setJitsiHeight(getPreferredJitsiHeight());
+				return;
+			}
+
 			if (event.code === "Space") {
 				event.preventDefault();
-				void handleMic(micMode === "public" ? "private" : "public");
+				void handleMic(getNextMicModeAfterPublicActivation(micMode));
 			}
 		};
 
 		window.addEventListener("keydown", handleMicShortcutKeyDown);
 		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
-	}, [handleMic, micMode]);
+	}, [handleMic, isJitsiFocused, micMode]);
+
+	useEffect(() => {
+		if (!isJitsiFocused) {
+			return;
+		}
+
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [isJitsiFocused]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -1145,18 +1189,19 @@ export default function MeetingRoom() {
 			setPrivateBoardWidth(current => clampPrivateBoardWidth(current));
 			setJitsiHeight(current => clampJitsiHeight(current));
 		};
+		const visualViewport = window.visualViewport;
 
 		window.addEventListener("resize", handleResize);
-		return () => window.removeEventListener("resize", handleResize);
+		visualViewport?.addEventListener("resize", handleResize);
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			visualViewport?.removeEventListener("resize", handleResize);
+		};
 	}, []);
 
 	useEffect(() => {
 		window.localStorage.setItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY, String(privateBoardWidth));
 	}, [privateBoardWidth]);
-
-	useEffect(() => {
-		window.localStorage.setItem(JITSI_HEIGHT_STORAGE_KEY, String(jitsiHeight));
-	}, [jitsiHeight]);
 
 	const handlePrivateBoardResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
@@ -1199,8 +1244,18 @@ export default function MeetingRoom() {
 		setPrivateBoardWidth(current => clampPrivateBoardWidth(current + direction * 24));
 	};
 
+	const openPrivateBoard = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+	}, []);
+
+	const openUnreadIdeaBlocks = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openLatestUnreadIdeaBlock(), 0);
+	}, []);
+
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const resizeHandle = event.currentTarget;
 		resizeHandle.setPointerCapture(event.pointerId);
 		const startY = event.clientY;
@@ -1236,8 +1291,18 @@ export default function MeetingRoom() {
 		}
 
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const direction = event.key === "ArrowUp" ? 1 : -1;
 		setJitsiHeight(current => clampJitsiHeight(current + direction * 24));
+	};
+
+	const handleJitsiFocusToggle = () => {
+		const shouldFocusJitsi = !isJitsiFocused;
+		setIsJitsiCollapsed(false);
+		setIsJitsiFocused(shouldFocusJitsi);
+		if (!shouldFocusJitsi) {
+			setJitsiHeight(getPreferredJitsiHeight());
+		}
 	};
 
 	useEffect(() => {
@@ -1333,6 +1398,9 @@ export default function MeetingRoom() {
 		}
 	}, [applyRankingSnapshot, lastMessage]);
 
+	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
+	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
+
 	if (!isParticipantIdValid) {
 		return (
 			<main className="grid min-h-screen place-items-center bg-background p-4 text-foreground">
@@ -1371,11 +1439,11 @@ export default function MeetingRoom() {
 
 	return (
 		<main
-			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
+			className="grid min-h-[100dvh] grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-[100dvh] xl:max-h-[100dvh] xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)] xl:overflow-hidden"
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-0.5 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2.5rem] gap-y-0.5 text-card-foreground xl:min-h-0">
 				<TaskWorkspace
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
@@ -1454,30 +1522,58 @@ export default function MeetingRoom() {
 					<div />
 				</div>
 
-				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
+				<div
+					className={cn(
+						"relative min-h-0 overflow-hidden bg-muted",
+						!isJitsiFocused && "rounded-lg border",
+						isJitsiFocused && "fixed inset-0 z-[70] h-[100dvh] w-[100vw] bg-black",
+						isJitsiCollapsed && !isJitsiFocused && "border-transparent bg-transparent"
+					)}
+					role={isJitsiFocused ? "dialog" : undefined}
+					aria-label={isJitsiFocused ? "Jitsi 放大模式" : undefined}
+					aria-modal={isJitsiFocused ? "true" : undefined}
+				>
 					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
 						<JitsiRoom
 							meetingDomain={jitsiBaseUrl}
 							roomName={roomName}
 							displayName={displayName}
 							micMode={micMode}
+							allowInteraction={isJitsiFocused}
 							onStatusChange={handleJitsiStatusChange}
 							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
 						/>
 					</div>
 					{!isJitsiCollapsed && (
 						<>
+							{!isJitsiFocused && (
+								<Button
+									type="button"
+									variant="outline"
+									size="icon"
+									className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+									aria-label="收合 Jitsi"
+									title="收合 Jitsi"
+									aria-expanded="true"
+									onClick={() => {
+										setIsJitsiFocused(false);
+										setIsJitsiCollapsed(true);
+									}}
+								>
+									<ChevronDown className="h-4 w-4" />
+								</Button>
+							)}
 							<Button
 								type="button"
 								variant="outline"
 								size="icon"
-								className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
-								aria-label="收合 Jitsi"
-								title="收合 Jitsi"
-								aria-expanded="true"
-								onClick={() => setIsJitsiCollapsed(true)}
+								className="absolute right-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+								aria-label={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								title={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								aria-pressed={isJitsiFocused}
+								onClick={handleJitsiFocusToggle}
 							>
-								<ChevronDown className="h-4 w-4" />
+								{isJitsiFocused ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
 							</Button>
 						</>
 					)}
@@ -1493,15 +1589,19 @@ export default function MeetingRoom() {
 					<div className="hidden">
 						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
 							<Button
+								type="button"
 								variant={micMode === "public" ? "destructive" : "outline"}
 								className={cn("gap-2", micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
-								onClick={() => void handleMic("public")}
+								aria-pressed={micMode === "public"}
+								aria-label={publicMicToggleLabel}
+								title={publicMicToggleLabel}
+								onClick={handlePublicMicActivation}
 							>
 								<Mic className="h-4 w-4" />
 								公開麥克風
 								<ShortcutKey label="Space" />
 							</Button>
-							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+							<Button type="button" className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} aria-pressed={micMode === "private"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
 							</Button>
@@ -1526,15 +1626,25 @@ export default function MeetingRoom() {
 					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2.5">
 						<Button
+							type="button"
 							variant={micMode === "public" ? "destructive" : "outline"}
 							className={cn("h-9 gap-2 px-4 text-sm", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
-							onClick={() => void handleMic("public")}
+							aria-pressed={micMode === "public"}
+							aria-label={publicMicToggleLabel}
+							title={publicMicToggleLabel}
+							onClick={handlePublicMicActivation}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
 							<ShortcutKey label="Space" />
 						</Button>
-						<Button className="h-9 gap-2 px-4 text-sm" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button
+							type="button"
+							className="h-9 gap-2 px-4 text-sm"
+							variant={micMode === "private" ? "default" : "outline"}
+							aria-pressed={micMode === "private"}
+							onClick={() => void handleMic("private")}
+						>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
@@ -1553,7 +1663,11 @@ export default function MeetingRoom() {
 							aria-label="展開 Jitsi"
 							title="展開 Jitsi"
 							aria-expanded="false"
-							onClick={() => setIsJitsiCollapsed(current => !current)}
+							onClick={() => {
+								setIsJitsiFocused(false);
+								setIsJitsiCollapsed(false);
+								setJitsiHeight(getPreferredJitsiHeight());
+							}}
 						>
 							<ChevronUp className="h-4 w-4" />
 						</Button>
@@ -1616,7 +1730,7 @@ export default function MeetingRoom() {
 				</div>
 			)}
 
-			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
+			<aside className="relative min-h-0 min-w-0 xl:min-w-[var(--private-board-width)]">
 				{!isPrivateBoardCollapsed && (
 					<button
 						type="button"
@@ -1633,21 +1747,38 @@ export default function MeetingRoom() {
 					</button>
 				)}
 				{isPrivateBoardCollapsed && (
-					<Button
-						type="button"
-						variant="outline"
-						size="icon"
-						className="absolute -right-2 top-3 z-20 h-8 w-8 shadow-sm"
-						aria-label="展開 Private Board"
-						title="展開 Private Board"
-						aria-expanded="false"
-						onClick={() => setIsPrivateBoardCollapsed(false)}
-					>
-						<ChevronLeft className="h-4 w-4" />
-					</Button>
+					<div className="absolute -right-2 top-3 z-20 grid justify-items-end gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className="h-8 w-8 shadow-sm"
+							aria-label="展開 Private Board"
+							title="展開 Private Board"
+							aria-expanded="false"
+							onClick={openPrivateBoard}
+						>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						{privateBoardUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardUnreadCount} 個新的 Idea Blocks，開啟最新項目`}
+								title="開啟新的 Idea Blocks"
+								onClick={openUnreadIdeaBlocks}
+							>
+								<Bell className="h-3.5 w-3.5" />
+								{privateBoardUnreadCountLabel}
+							</Button>
+						)}
+					</div>
 				)}
 				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
 					<PrivateBoard
+						ref={privateBoardRef}
 						sessionId={sessionId}
 						participantId={participantId}
 						lastMessage={lastMessage}
@@ -1661,7 +1792,8 @@ export default function MeetingRoom() {
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
 						isCollapsed={isPrivateBoardCollapsed}
-						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
+						onRequestOpen={openPrivateBoard}
+						onIdeaBlockUnreadStateChange={setPrivateBoardIdeaBlockUnreadState}
 					/>
 				</div>
 			</aside>
