@@ -7,6 +7,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
@@ -910,6 +911,8 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const micModeStatusLabel = micMode === "public" ? "目前：公開發言" : "目前：悄悄話";
+	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1017,6 +1020,10 @@ export default function MeetingRoom() {
 		[hasAudioConnectionError, micMode, startAudioStream]
 	);
 
+	const handlePublicMicActivation = useCallback(() => {
+		void handleMic(getNextMicModeAfterPublicActivation(micMode));
+	}, [handleMic, micMode]);
+
 	useEffect(() => {
 		if (!connectionParticipantId || joinRejectedMessage) {
 			return;
@@ -1040,7 +1047,7 @@ export default function MeetingRoom() {
 
 			if (event.code === "Space") {
 				event.preventDefault();
-				void handleMic(micMode === "public" ? "private" : "public");
+				void handleMic(getNextMicModeAfterPublicActivation(micMode));
 			}
 		};
 
@@ -1493,15 +1500,19 @@ export default function MeetingRoom() {
 					<div className="hidden">
 						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
 							<Button
+								type="button"
 								variant={micMode === "public" ? "destructive" : "outline"}
 								className={cn("gap-2", micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
-								onClick={() => void handleMic("public")}
+								aria-pressed={micMode === "public"}
+								aria-label={publicMicToggleLabel}
+								title={publicMicToggleLabel}
+								onClick={handlePublicMicActivation}
 							>
 								<Mic className="h-4 w-4" />
 								公開麥克風
 								<ShortcutKey label="Space" />
 							</Button>
-							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+							<Button type="button" className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} aria-pressed={micMode === "private"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
 							</Button>
@@ -1526,18 +1537,31 @@ export default function MeetingRoom() {
 					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2.5">
 						<Button
+							type="button"
 							variant={micMode === "public" ? "destructive" : "outline"}
 							className={cn("h-9 gap-2 px-4 text-sm", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
-							onClick={() => void handleMic("public")}
+							aria-pressed={micMode === "public"}
+							aria-label={publicMicToggleLabel}
+							title={publicMicToggleLabel}
+							onClick={handlePublicMicActivation}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
 							<ShortcutKey label="Space" />
 						</Button>
-						<Button className="h-9 gap-2 px-4 text-sm" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button
+							type="button"
+							className="h-9 gap-2 px-4 text-sm"
+							variant={micMode === "private" ? "default" : "outline"}
+							aria-pressed={micMode === "private"}
+							onClick={() => void handleMic("private")}
+						>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
+						<span className="text-xs font-medium text-muted-foreground" role="status" aria-live="polite">
+							{micModeStatusLabel}
+						</span>
 					</div>
 					{hasAudioConnectionError && (
 						<AlertCircle className="absolute right-24 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
