@@ -1681,6 +1681,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		if (blockIds.size === 0) {
 			return;
 		}
+		blockIds.forEach(blockId => {
+			unreadIdeaBlockIdsFromRefreshRef.current.delete(blockId);
+		});
 		setIdeaBlocks(prev => {
 			let didChange = false;
 			const nextBlocks = prev.map(block => {
