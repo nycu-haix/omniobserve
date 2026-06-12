@@ -5,6 +5,7 @@ from app.schemas import ApiError
 from app.services.phase_task_item_snapshot_service import _participant_user_id_filter
 from app.services.participant_status import sync_participant_roles
 from app.services.participant_roles import normalize_participant_role
+from app.services.ranking_phase_snapshot_service import _is_participant_subject
 from app.services.realtime import _is_participant_ranking_subject, _phase_snapshot_participant_ids
 from app.services.task_export_service import _ranking_artifact_name, _snapshot_subject_token
 
@@ -65,6 +66,14 @@ class ParticipantRoleTests(unittest.TestCase):
         self.assertEqual(_participant_user_id_filter(["2", "admin", "observer", "1"]), [1, 2])
         self.assertEqual(_participant_user_id_filter([]), [])
         self.assertIsNone(_participant_user_id_filter(None))
+
+    def test_persisted_phase_snapshot_subjects_are_participant_ids(self) -> None:
+        self.assertTrue(_is_participant_subject("1"))
+        self.assertTrue(_is_participant_subject(2))
+        self.assertFalse(_is_participant_subject("0"))
+        self.assertFalse(_is_participant_subject("admin"))
+        self.assertFalse(_is_participant_subject("admin-reviewer"))
+        self.assertFalse(_is_participant_subject("test-client"))
 
 
 if __name__ == "__main__":

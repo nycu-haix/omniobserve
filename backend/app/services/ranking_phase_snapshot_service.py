@@ -750,7 +750,9 @@ def _is_participant_subject(value: Any) -> bool:
     if not text:
         return False
     normalized = text.lower()
-    return normalized != "admin" and not normalized.startswith("admin-")
+    if normalized == "admin" or normalized.startswith("admin-"):
+        return False
+    return text != "0" and text.isdigit()
 
 
 def _participant_sort_key(value: str) -> tuple[int, int | str]:
