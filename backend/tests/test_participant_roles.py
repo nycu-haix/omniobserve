@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import unittest
 
 from app.schemas import ApiError
+from app.services.phase_task_item_snapshot_service import _participant_user_id_filter
 from app.services.participant_status import sync_participant_roles
 from app.services.participant_roles import normalize_participant_role
 from app.services.realtime import _is_participant_ranking_subject, _phase_snapshot_participant_ids
@@ -58,6 +59,11 @@ class ParticipantRoleTests(unittest.TestCase):
         )
         self.assertFalse(_is_participant_ranking_subject(session_name, "1"))
         self.assertTrue(_is_participant_ranking_subject(session_name, "2"))
+
+    def test_phase_snapshot_item_catalog_filters_to_analysis_participants(self) -> None:
+        self.assertEqual(_participant_user_id_filter(["2", "admin", "observer", "1"]), [1, 2])
+        self.assertEqual(_participant_user_id_filter([]), [])
+        self.assertIsNone(_participant_user_id_filter(None))
 
 
 if __name__ == "__main__":
