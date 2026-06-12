@@ -8,6 +8,7 @@ interface JitsiRoomProps {
 	roomName?: string;
 	displayName?: string;
 	micMode: MicMode;
+	allowInteraction?: boolean;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
 	onStatusChange?: (status: JitsiConnectionStatus) => void;
 	onAudioParticipantsChange?: (snapshot: JitsiAudioSnapshot) => void;
@@ -227,7 +228,7 @@ function getParticipantMergeKey(participant: JitsiAudioParticipant) {
 	return displayName && !displayName.startsWith("Participant ") ? `name:${displayName.toLocaleLowerCase()}` : `id:${participant.id}`;
 }
 
-export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange, onAudioParticipantsChange }: JitsiRoomProps) {
+export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, allowInteraction = false, onApiReady, onStatusChange, onAudioParticipantsChange }: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const desiredAudioMutedRef = useRef(micMode !== "public");
@@ -677,8 +678,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					<Loader2 className="h-6 w-6 animate-spin" />
 				</div>
 			)}
-			{/* Transparent overlay to prevent iframe interaction */}
-			<div className="absolute inset-0 z-20" />
+			{!allowInteraction && <div className="absolute inset-0 z-20" aria-hidden="true" />}
 			<div ref={containerRef} className="h-full w-full" />
 		</div>
 	);
