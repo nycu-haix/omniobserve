@@ -29,10 +29,13 @@ from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import (
     get_participant_display_name,
     get_participant_presence,
+    is_cached_observer,
     mark_audio_disconnected,
+    sync_participant_roles,
     update_participant_metadata,
     update_audio_status,
 )
+from .participant_roles import list_session_participant_roles
 from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
@@ -79,6 +82,12 @@ def _is_admin_participant_id(participant_id: str | None) -> bool:
     return normalized_id == ADMIN_PARTICIPANT_ID or normalized_id.startswith(
         ADMIN_PARTICIPANT_ID_PREFIX
     )
+
+
+def _is_participant_ranking_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id):
+        return False
+    return not is_cached_observer(session_id, str(participant_id or ""))
 
 
 class ConnectionManager:
@@ -372,9 +381,24 @@ def _presence_state_message(session_id: str) -> dict[str, Any]:
     }
 
 
+async def _sync_cached_participant_roles(session_id: str) -> None:
+    async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
+
+
 async def broadcast_presence_state(session_id: str) -> None:
-    await presence_manager.broadcast(session_id, _presence_state_message(session_id))
-    await admin_manager.broadcast(session_id, _presence_state_message(session_id))
+    await _sync_cached_participant_roles(session_id)
+    message = _presence_state_message(session_id)
+    await presence_manager.broadcast(session_id, message)
+    await admin_manager.broadcast(session_id, message)
+
+
+async def broadcast_admin_ranking_state(session_id: str) -> None:
+    await _sync_cached_participant_roles(session_id)
+    await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
 
 
 async def broadcast_admin_idea_blocks_update(
@@ -534,7 +558,7 @@ async def _publish_public_context_matches(
     target_participant_ids = [
         target_participant_id
         for target_participant_id in board_manager.get_participants(session_id)
-        if not _is_admin_participant_id(target_participant_id)
+        if _is_participant_ranking_subject(session_id, target_participant_id)
     ]
     for target_participant_id in target_participant_ids:
         user_matches = matches_by_user.get(target_participant_id, [])
@@ -1146,7 +1170,7 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     private_rankings = {
         participant_id: _ranking_payload(session_id, state)
         for participant_id, state in sorted(private_ranking_state[session_id].items())
-        if not _is_admin_participant_id(participant_id)
+        if _is_participant_ranking_subject(session_id, participant_id)
     }
     return {
         "type": "admin_ranking_state",
@@ -1415,9 +1439,7 @@ async def handle_board_websocket(
                         await board_manager.send_to(session_id, participant_id, message)
                     else:
                         await board_manager.broadcast(session_id, message)
-                    await admin_manager.broadcast(
-                        session_id, _admin_ranking_state_message(session_id)
-                    )
+                    await broadcast_admin_ranking_state(session_id)
                 continue
 
             if message_type == "public_chat_send":
@@ -1514,6 +1536,11 @@ async def handle_admin_websocket(
             admin_id,
         )
         return
+    async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
     logger.info(
         "admin ws connected session_id=%s admin_id=%s admins=%s",
         session_id,
@@ -1596,7 +1623,7 @@ async def handle_admin_websocket(
                                     participant_ids=[
                                         participant_id
                                         for participant_id in participant_ids
-                                        if not _is_admin_participant_id(participant_id)
+                                        if _is_participant_ranking_subject(session_id, participant_id)
                                     ],
                                     private_ranking_states=private_ranking_state[session_id],
                                     public_ranking_state=public_ranking_state.get(session_id),
@@ -1606,7 +1633,7 @@ async def handle_admin_websocket(
                                 for checkpoint_participant_id in [
                                     participant_id
                                     for participant_id in participant_ids
-                                    if not _is_admin_participant_id(participant_id)
+                                    if _is_participant_ranking_subject(session_id, participant_id)
                                 ]:
                                     state = private_ranking_state[session_id].get(checkpoint_participant_id)
                                     if state is None:
@@ -1638,7 +1665,7 @@ async def handle_admin_websocket(
                                         checkpoint_revision = _normalize_int(state.get("revision"), 0)
                                     if not checkpoint_items:
                                         continue
-                                    if _is_admin_participant_id(checkpoint_participant_id):
+                                    if not _is_participant_ranking_subject(session_id, checkpoint_participant_id):
                                         continue
                                     await create_ranking_checkpoint(
                                         session_name=session_id,
@@ -1657,7 +1684,7 @@ async def handle_admin_websocket(
                                 participant_ids=[
                                     participant_id
                                     for participant_id in participant_ids
-                                    if not _is_admin_participant_id(participant_id)
+                                    if _is_participant_ranking_subject(session_id, participant_id)
                                 ],
                             )
                         except Exception as exc:
@@ -1709,7 +1736,7 @@ async def handle_admin_websocket(
                         participant_id,
                         _board_state_message(session_id, participant_id),
                     )
-                await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
+                await broadcast_admin_ranking_state(session_id)
             elif message_type == "set_countdown":
                 _set_session_countdown(
                     session_id, _normalize_int(payload.get("duration_s"), 0)

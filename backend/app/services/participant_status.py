@@ -1,5 +1,6 @@
 from typing import Any
 
+from .participant_roles import PARTICIPANT_ROLE, normalize_participant_role, is_observer_role
 from ..utils import to_iso_z, utc_now
 
 
@@ -50,6 +51,31 @@ def update_participant_metadata(
     }
 
 
+def update_participant_role(session_name: str, participant_id: str, participant_role: str) -> None:
+    session_statuses = _participant_statuses.setdefault(session_name, {})
+    current = session_statuses.get(participant_id, {})
+    session_statuses[participant_id] = {
+        **current,
+        "id": participant_id,
+        "participant_role": normalize_participant_role(participant_role),
+        "updated_at": to_iso_z(utc_now()),
+    }
+
+
+def sync_participant_roles(session_name: str, participant_roles: dict[str, str]) -> None:
+    for participant_id, participant_role in participant_roles.items():
+        update_participant_role(session_name, participant_id, participant_role)
+
+
+def get_cached_participant_role(session_name: str, participant_id: str) -> str:
+    status = _participant_statuses.get(session_name, {}).get(participant_id, {})
+    return normalize_participant_role(status.get("participant_role", PARTICIPANT_ROLE))
+
+
+def is_cached_observer(session_name: str, participant_id: str) -> bool:
+    return is_observer_role(get_cached_participant_role(session_name, participant_id))
+
+
 def mark_audio_disconnected(session_name: str, participant_id: str) -> None:
     update_audio_status(
         session_name,
@@ -60,14 +86,22 @@ def mark_audio_disconnected(session_name: str, participant_id: str) -> None:
     )
 
 
-def get_participant_presence(session_name: str, participant_ids: list[str]) -> list[dict[str, Any]]:
+def get_participant_presence(
+    session_name: str,
+    participant_ids: list[str],
+    participant_roles: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     session_statuses = _participant_statuses.get(session_name, {})
     participants: list[dict[str, Any]] = []
     for participant_id in sorted(set(participant_ids)):
         status = session_statuses.get(participant_id, {})
+        participant_role = normalize_participant_role(
+            (participant_roles or {}).get(participant_id, status.get("participant_role", PARTICIPANT_ROLE))
+        )
         participants.append(
             {
                 "id": participant_id,
+                "participant_role": participant_role,
                 "mic_mode": status.get("mic_mode", "off"),
                 "audio_connected": bool(status.get("audio_connected", False)),
                 "is_speaking": bool(status.get("is_speaking", False)),

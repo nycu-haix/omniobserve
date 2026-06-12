@@ -27,6 +27,7 @@ from ..models import (
     Transcript,
 )
 from ..task_config import get_task_phases_for_session, resolve_task_id
+from .participant_roles import OBSERVER_ROLE, PARTICIPANT_ROLE, list_session_participant_roles, normalize_participant_role
 
 TASK_EXPORT_SCHEMA_VERSION = 1
 APP_VERSION = "0.1.0"
@@ -141,6 +142,7 @@ async def build_task_export_bundle(
         task_id=resolved_task_id,
         similarities=similarities,
     )
+    participant_roles = await list_session_participant_roles(db, session_name=session_name)
 
     phase_windows = _build_phase_windows(
         context=context,
@@ -148,6 +150,7 @@ async def build_task_export_bundle(
     )
     participants = _collect_participants(
         context=context,
+        participant_roles=participant_roles,
         transcripts=transcripts,
         chat_messages=chat_messages,
         idea_blocks=idea_blocks,
@@ -155,6 +158,7 @@ async def build_task_export_bundle(
     )
     files = _build_data_files(
         context=context,
+        participant_roles=participant_roles,
         participants=participants,
         transcripts=transcripts,
         chat_messages=chat_messages,
@@ -188,6 +192,7 @@ async def build_task_export_bundle(
     manifest = _build_manifest(
         context=context,
         files=files_with_placeholders,
+        participant_roles=participant_roles,
         participants=participants,
         ranking_snapshots=ranking_snapshots,
         transcripts=transcripts,
@@ -338,6 +343,7 @@ async def _load_task_cue_events(
 def _build_data_files(
     *,
     context: ExportContext,
+    participant_roles: dict[str, str],
     participants: list[dict[str, Any]],
     transcripts: list[Transcript],
     chat_messages: list[ChatMessage],
@@ -350,11 +356,11 @@ def _build_data_files(
 ) -> list[TaskExportFile]:
     files: list[TaskExportFile] = []
     files.append(_participant_mapping_file(context, participants))
-    files.extend(_ranking_snapshot_files(context, ranking_snapshots))
-    files.extend(_phase_task_item_snapshot_files(context, phase_task_snapshots))
-    files.extend(_transcript_files(context, participants, transcripts, phase_windows))
-    files.append(_idea_blocks_file(context, idea_blocks, phase_windows))
-    files.append(_public_chat_file(context, chat_messages, phase_windows))
+    files.extend(_ranking_snapshot_files(context, ranking_snapshots, participant_roles))
+    files.extend(_phase_task_item_snapshot_files(context, phase_task_snapshots, participant_roles))
+    files.extend(_transcript_files(context, participant_roles, participants, transcripts, phase_windows))
+    files.append(_idea_blocks_file(context, participant_roles, idea_blocks, phase_windows))
+    files.append(_public_chat_file(context, participant_roles, chat_messages, phase_windows))
     files.extend(_cue_files(context, idea_blocks, similarities, cue_events, phase_windows))
     files.append(_phase_timestamps_file(context, phase_windows))
     return files
@@ -368,6 +374,8 @@ def _participant_mapping_file(
         "system_id",
         "participant_code",
         "display_name",
+        "participant_role",
+        "participant_analysis_included",
         "group_id",
         "sources",
         "research_code_inferred",
@@ -378,6 +386,8 @@ def _participant_mapping_file(
             "system_id": participant["system_id"],
             "participant_code": participant["participant_code"],
             "display_name": participant.get("display_name") or "",
+            "participant_role": participant.get("participant_role") or PARTICIPANT_ROLE,
+            "participant_analysis_included": participant.get("participant_analysis_included", True),
             "group_id": context.group_id,
             "sources": ";".join(participant.get("sources") or []),
             "research_code_inferred": "true",
@@ -400,6 +410,7 @@ def _participant_mapping_file(
 def _ranking_snapshot_files(
     context: ExportContext,
     snapshots: list[RankingPhaseSnapshot],
+    participant_roles: dict[str, str],
 ) -> list[TaskExportFile]:
     files: list[TaskExportFile] = []
     latest_snapshots = _latest_ranking_snapshots(snapshots)
@@ -408,7 +419,7 @@ def _ranking_snapshot_files(
     all_rows = [
         row
         for snapshot in snapshots
-        for row in _ranking_snapshot_rows(context, snapshot)
+        for row in _ranking_snapshot_rows(context, snapshot, participant_roles)
     ]
     files.append(
         TaskExportFile(
@@ -423,15 +434,15 @@ def _ranking_snapshot_files(
     )
 
     for snapshot in latest_snapshots:
-        artifact = _ranking_artifact_name(snapshot)
-        subject = _snapshot_subject_token(context, snapshot)
+        artifact = _ranking_artifact_name(snapshot, participant_roles)
+        subject = _snapshot_subject_token(context, snapshot, participant_roles)
         filename = f"{_artifact_prefix(context)}_{artifact}_{subject}.csv"
-        rows = _ranking_snapshot_rows(context, snapshot)
+        rows = _ranking_snapshot_rows(context, snapshot, participant_roles)
         files.append(
             TaskExportFile(
                 path=_package_path(context, filename),
                 artifact=artifact,
-                scope=snapshot.scope,
+                scope="diagnostic" if artifact == "observer_ranking_diagnostic" else snapshot.scope,
                 record_count=len(rows),
                 required=artifact in {"initial_ranking", "group_ranking", "final_ranking"},
                 media_type="text/csv",
@@ -444,6 +455,7 @@ def _ranking_snapshot_files(
 def _phase_task_item_snapshot_files(
     context: ExportContext,
     snapshots: list[PhaseTaskItemSnapshot],
+    participant_roles: dict[str, str],
 ) -> list[TaskExportFile]:
     if not snapshots:
         return []
@@ -468,6 +480,7 @@ def _phase_task_item_snapshot_files(
         "statement",
         "source_user_ids",
         "source_participant_codes",
+        "source_participant_roles",
         "source_priorities",
     ]
     rows = [
@@ -495,6 +508,11 @@ def _phase_task_item_snapshot_files(
                 for user_id in item.source_user_ids
                 if _is_real_participant_id(user_id)
             ],
+            "source_participant_roles": [
+                _participant_role_for_id(participant_roles, user_id)
+                for user_id in item.source_user_ids
+                if _is_real_participant_id(user_id)
+            ],
             "source_priorities": item.source_priorities,
         }
         for item in latest_snapshot.items
@@ -514,6 +532,7 @@ def _phase_task_item_snapshot_files(
 
 def _transcript_files(
     context: ExportContext,
+    participant_roles: dict[str, str],
     participants: list[dict[str, Any]],
     transcripts: list[Transcript],
     phase_windows: list[dict[str, Any]],
@@ -522,12 +541,13 @@ def _transcript_files(
     private_by_participant: dict[str, list[Transcript]] = {
         participant["system_id"]: []
         for participant in participants
+        if participant.get("participant_analysis_included", True)
     }
     public_transcripts: list[Transcript] = []
     for transcript in transcripts:
         if transcript.visibility == "public":
             public_transcripts.append(transcript)
-        elif _is_real_participant_id(transcript.user_id):
+        elif _is_analysis_participant_id(participant_roles, transcript.user_id):
             private_by_participant.setdefault(str(transcript.user_id), []).append(transcript)
 
     for participant_id, participant_transcripts in sorted(private_by_participant.items(), key=lambda entry: _participant_sort_key(entry[0])):
@@ -543,7 +563,7 @@ def _transcript_files(
                 record_count=len(participant_transcripts),
                 required=True,
                 media_type="text/plain",
-                content=_transcript_text(context, participant_transcripts, phase_windows),
+                content=_transcript_text(context, participant_roles, participant_transcripts, phase_windows),
             )
         )
 
@@ -555,7 +575,7 @@ def _transcript_files(
             record_count=len(public_transcripts),
             required=True,
             media_type="text/plain",
-            content=_transcript_text(context, public_transcripts, phase_windows),
+            content=_transcript_text(context, participant_roles, public_transcripts, phase_windows),
         )
     )
     return files
@@ -563,6 +583,7 @@ def _transcript_files(
 
 def _idea_blocks_file(
     context: ExportContext,
+    participant_roles: dict[str, str],
     idea_blocks: list[IdeaBlock],
     phase_windows: list[dict[str, Any]],
 ) -> TaskExportFile:
@@ -575,6 +596,8 @@ def _idea_blocks_file(
         "phase",
         "participant_id",
         "participant_code",
+        "participant_role",
+        "participant_analysis_included",
         "created_at",
         "title",
         "summary",
@@ -606,6 +629,8 @@ def _idea_blocks_file(
                 "phase": phase,
                 "participant_id": block.user_id,
                 "participant_code": _participant_code(context.group_id, str(block.user_id)),
+                "participant_role": _participant_role_for_id(participant_roles, block.user_id),
+                "participant_analysis_included": _is_analysis_participant_id(participant_roles, block.user_id),
                 "created_at": _isoformat(block.time_stamp),
                 "title": block.title,
                 "summary": block.summary,
@@ -635,6 +660,7 @@ def _idea_blocks_file(
 
 def _public_chat_file(
     context: ExportContext,
+    participant_roles: dict[str, str],
     chat_messages: list[ChatMessage],
     phase_windows: list[dict[str, Any]],
 ) -> TaskExportFile:
@@ -647,6 +673,8 @@ def _public_chat_file(
         "phase",
         "participant_id",
         "participant_code",
+        "participant_role",
+        "participant_analysis_included",
         "display_name",
         "timestamp",
         "message",
@@ -662,6 +690,8 @@ def _public_chat_file(
             "phase": _infer_phase_for_timestamp(message.time_stamp, phase_windows),
             "participant_id": message.user_id,
             "participant_code": _participant_code(context.group_id, str(message.user_id)) if _is_real_participant_id(message.user_id) else "admin",
+            "participant_role": _participant_role_for_id(participant_roles, message.user_id) if _is_real_participant_id(message.user_id) else "admin",
+            "participant_analysis_included": _is_analysis_participant_id(participant_roles, message.user_id) if _is_real_participant_id(message.user_id) else False,
             "display_name": message.display_name,
             "timestamp": _isoformat(message.time_stamp),
             "message": message.message,
@@ -932,6 +962,8 @@ def _ranking_snapshot_headers() -> list[str]:
         "subject_id",
         "participant_id",
         "participant_code",
+        "participant_role",
+        "participant_analysis_included",
         "snapshot_created_at",
         "source",
         "source_phase",
@@ -949,7 +981,10 @@ def _ranking_snapshot_headers() -> list[str]:
 def _ranking_snapshot_rows(
     context: ExportContext,
     snapshot: RankingPhaseSnapshot,
+    participant_roles: dict[str, str],
 ) -> list[dict[str, Any]]:
+    participant_role = _participant_role_for_id(participant_roles, snapshot.participant_id)
+    participant_analysis_included = _is_analysis_participant_id(participant_roles, snapshot.participant_id) if snapshot.participant_id else snapshot.scope == "public"
     participant_code = (
         _participant_code(context.group_id, snapshot.participant_id)
         if snapshot.participant_id
@@ -970,6 +1005,8 @@ def _ranking_snapshot_rows(
                 "subject_id": snapshot.subject_id,
                 "participant_id": snapshot.participant_id,
                 "participant_code": participant_code,
+                "participant_role": participant_role,
+                "participant_analysis_included": participant_analysis_included,
                 "snapshot_created_at": _isoformat(snapshot.created_at),
                 "source": snapshot.source,
                 "source_phase": snapshot.source_phase,
@@ -997,6 +1034,8 @@ def _ranking_snapshot_rows(
             "subject_id": snapshot.subject_id,
             "participant_id": snapshot.participant_id,
             "participant_code": participant_code,
+            "participant_role": participant_role,
+            "participant_analysis_included": participant_analysis_included,
             "snapshot_created_at": _isoformat(snapshot.created_at),
             "source": snapshot.source,
             "source_phase": snapshot.source_phase,
@@ -1028,7 +1067,9 @@ def _latest_ranking_snapshots(snapshots: list[RankingPhaseSnapshot]) -> list[Ran
     )
 
 
-def _ranking_artifact_name(snapshot: RankingPhaseSnapshot) -> str:
+def _ranking_artifact_name(snapshot: RankingPhaseSnapshot, participant_roles: dict[str, str] | None = None) -> str:
+    if snapshot.scope == "private" and snapshot.participant_id and _is_observer_participant_id(participant_roles or {}, snapshot.participant_id):
+        return "observer_ranking_diagnostic"
     if snapshot.scope == "public" or snapshot.phase == "group":
         return "group_ranking"
     if snapshot.phase == "reflect" and snapshot.scope == "private":
@@ -1040,15 +1081,19 @@ def _ranking_artifact_name(snapshot: RankingPhaseSnapshot) -> str:
     return f"{_file_token(snapshot.phase)}_{_file_token(snapshot.scope)}_ranking"
 
 
-def _snapshot_subject_token(context: ExportContext, snapshot: RankingPhaseSnapshot) -> str:
+def _snapshot_subject_token(context: ExportContext, snapshot: RankingPhaseSnapshot, participant_roles: dict[str, str] | None = None) -> str:
     if snapshot.scope == "public" or snapshot.subject_type == "group":
         return "group"
     subject_id = snapshot.participant_id or snapshot.subject_id
-    return _participant_code(context.group_id, subject_id)
+    subject_token = _participant_code(context.group_id, subject_id)
+    if snapshot.scope == "private" and _is_observer_participant_id(participant_roles or {}, subject_id):
+        return f"observer_{subject_token}"
+    return subject_token
 
 
 def _transcript_text(
     context: ExportContext,
+    participant_roles: dict[str, str],
     transcripts: list[Transcript],
     phase_windows: list[dict[str, Any]],
 ) -> str:
@@ -1065,10 +1110,11 @@ def _transcript_text(
             if _is_real_participant_id(transcript.user_id)
             else "admin"
         )
+        participant_role = _participant_role_for_id(participant_roles, transcript.user_id) if _is_real_participant_id(transcript.user_id) else "admin"
         speaker = transcript.display_name or participant_code
         lines.append(
             f"[{_isoformat(transcript.time_stamp)}] [{phase}] {speaker} "
-            f"(system_id={transcript.user_id}, transcript_id={transcript.id}, visibility={transcript.visibility})"
+            f"(system_id={transcript.user_id}, participant_role={participant_role}, transcript_id={transcript.id}, visibility={transcript.visibility})"
         )
         lines.append(transcript.transcript)
         lines.append("")
@@ -1180,6 +1226,7 @@ def _infer_phase_for_timestamp(
 def _collect_participants(
     *,
     context: ExportContext,
+    participant_roles: dict[str, str],
     transcripts: list[Transcript],
     chat_messages: list[ChatMessage],
     idea_blocks: list[IdeaBlock],
@@ -1204,12 +1251,16 @@ def _collect_participants(
         add(block.user_id, "idea_block")
     for snapshot in ranking_snapshots:
         add(snapshot.participant_id, "ranking_snapshot")
+    for participant_id in participant_roles:
+        add(participant_id, "participant_role")
 
     return [
         {
             "system_id": participant_id,
             "participant_code": _participant_code(context.group_id, participant_id),
             "display_name": display_names.get(participant_id),
+            "participant_role": _participant_role_for_id(participant_roles, participant_id),
+            "participant_analysis_included": _is_analysis_participant_id(participant_roles, participant_id),
             "sources": sorted(sources),
         }
         for participant_id, sources in sorted(
@@ -1223,6 +1274,7 @@ def _build_manifest(
     *,
     context: ExportContext,
     files: list[TaskExportFile],
+    participant_roles: dict[str, str],
     participants: list[dict[str, Any]],
     ranking_snapshots: list[RankingPhaseSnapshot],
     transcripts: list[Transcript],
@@ -1236,7 +1288,8 @@ def _build_manifest(
     checklist = _build_checklist(
         context=context,
         files=files,
-        participant_count=len(participants),
+        participant_roles=participant_roles,
+        participant_count=_analysis_participant_count(participants),
         ranking_snapshots=ranking_snapshots,
         transcripts=transcripts,
         chat_messages=chat_messages,
@@ -1258,6 +1311,8 @@ def _build_manifest(
         "condition_source": context.condition.source,
         "cue_enabled": context.condition.cue_enabled,
         "participants": participants,
+        "participant_role_counts": _participant_role_counts(participants),
+        "analysis_participant_count": _analysis_participant_count(participants),
         "system": _system_version_metadata(),
         "phase_timestamps": [
             {
@@ -1280,6 +1335,9 @@ def _build_manifest(
         ],
         "checklist": checklist,
         "counts": {
+            "participants": len(participants),
+            "analysis_participants": _analysis_participant_count(participants),
+            "observers": sum(1 for participant in participants if participant.get("participant_role") == OBSERVER_ROLE),
             "ranking_snapshots": len(ranking_snapshots),
             "phase_task_item_snapshots": len(phase_task_snapshots),
             "transcripts": len(transcripts),
@@ -1296,6 +1354,7 @@ def _build_manifest(
             "Transcripts and public chat are session-scoped because those tables do not store task_id; this export assumes one task run per session URL.",
             "Idea block phase is inferred from persisted phase-boundary snapshot timestamps when available.",
             "Cue lifecycle export uses similarity_cue_events when available; older runs without durable event rows fall back to similarity-pair evidence.",
+            "Manual participant_role metadata comes from session_participant_roles. Observer private ranking rows carry participant_analysis_included=false, latest observer private ranking files use the observer_ranking_diagnostic artifact, and observer rows are excluded from participant checklist denominators.",
         ],
     }
 
@@ -1304,6 +1363,7 @@ def _build_checklist(
     *,
     context: ExportContext,
     files: list[TaskExportFile],
+    participant_roles: dict[str, str],
     participant_count: int,
     ranking_snapshots: list[RankingPhaseSnapshot],
     transcripts: list[Transcript],
@@ -1318,18 +1378,18 @@ def _build_checklist(
     initial_subjects = {
         snapshot.participant_id or snapshot.subject_id
         for snapshot in latest_snapshots
-        if _ranking_artifact_name(snapshot) == "initial_ranking"
+        if _ranking_artifact_name(snapshot, participant_roles) == "initial_ranking"
     }
     final_subjects = {
         snapshot.participant_id or snapshot.subject_id
         for snapshot in latest_snapshots
-        if _ranking_artifact_name(snapshot) == "final_ranking"
+        if _ranking_artifact_name(snapshot, participant_roles) == "final_ranking"
     }
-    group_ranking_count = sum(1 for snapshot in latest_snapshots if _ranking_artifact_name(snapshot) == "group_ranking")
+    group_ranking_count = sum(1 for snapshot in latest_snapshots if _ranking_artifact_name(snapshot, participant_roles) == "group_ranking")
     private_transcript_subjects = {
         str(transcript.user_id)
         for transcript in transcripts
-        if transcript.visibility == "private" and _is_real_participant_id(transcript.user_id)
+        if transcript.visibility == "private" and _is_analysis_participant_id(participant_roles, transcript.user_id)
     }
     public_transcript_count = sum(1 for transcript in transcripts if transcript.visibility == "public")
     phase_end_count = sum(1 for window in phase_windows if window.get("ended_at"))
@@ -1502,8 +1562,11 @@ def _build_session_summary_markdown(manifest: dict[str, Any]) -> str:
     ]
     if manifest["participants"]:
         for participant in manifest["participants"]:
+            role = participant.get("participant_role") or PARTICIPANT_ROLE
+            included = bool(participant.get("participant_analysis_included", True))
+            scope = "included in participant analysis" if included else "observer diagnostic only"
             lines.append(
-                f"- `{participant['participant_code']}`: system id `{participant['system_id']}`"
+                f"- `{participant['participant_code']}`: system id `{participant['system_id']}`, role `{role}`, {scope}"
             )
     else:
         lines.append("- No real participant ids were found in exported system data.")
@@ -1657,6 +1720,32 @@ def _is_real_participant_id(value: Any) -> bool:
     if not participant_id or participant_id == "0":
         return False
     return participant_id != "admin" and not participant_id.startswith("admin-")
+
+
+def _participant_role_for_id(participant_roles: dict[str, str], participant_id: Any) -> str:
+    if not _is_real_participant_id(participant_id):
+        return ""
+    return normalize_participant_role(participant_roles.get(str(participant_id), PARTICIPANT_ROLE))
+
+
+def _is_observer_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
+    return _participant_role_for_id(participant_roles, participant_id) == OBSERVER_ROLE
+
+
+def _is_analysis_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
+    return _is_real_participant_id(participant_id) and not _is_observer_participant_id(participant_roles, participant_id)
+
+
+def _analysis_participant_count(participants: list[dict[str, Any]]) -> int:
+    return sum(1 for participant in participants if participant.get("participant_analysis_included", True))
+
+
+def _participant_role_counts(participants: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for participant in participants:
+        role = str(participant.get("participant_role") or PARTICIPANT_ROLE)
+        counts[role] = counts.get(role, 0) + 1
+    return counts
 
 
 def _participant_sort_key(value: Any) -> tuple[int, str]:
