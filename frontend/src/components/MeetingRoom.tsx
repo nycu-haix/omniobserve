@@ -2,11 +2,12 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
 import { cn } from "../lib/utils";
@@ -14,7 +15,8 @@ import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type Ta
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
-import { PrivateBoard } from "./private-board/PrivateBoard";
+import { PrivateBoard, type PrivateBoardHandle } from "./private-board/PrivateBoard";
+import { formatUnreadCount, type IdeaBlockUnreadState } from "./private-board/unreadIdeaBlocks";
 import { Button } from "./ui/Button";
 import { ShortcutKey } from "./ui/ShortcutKey";
 
@@ -653,7 +655,7 @@ function SortableLostAtSeaItem({
 			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
-			<span className="min-w-0 flex-1">{item.label}</span>
+			<span className="min-w-0 flex-1 whitespace-normal break-words py-0.5 leading-5">{item.label}</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
@@ -677,7 +679,7 @@ function SortableLostAtSeaItem({
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+			<GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
 }
@@ -878,6 +880,7 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
+	const [privateBoardIdeaBlockUnreadState, setPrivateBoardIdeaBlockUnreadState] = useState<IdeaBlockUnreadState>({ count: 0, latestBlockId: null });
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
@@ -890,6 +893,7 @@ export default function MeetingRoom() {
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
+	const privateBoardRef = useRef<PrivateBoardHandle | null>(null);
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -926,6 +930,7 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1033,6 +1038,10 @@ export default function MeetingRoom() {
 		[hasAudioConnectionError, micMode, startAudioStream]
 	);
 
+	const handlePublicMicActivation = useCallback(() => {
+		void handleMic(getNextMicModeAfterPublicActivation(micMode));
+	}, [handleMic, micMode]);
+
 	useEffect(() => {
 		if (!connectionParticipantId || joinRejectedMessage) {
 			return;
@@ -1063,7 +1072,7 @@ export default function MeetingRoom() {
 
 			if (event.code === "Space") {
 				event.preventDefault();
-				void handleMic(micMode === "public" ? "private" : "public");
+				void handleMic(getNextMicModeAfterPublicActivation(micMode));
 			}
 		};
 
@@ -1235,6 +1244,15 @@ export default function MeetingRoom() {
 		setPrivateBoardWidth(current => clampPrivateBoardWidth(current + direction * 24));
 	};
 
+	const openPrivateBoard = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+	}, []);
+
+	const openUnreadIdeaBlocks = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openLatestUnreadIdeaBlock(), 0);
+	}, []);
+
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
 		setIsJitsiFocused(false);
@@ -1379,6 +1397,9 @@ export default function MeetingRoom() {
 			applyRankingSnapshot(scope, nextRanking);
 		}
 	}, [applyRankingSnapshot, lastMessage]);
+
+	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
+	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
 
 	if (!isParticipantIdValid) {
 		return (
@@ -1568,15 +1589,19 @@ export default function MeetingRoom() {
 					<div className="hidden">
 						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
 							<Button
+								type="button"
 								variant={micMode === "public" ? "destructive" : "outline"}
 								className={cn("gap-2", micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
-								onClick={() => void handleMic("public")}
+								aria-pressed={micMode === "public"}
+								aria-label={publicMicToggleLabel}
+								title={publicMicToggleLabel}
+								onClick={handlePublicMicActivation}
 							>
 								<Mic className="h-4 w-4" />
 								公開麥克風
 								<ShortcutKey label="Space" />
 							</Button>
-							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+							<Button type="button" className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} aria-pressed={micMode === "private"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
 							</Button>
@@ -1601,15 +1626,25 @@ export default function MeetingRoom() {
 					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2.5">
 						<Button
+							type="button"
 							variant={micMode === "public" ? "destructive" : "outline"}
 							className={cn("h-9 gap-2 px-4 text-sm", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
-							onClick={() => void handleMic("public")}
+							aria-pressed={micMode === "public"}
+							aria-label={publicMicToggleLabel}
+							title={publicMicToggleLabel}
+							onClick={handlePublicMicActivation}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
 							<ShortcutKey label="Space" />
 						</Button>
-						<Button className="h-9 gap-2 px-4 text-sm" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button
+							type="button"
+							className="h-9 gap-2 px-4 text-sm"
+							variant={micMode === "private" ? "default" : "outline"}
+							aria-pressed={micMode === "private"}
+							onClick={() => void handleMic("private")}
+						>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
@@ -1712,21 +1747,38 @@ export default function MeetingRoom() {
 					</button>
 				)}
 				{isPrivateBoardCollapsed && (
-					<Button
-						type="button"
-						variant="outline"
-						size="icon"
-						className="absolute -right-2 top-3 z-20 h-8 w-8 shadow-sm"
-						aria-label="展開 Private Board"
-						title="展開 Private Board"
-						aria-expanded="false"
-						onClick={() => setIsPrivateBoardCollapsed(false)}
-					>
-						<ChevronLeft className="h-4 w-4" />
-					</Button>
+					<div className="absolute -right-2 top-3 z-20 grid justify-items-end gap-2">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className="h-8 w-8 shadow-sm"
+							aria-label="展開 Private Board"
+							title="展開 Private Board"
+							aria-expanded="false"
+							onClick={openPrivateBoard}
+						>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						{privateBoardUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardUnreadCount} 個新的 Idea Blocks，開啟最新項目`}
+								title="開啟新的 Idea Blocks"
+								onClick={openUnreadIdeaBlocks}
+							>
+								<Bell className="h-3.5 w-3.5" />
+								{privateBoardUnreadCountLabel}
+							</Button>
+						)}
+					</div>
 				)}
 				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
 					<PrivateBoard
+						ref={privateBoardRef}
 						sessionId={sessionId}
 						participantId={participantId}
 						lastMessage={lastMessage}
@@ -1740,7 +1792,8 @@ export default function MeetingRoom() {
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
 						isCollapsed={isPrivateBoardCollapsed}
-						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
+						onRequestOpen={openPrivateBoard}
+						onIdeaBlockUnreadStateChange={setPrivateBoardIdeaBlockUnreadState}
 					/>
 				</div>
 			</aside>
