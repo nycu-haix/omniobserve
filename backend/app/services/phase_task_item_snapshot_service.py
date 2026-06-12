@@ -4,13 +4,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..config import logger
 from ..models import PhaseTaskItemSnapshot, PhaseTaskItemSnapshotItem, PrivatePhaseTaskItem
 from ..task_config import resolve_task_id
+from .participant_roles import is_observer_role, list_session_participant_roles
 
 ENHANCE_THE_POSTER_TASK_ID = "enhance-the-poster"
 PRIVATE_PHASE_1 = "private_phase_1"
@@ -72,6 +73,7 @@ async def initialize_phase_rankings(
         task_id=task_id,
         from_phase=from_phase,
         to_phase=PRIVATE_PHASE_2,
+        participant_ids=participant_ids,
         force_new=to_phase == PRIVATE_PHASE_2 and from_phase == PRIVATE_PHASE_1,
     )
     ranking_items = serialize_snapshot_ranking_items(snapshot.items)
@@ -128,6 +130,7 @@ async def get_or_create_phase_snapshot(
     task_id: str,
     from_phase: str,
     to_phase: str,
+    participant_ids: list[str] | None = None,
     force_new: bool = False,
 ) -> PhaseTaskItemSnapshot:
     if not force_new:
@@ -158,7 +161,13 @@ async def get_or_create_phase_snapshot(
     db.add(snapshot)
     await db.flush()
 
-    source_items = await load_private_phase_items(db, session_name=session_name, task_id=task_id)
+    participant_roles = await list_session_participant_roles(db, session_name=session_name)
+    source_items = await load_private_phase_items(
+        db,
+        session_name=session_name,
+        task_id=task_id,
+        excluded_participant_ids=_observer_participant_ids(participant_roles),
+    )
     deduplicated_items = deduplicate_private_phase_items(source_items)
     logger.info(
         "phase_snapshot_create_start session_name=%s task_id=%s from_phase=%s to_phase=%s snapshot_id=%s source_item_count=%s deduped_count=%s",
@@ -235,12 +244,17 @@ async def load_private_phase_items(
     *,
     session_name: str,
     task_id: str,
+    participant_ids: list[str] | None = None,
+    excluded_participant_ids: list[str] | None = None,
 ) -> list[PrivatePhaseTaskItem]:
-    result = await db.execute(
+    participant_user_ids = _participant_user_id_filter(participant_ids)
+    excluded_user_ids = set(_participant_user_id_filter(excluded_participant_ids) or [])
+    stmt = (
         select(PrivatePhaseTaskItem)
         .where(
             PrivatePhaseTaskItem.session_name == session_name,
             PrivatePhaseTaskItem.task_id == task_id,
+            PrivatePhaseTaskItem.user_id > 0,
         )
         .order_by(
             PrivatePhaseTaskItem.user_id.asc(),
@@ -248,6 +262,14 @@ async def load_private_phase_items(
             PrivatePhaseTaskItem.id.asc(),
         )
     )
+    if participant_user_ids is not None:
+        if participant_user_ids:
+            stmt = stmt.where(PrivatePhaseTaskItem.user_id.in_(participant_user_ids))
+        else:
+            stmt = stmt.where(false())
+    if excluded_user_ids:
+        stmt = stmt.where(~PrivatePhaseTaskItem.user_id.in_(excluded_user_ids))
+    result = await db.execute(stmt)
     grouped: dict[int, list[PrivatePhaseTaskItem]] = defaultdict(list)
     for item in result.scalars().all():
         grouped[item.user_id].append(item)
@@ -259,6 +281,28 @@ async def load_private_phase_items(
         sum(len(items) for items in grouped.values()),
     )
     return [item for user_items in grouped.values() for item in user_items]
+
+
+def _participant_user_id_filter(participant_ids: list[str] | None) -> list[int] | None:
+    if participant_ids is None:
+        return None
+    user_ids: set[int] = set()
+    for participant_id in participant_ids:
+        try:
+            parsed = int(str(participant_id).strip())
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            user_ids.add(parsed)
+    return sorted(user_ids)
+
+
+def _observer_participant_ids(participant_roles: dict[str, str]) -> list[str]:
+    return sorted(
+        participant_id
+        for participant_id, participant_role in participant_roles.items()
+        if is_observer_role(participant_role)
+    )
 
 
 def deduplicate_private_phase_items(items: list[PrivatePhaseTaskItem]) -> list[PrivatePhaseTaskItem]:

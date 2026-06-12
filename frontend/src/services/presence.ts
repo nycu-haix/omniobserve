@@ -1,8 +1,10 @@
 import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { filterAdminPresenceRows, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import { apiUrl } from "./api";
 
 export interface ParticipantPresence {
 	id: string;
+	participant_role: ParticipantRole;
 	mic_mode: "off" | "public" | "private" | string;
 	audio_connected: boolean;
 	is_speaking?: boolean;
@@ -15,6 +17,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	if (typeof item === "string") {
 		return {
 			id: item,
+			participant_role: "participant",
 			mic_mode: "off",
 			audio_connected: false
 		};
@@ -27,6 +30,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	const participant = item as Record<string, unknown>;
 	return {
 		id: item.id,
+		participant_role: normalizeParticipantRole(participant.participant_role),
 		mic_mode: typeof participant.mic_mode === "string" ? participant.mic_mode : "off",
 		audio_connected: typeof participant.audio_connected === "boolean" ? participant.audio_connected : false,
 		is_speaking: typeof participant.is_speaking === "boolean" ? participant.is_speaking : false,
@@ -34,6 +38,13 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 		client_id: typeof participant.client_id === "string" ? participant.client_id : null,
 		updated_at: typeof participant.updated_at === "string" ? participant.updated_at : null
 	};
+}
+
+export function normalizePresenceParticipantsPayload(payload: { participants?: unknown; participant_ids?: unknown }, options: { includeAdmin?: boolean } = {}): ParticipantPresence[] {
+	const includeAdmin = options.includeAdmin ?? true;
+	const rawParticipants = Array.isArray(payload.participants) ? payload.participants : Array.isArray(payload.participant_ids) ? payload.participant_ids : [];
+	const participants = rawParticipants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null);
+	return includeAdmin ? participants : filterAdminPresenceRows(participants);
 }
 
 export async function fetchSessionPresence(sessionName: string, signal?: AbortSignal): Promise<ParticipantPresence[]> {
@@ -45,11 +56,7 @@ export async function fetchSessionPresence(sessionName: string, signal?: AbortSi
 	}
 
 	const payload = (await response.json()) as { participants?: unknown; participant_ids?: unknown };
-	if (Array.isArray(payload.participants)) {
-		return payload.participants.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null);
-	}
-
-	return Array.isArray(payload.participant_ids) ? payload.participant_ids.map(normalizePresenceParticipant).filter((item): item is ParticipantPresence => item !== null) : [];
+	return normalizePresenceParticipantsPayload(payload);
 }
 
 export async function fetchSessionParticipants(sessionName: string, signal?: AbortSignal) {
