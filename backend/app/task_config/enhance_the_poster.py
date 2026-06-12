@@ -21,18 +21,13 @@ REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
 CUSTOM_DETAIL_ACTION_ID = "custom_detail"
-REPLACE_SLOGAN_LIBRARY_ACTION_ID = "replace_slogan_library"
 REPLACE_IMAGE_LIBRARY_ACTION_ID = "replace_image_library"
-SLOGAN_LIBRARY_COMPONENT_IDS = {
-    "main_title",
-    "subtitle",
-    "description",
-    "cta",
-    "qr_caption",
-    "reminder",
-    "contact_info",
+IMAGE_LIBRARY_COMPONENT_IDS = {
+    "people_icon1",
+    "people_icon2",
+    "activity_icon1",
+    "activity_icon2",
 }
-IMAGE_LIBRARY_COMPONENT_IDS = {"icon"}
 
 TOPIC_DESCRIPTION = """你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，我們將目前的設計交給 reviewer 閱讀，並收集了一些關於資訊清楚度、文字內容與視覺呈現的改善建議。請綜合目前的海報內容與 reviewer feedback，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。
 
@@ -217,109 +212,103 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "main_title",
         "label_zh": "主標題",
         "label_en": "Main title",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "subtitle",
         "label_zh": "副標題",
         "label_en": "Subtitle",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "description",
-        "label_zh": "說明文字",
-        "label_en": "Description",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "id": "description1",
+        "label_zh": "活動說明1",
+        "label_en": "Description 1",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "date",
-        "label_zh": "日期時間",
-        "label_en": "Date & Time",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "id": "description2",
+        "label_zh": "活動說明2",
+        "label_en": "Description 2",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "location",
-        "label_zh": "地點",
-        "label_en": "Location",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "id": "people_icon1",
+        "label_zh": "人物圖示1",
+        "label_en": "People Icon 1",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", REPLACE_IMAGE_LIBRARY_ACTION_ID, "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "cta",
-        "label_zh": "行動呼籲",
-        "label_en": "CTA",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "id": "people_icon2",
+        "label_zh": "人物圖示2",
+        "label_en": "People Icon 2",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", REPLACE_IMAGE_LIBRARY_ACTION_ID, "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "qr_code",
         "label_zh": "QR 碼",
-        "label_en": "QR code", 
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "transparency"],
+        "label_en": "QR code",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "qr_caption",
         "label_zh": "QR 碼說明",
         "label_en": "QR caption",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
-    },
-    {
-        "id": "organizer_list",
-        "label_zh": "協辦單位",
-        "label_en": "Organizer list",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
-    },
-    {
-        "id": "reminder",
-        "label_zh": "注意事項",
-        "label_en": "Reminder",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "contact_info",
-        "label_zh": "聯絡資訊",
-        "label_en": "Contact info",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency"],
+        "label_zh": "參與資訊",
+        "label_en": "Participation info",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "icon",
-        "label_zh": "人物圖示",
-        "label_en": "Icon",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "replace1", "replace2", "transparency"],
+        "id": "organizer_list",
+        "label_zh": "主辦單位",
+        "label_en": "Organizer list",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "beach_background",
-        "label_zh": "海灘背景圖",
-        "label_en": "Beach background",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "transparency"],
+        "id": "reminder",
+        "label_zh": "指導單位",
+        "label_en": "Advising organization",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
-        "id": "blue_block",
-        "label_zh": "下方藍色區塊",
-        "label_en": "Blue block",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "transparency"],
+        "id": "event_info",
+        "label_zh": "響應活動",
+        "label_en": "Participating event",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
+    },
+    {
+        "id": "activity_icon1",
+        "label_zh": "活動圖示1",
+        "label_en": "Activity Icon 1",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", REPLACE_IMAGE_LIBRARY_ACTION_ID, "transparency", CUSTOM_DETAIL_ACTION_ID],
+    },
+    {
+        "id": "activity_icon2",
+        "label_zh": "活動圖示2",
+        "label_en": "Activity Icon 2",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", REPLACE_IMAGE_LIBRARY_ACTION_ID, "transparency", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "qr_code_group",
         "label_zh": "QR 碼+說明",
         "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "title_group",
-        "label_zh": "主標題+副標題+說明",
+        "label_zh": "主標題+副標題",
         "label_en": "Title group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "info_group2",
-        "label_zh": "日期時間+地點+行動呼籲",
-        "label_en": "Date, location, and CTA group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
-    },
-    {
-        "id": "info_group",
-        "label_zh": "下方資訊",
-        "label_en": "Info group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble"],
+        "label_zh": "主辦單位+指導單位+響應活動",
+        "label_en": "Organizer, advising organization, and participating event group",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble", CUSTOM_DETAIL_ACTION_ID],
     },
 ]
 
@@ -329,18 +318,6 @@ PHASE1_ACTION_ITEMS = [
         "label_zh": "去除",
         "label_en": "Remove",
         "template_zh": "去除「{component}」",
-    },
-    {
-        "id": "replace1",
-        "label_zh": "替換成人物圖示1",
-        "label_en": "Replace1",
-        "template_zh": "「{component}」替換成人物圖示1",
-    },
-    {
-        "id": "replace2",
-        "label_zh": "替換成人物圖示2",
-        "label_en": "Replace2",
-        "template_zh": "「{component}」替換成人物圖示2",
     },
     {
         "id": "move",
@@ -427,20 +404,6 @@ PHASE1_ACTION_ITEMS = [
         "template_zh": "將「{component}」置中對齊",
     },
     {
-        "id": REPLACE_SLOGAN_LIBRARY_ACTION_ID,
-        "label_zh": "替換成 Slogan",
-        "label_en": "Replace with slogan",
-        "description_zh": "輸入 Canva Slogan Library 的編號，將這個文字元件替換成指定 slogan。",
-        "template_zh": "將「{component}」替換成 Slogan {detail}",
-        "requires_detail": True,
-        "detail_input": {
-            "kind": "library_number",
-            "label_zh": "Slogan 編號",
-            "placeholder_zh": "例如：7",
-            "min": 1,
-        },
-    },
-    {
         "id": REPLACE_IMAGE_LIBRARY_ACTION_ID,
         "label_zh": "替換成圖片",
         "label_en": "Replace with image",
@@ -468,8 +431,6 @@ for component in PHASE1_POSTER_COMPONENTS:
     allowed_action_ids = component.get("allowed_action_ids")
     if not isinstance(allowed_action_ids, list):
         continue
-    if component.get("id") in SLOGAN_LIBRARY_COMPONENT_IDS and REPLACE_SLOGAN_LIBRARY_ACTION_ID not in allowed_action_ids:
-        allowed_action_ids.append(REPLACE_SLOGAN_LIBRARY_ACTION_ID)
     if component.get("id") in IMAGE_LIBRARY_COMPONENT_IDS and REPLACE_IMAGE_LIBRARY_ACTION_ID not in allowed_action_ids:
         allowed_action_ids.append(REPLACE_IMAGE_LIBRARY_ACTION_ID)
     if CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
