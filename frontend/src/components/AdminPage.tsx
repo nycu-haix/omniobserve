@@ -1,7 +1,28 @@
-import { AlertCircle, ArrowRight, Check, ClipboardList, Clock, Copy, Download, FileText, Lightbulb, Link2, MessageSquare, Radio, RefreshCw, Search, Undo2, Users, X } from "lucide-react";
+import {
+	AlertCircle,
+	ArrowRight,
+	Check,
+	ClipboardList,
+	Clock,
+	Copy,
+	Download,
+	Eye,
+	FileText,
+	Lightbulb,
+	Link2,
+	MessageSquare,
+	Radio,
+	RefreshCw,
+	Search,
+	Undo2,
+	UserCheck,
+	Users,
+	X
+} from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
+import { isObserverRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
 	DEFAULT_SESSION_PHASE,
 	DEFAULT_SESSION_PHASE_OPTIONS,
@@ -204,6 +225,14 @@ const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
 	same: "border-green-700/30 bg-green-100 text-green-900",
 	different: "border-yellow-700/30 bg-yellow-100 text-yellow-900",
 	mixed: "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
+};
+const PARTICIPANT_ROLE_LABELS: Record<ParticipantRole, string> = {
+	participant: "Participant",
+	observer: "Observer"
+};
+const PARTICIPANT_ROLE_BADGE_CLASSES: Record<ParticipantRole, string> = {
+	participant: "border-emerald-700/20 bg-emerald-50 text-emerald-800",
+	observer: "border-amber-700/25 bg-amber-50 text-amber-900"
 };
 
 function getAdminAvailableLayoutWidth() {
@@ -437,6 +466,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	if (typeof item === "string") {
 		return {
 			id: item,
+			participant_role: "participant",
 			mic_mode: "off",
 			audio_connected: false
 		};
@@ -449,6 +479,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	const participant = item as Record<string, unknown>;
 	return {
 		id: item.id,
+		participant_role: normalizeParticipantRole(participant.participant_role),
 		mic_mode: typeof participant.mic_mode === "string" ? participant.mic_mode : "off",
 		audio_connected: typeof participant.audio_connected === "boolean" ? participant.audio_connected : false,
 		is_speaking: typeof participant.is_speaking === "boolean" ? participant.is_speaking : false,
@@ -838,6 +869,8 @@ export function AdminPage() {
 	const [isExportingTaskPackage, setIsExportingTaskPackage] = useState(false);
 	const [taskPackageError, setTaskPackageError] = useState<string | null>(null);
 	const [lastTaskPackageDownloadedAt, setLastTaskPackageDownloadedAt] = useState<string | null>(null);
+	const [roleUpdatingParticipantId, setRoleUpdatingParticipantId] = useState<string | null>(null);
+	const [participantRoleError, setParticipantRoleError] = useState<string | null>(null);
 	const [latestTranscripts, setLatestTranscripts] = useState<Record<string, LatestParticipantTranscript>>({});
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [phase1Components, setPhase1Components] = useState<Phase1BuilderOption[]>([]);
@@ -918,6 +951,16 @@ export function AdminPage() {
 		});
 		return nextParticipantNameById;
 	}, [participants]);
+	const participantRoleById = useMemo(() => {
+		const nextParticipantRoleById = new Map<string, ParticipantRole>();
+		participants.forEach(participant => {
+			nextParticipantRoleById.set(participant.id, normalizeParticipantRole(participant.participant_role));
+		});
+		return nextParticipantRoleById;
+	}, [participants]);
+	const observerCount = useMemo(() => participants.filter(participant => isObserverRole(participant.participant_role)).length, [participants]);
+	const analysisParticipantCount = participants.length - observerCount;
+	const isObserverParticipantId = useCallback((participantId: string | number | null | undefined) => isObserverRole(participantRoleById.get(String(participantId ?? ""))), [participantRoleById]);
 	const getParticipantLabel = useCallback(
 		(participantId: string | number | null | undefined) => {
 			const normalizedParticipantId = participantId == null ? "" : String(participantId);
@@ -1331,7 +1374,7 @@ export function AdminPage() {
 	const publicRankingItems = publicRankingSnapshot ? normalizeRankingItemIds(publicRankingSnapshot.items, defaultRankingItemIds) : [];
 	const privateRankingMap: Record<string, RankingSnapshot> = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
 	const privateRankingEntries = Object.entries(privateRankingMap)
-		.filter(([participantId]) => !isAdminParticipantId(participantId))
+		.filter(([participantId]) => !isAdminParticipantId(participantId) && !isObserverParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
 	const privateRankingColumns = privateRankingEntries.map(([participantId, ranking]) => {
 		const items = normalizeRankingItemIds(ranking.items, defaultRankingItemIds);
@@ -1415,6 +1458,33 @@ export function AdminPage() {
 			setTaskPackageError(error instanceof Error ? error.message : String(error));
 		} finally {
 			setIsExportingTaskPackage(false);
+		}
+	};
+
+	const setParticipantRole = async (participant: ParticipantPresence, nextRole: ParticipantRole) => {
+		if (roleUpdatingParticipantId !== null || normalizeParticipantRole(participant.participant_role) === nextRole) {
+			return;
+		}
+
+		setRoleUpdatingParticipantId(participant.id);
+		setParticipantRoleError(null);
+		try {
+			const response = await fetch(buildSessionApiUrl(roomName, `/participants/${encodeURIComponent(participant.id)}/role`), {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ role: nextRole })
+			});
+			if (!response.ok) {
+				const detail = await response.text();
+				throw new Error(detail || `Failed to update participant role (${response.status})`);
+			}
+			const payload = (await response.json()) as { participant_role?: unknown };
+			const confirmedRole = normalizeParticipantRole(payload.participant_role ?? nextRole);
+			setParticipants(current => current.map(item => (item.id === participant.id ? { ...item, participant_role: confirmedRole } : item)));
+		} catch (error) {
+			setParticipantRoleError(error instanceof Error ? error.message : String(error));
+		} finally {
+			setRoleUpdatingParticipantId(null);
 		}
 	};
 
@@ -1735,7 +1805,11 @@ export function AdminPage() {
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Participants</span>
-								<span className="font-medium">{participants.length}</span>
+								<span className="font-medium">{analysisParticipantCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Observers</span>
+								<span className="font-medium">{observerCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Admin participant</span>
@@ -1884,21 +1958,46 @@ export function AdminPage() {
 							<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 							<h2 className="text-sm font-semibold">Presence</h2>
 						</header>
+						{participantRoleError && <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{participantRoleError}</p>}
 						{participants.length > 0 ? (
 							<div className="grid gap-2">
 								{participants.map(participant => (
 									<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm" title={`Participant ID ${participant.id}`}>
 										{(() => {
 											const latestTranscript = latestTranscripts[participant.id];
+											const participantRole = normalizeParticipantRole(participant.participant_role);
+											const isObserver = participantRole === "observer";
+											const nextRole: ParticipantRole = isObserver ? "participant" : "observer";
+											const isUpdatingRole = roleUpdatingParticipantId === participant.id;
 											return (
 												<>
 													<div className="flex items-center justify-between gap-3">
 														<span className="min-w-0 truncate font-medium">{getParticipantLabel(participant.id)}</span>
-														<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
+														<div className="flex shrink-0 items-center gap-2">
+															<Badge variant="outline" className={cn("h-6 px-2 text-[10px]", PARTICIPANT_ROLE_BADGE_CLASSES[participantRole])}>
+																{PARTICIPANT_ROLE_LABELS[participantRole]}
+															</Badge>
+															<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
+														</div>
 													</div>
 													<div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
 														<span className="truncate">ID {participant.id}</span>
 														<span className="font-medium">{participant.audio_connected ? participant.mic_mode : "mic off"}</span>
+													</div>
+													<div className="mt-1 flex items-center justify-between gap-2">
+														<span className="min-w-0 truncate text-xs text-muted-foreground">{isObserver ? "Excluded from rankings" : "Included in rankings"}</span>
+														<Button
+															type="button"
+															size="sm"
+															variant="outline"
+															className="h-7 shrink-0 gap-1 px-2 text-xs"
+															onClick={() => void setParticipantRole(participant, nextRole)}
+															disabled={roleUpdatingParticipantId !== null}
+															aria-label={`${isObserver ? "Mark participant" : "Mark observer"} ${getParticipantLabel(participant.id)}`}
+														>
+															{isObserver ? <UserCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}
+															{isUpdatingRole ? "Updating" : isObserver ? "Participant" : "Observer"}
+														</Button>
 													</div>
 													{latestTranscript && (
 														<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
@@ -1928,7 +2027,11 @@ export function AdminPage() {
 						<div className="grid gap-3 text-sm">
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Participants</span>
-								<span className="font-medium">{participants.length}</span>
+								<span className="font-medium">{analysisParticipantCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Observers</span>
+								<span className="font-medium">{observerCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Transcripts</span>

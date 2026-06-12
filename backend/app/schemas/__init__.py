@@ -31,6 +31,7 @@ from .phase_task_item_snapshot import (
     PhaseTaskItemSnapshotItemResponse,
     PhaseTaskItemSnapshotResponse,
 )
+from .participant_role import ParticipantRoleResponse, ParticipantRoleUpdateRequest
 from .poster_idea_block_task_item import (
     PosterIdeaBlockTaskItemResponse,
     PosterIdeaBlockTaskItemsForIdeaBlockResponse,
@@ -84,6 +85,8 @@ __all__ = [
     "EffectiveRankingStateResponse",
     "PhaseTaskItemSnapshotItemResponse",
     "PhaseTaskItemSnapshotResponse",
+    "ParticipantRoleResponse",
+    "ParticipantRoleUpdateRequest",
     "PosterIdeaBlockTaskItemResponse",
     "PosterIdeaBlockTaskItemsForIdeaBlockResponse",
     "PrivatePhaseTaskItemCreate",
