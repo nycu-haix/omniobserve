@@ -90,6 +90,14 @@ def _is_participant_ranking_subject(session_id: str, participant_id: str | None)
     return not is_cached_observer(session_id, str(participant_id or ""))
 
 
+def _phase_snapshot_participant_ids(participant_ids: list[str]) -> list[str]:
+    return [
+        participant_id
+        for participant_id in participant_ids
+        if not _is_admin_participant_id(participant_id)
+    ]
+
+
 class ConnectionManager:
     def __init__(self) -> None:
         self.connections: dict[str, dict[str, WebSocket]] = defaultdict(dict)
@@ -1620,11 +1628,7 @@ async def handle_admin_websocket(
                                     to_phase=new_phase,
                                     condition=session_cue_conditions[session_id],
                                     cue_enabled=is_similarity_cue_enabled(session_id),
-                                    participant_ids=[
-                                        participant_id
-                                        for participant_id in participant_ids
-                                        if _is_participant_ranking_subject(session_id, participant_id)
-                                    ],
+                                    participant_ids=_phase_snapshot_participant_ids(participant_ids),
                                     private_ranking_states=private_ranking_state[session_id],
                                     public_ranking_state=public_ranking_state.get(session_id),
                                     ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
