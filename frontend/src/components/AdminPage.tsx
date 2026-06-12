@@ -203,9 +203,9 @@ const API_REFRESH_INTERVAL_MS = 5000;
 const ADMIN_PARTICIPANT_ID = "admin";
 const ADMIN_PARTICIPANT_ID_PREFIX = `${ADMIN_PARTICIPANT_ID}-`;
 const PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS = 5000;
-const DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH = 320;
+const DEFAULT_ADMIN_LEFT_SIDEBAR_WIDTH = 360;
 const DEFAULT_ADMIN_RIGHT_SIDEBAR_WIDTH = 360;
-const MIN_ADMIN_LEFT_SIDEBAR_WIDTH = 280;
+const MIN_ADMIN_LEFT_SIDEBAR_WIDTH = 360;
 const MIN_ADMIN_RIGHT_SIDEBAR_WIDTH = 320;
 const MIN_ADMIN_CENTER_COLUMN_WIDTH = 520;
 const ADMIN_LEFT_SIDEBAR_WIDTH_STORAGE_KEY = "omni.admin.leftSidebarWidth";
@@ -1960,9 +1960,9 @@ export function AdminPage() {
 						</header>
 						{participantRoleError && <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs leading-5 text-destructive">{participantRoleError}</p>}
 						{participants.length > 0 ? (
-							<div className="grid gap-2">
+							<div className="grid min-w-[296px] gap-2">
 								{participants.map(participant => (
-									<div key={participant.id} className="grid gap-1 rounded-lg border bg-background px-3 py-2 text-sm" title={`Participant ID ${participant.id}`}>
+									<div key={participant.id} className="grid min-w-[296px] gap-1 rounded-lg border bg-background px-3 py-2 text-sm" title={`Participant ID ${participant.id}`}>
 										{(() => {
 											const latestTranscript = latestTranscripts[participant.id];
 											const participantRole = normalizeParticipantRole(participant.participant_role);
@@ -1978,7 +1978,7 @@ export function AdminPage() {
 															<span>{participant.audio_connected ? participant.mic_mode : "mic off"}</span>
 														</div>
 													</div>
-													<div className="mt-2 grid grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label={`Role for ${getParticipantLabel(participant.id)}`}>
+													<div className="mt-2 grid min-w-[264px] grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label={`Role for ${getParticipantLabel(participant.id)}`}>
 														{(["participant", "observer"] as const).map(role => {
 															const isSelected = participantRole === role;
 															return (
@@ -1989,7 +1989,7 @@ export function AdminPage() {
 																	aria-checked={isSelected}
 																	aria-label={`Mark ${role} ${getParticipantLabel(participant.id)}`}
 																	className={cn(
-																		"inline-flex h-8 min-w-0 items-center justify-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+																		"inline-flex h-8 min-w-[126px] items-center justify-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 																		isSelected ? PARTICIPANT_ROLE_SEGMENT_CLASSES[role] : "text-muted-foreground hover:bg-background hover:text-foreground",
 																		roleUpdatingParticipantId === participant.id && "opacity-60"
 																	)}
