@@ -12,6 +12,7 @@ from ..schemas import ApiError, IdeaBlockCreate, IdeaBlockUpdate
 from ..task_config.registry import normalize_task_name
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
+from .idea_block_generation_limits import bound_generated_idea_blocks
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
@@ -32,7 +33,9 @@ async def create_idea_block_from_content(
     if not normalized_content:
         raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
 
-    generated_blocks = await build_idea_blocks_with_llm(normalized_content, session_name=session_name, task_name=task_name)
+    generated_blocks = bound_generated_idea_blocks(
+        await build_idea_blocks_with_llm(normalized_content, session_name=session_name, task_name=task_name)
+    )
     if not generated_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
 

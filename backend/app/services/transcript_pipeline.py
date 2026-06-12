@@ -14,9 +14,13 @@ from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
 from ..task_config import resolve_task_id
 from .embedding_service import create_text_embedding
-from .idea_blocks import build_idea_blocks_with_llm
 from .idea_block_deduplication import find_duplicate_idea_block
+from .idea_block_generation_limits import (
+    MAX_IDEA_BLOCKS_PER_TRANSCRIPT_BATCH,
+    deduplicate_generated_idea_blocks,
+)
 from .idea_block_similarity_context import attach_similarity_reason_flags
+from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
@@ -150,12 +154,21 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(transcript_text),
         )
-        generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
+        raw_generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
+        deduplicated_generated_blocks = deduplicate_generated_idea_blocks(raw_generated_blocks)
+        generated_blocks = deduplicated_generated_blocks[:MAX_IDEA_BLOCKS_PER_TRANSCRIPT_BATCH]
         logger.info(
-            "pipeline_idea_llm_done session_name=%s user_id=%s count=%s",
+            (
+                "pipeline_idea_llm_done session_name=%s user_id=%s visibility=%s "
+                "generated=%s displayed=%s deduped=%s capped=%s"
+            ),
             session_name,
             user_id,
+            visibility.value,
+            len(raw_generated_blocks),
             len(generated_blocks),
+            max(0, len(raw_generated_blocks) - len(deduplicated_generated_blocks)),
+            max(0, len(deduplicated_generated_blocks) - len(generated_blocks)),
         )
         if generated_blocks and on_provisional_idea_blocks_update is not None:
             provisional_idea_blocks = serialize_provisional_idea_blocks(
