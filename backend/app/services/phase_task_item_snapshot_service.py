@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from ..config import logger
 from ..models import PhaseTaskItemSnapshot, PhaseTaskItemSnapshotItem, PrivatePhaseTaskItem
 from ..task_config import resolve_task_id
+from .participant_roles import is_observer_role, list_session_participant_roles
 
 ENHANCE_THE_POSTER_TASK_ID = "enhance-the-poster"
 PRIVATE_PHASE_1 = "private_phase_1"
@@ -160,11 +161,12 @@ async def get_or_create_phase_snapshot(
     db.add(snapshot)
     await db.flush()
 
+    participant_roles = await list_session_participant_roles(db, session_name=session_name)
     source_items = await load_private_phase_items(
         db,
         session_name=session_name,
         task_id=task_id,
-        participant_ids=participant_ids,
+        excluded_participant_ids=_observer_participant_ids(participant_roles),
     )
     deduplicated_items = deduplicate_private_phase_items(source_items)
     logger.info(
@@ -243,13 +245,16 @@ async def load_private_phase_items(
     session_name: str,
     task_id: str,
     participant_ids: list[str] | None = None,
+    excluded_participant_ids: list[str] | None = None,
 ) -> list[PrivatePhaseTaskItem]:
     participant_user_ids = _participant_user_id_filter(participant_ids)
+    excluded_user_ids = set(_participant_user_id_filter(excluded_participant_ids) or [])
     stmt = (
         select(PrivatePhaseTaskItem)
         .where(
             PrivatePhaseTaskItem.session_name == session_name,
             PrivatePhaseTaskItem.task_id == task_id,
+            PrivatePhaseTaskItem.user_id > 0,
         )
         .order_by(
             PrivatePhaseTaskItem.user_id.asc(),
@@ -262,6 +267,8 @@ async def load_private_phase_items(
             stmt = stmt.where(PrivatePhaseTaskItem.user_id.in_(participant_user_ids))
         else:
             stmt = stmt.where(false())
+    if excluded_user_ids:
+        stmt = stmt.where(~PrivatePhaseTaskItem.user_id.in_(excluded_user_ids))
     result = await db.execute(stmt)
     grouped: dict[int, list[PrivatePhaseTaskItem]] = defaultdict(list)
     for item in result.scalars().all():
@@ -282,10 +289,20 @@ def _participant_user_id_filter(participant_ids: list[str] | None) -> list[int] 
     user_ids: set[int] = set()
     for participant_id in participant_ids:
         try:
-            user_ids.add(int(str(participant_id)))
+            parsed = int(str(participant_id).strip())
         except (TypeError, ValueError):
             continue
+        if parsed > 0:
+            user_ids.add(parsed)
     return sorted(user_ids)
+
+
+def _observer_participant_ids(participant_roles: dict[str, str]) -> list[str]:
+    return sorted(
+        participant_id
+        for participant_id, participant_role in participant_roles.items()
+        if is_observer_role(participant_role)
+    )
 
 
 def deduplicate_private_phase_items(items: list[PrivatePhaseTaskItem]) -> list[PrivatePhaseTaskItem]:
