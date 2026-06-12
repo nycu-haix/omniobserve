@@ -39,14 +39,14 @@ class ParticipantRoleTests(unittest.TestCase):
         snapshot = SimpleNamespace(
             scope="private",
             participant_id="7",
-            phase="initial",
+            phase="private_phase_2",
             subject_type="participant",
             subject_id="7",
         )
 
         self.assertEqual(
             _snapshot_subject_token(context, snapshot, {"7": "observer"}),
-            "observer_G2P7",
+            "observer_G2P7_private_phase_2",
         )
 
     def test_observer_is_kept_for_phase_snapshot_diagnostics(self) -> None:
@@ -54,11 +54,12 @@ class ParticipantRoleTests(unittest.TestCase):
         sync_participant_roles(session_name, {"1": "observer", "2": "participant"})
 
         self.assertEqual(
-            _phase_snapshot_participant_ids(["1", "2", "admin", "admin-reviewer"]),
+            _phase_snapshot_participant_ids(["1", "2", "admin", "admin-reviewer", "observer"]),
             ["1", "2"],
         )
         self.assertFalse(_is_participant_ranking_subject(session_name, "1"))
         self.assertTrue(_is_participant_ranking_subject(session_name, "2"))
+        self.assertFalse(_is_participant_ranking_subject(session_name, "observer"))
 
     def test_phase_snapshot_item_catalog_filters_to_analysis_participants(self) -> None:
         self.assertEqual(_participant_user_id_filter(["2", "admin", "observer", "1"]), [1, 2])
