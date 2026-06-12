@@ -1087,7 +1087,7 @@ def _snapshot_subject_token(context: ExportContext, snapshot: RankingPhaseSnapsh
     subject_id = snapshot.participant_id or snapshot.subject_id
     subject_token = _participant_code(context.group_id, subject_id)
     if snapshot.scope == "private" and _is_observer_participant_id(participant_roles or {}, subject_id):
-        return f"observer_{subject_token}"
+        return f"observer_{subject_token}_{_file_token(snapshot.phase)}"
     return subject_token
 
 

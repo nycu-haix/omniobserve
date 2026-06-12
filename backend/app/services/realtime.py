@@ -84,8 +84,13 @@ def _is_admin_participant_id(participant_id: str | None) -> bool:
     )
 
 
+def _is_real_participant_id(participant_id: str | None) -> bool:
+    participant_text = str(participant_id or "").strip()
+    return bool(participant_text) and participant_text != "0" and participant_text.isdigit()
+
+
 def _is_participant_ranking_subject(session_id: str, participant_id: str | None) -> bool:
-    if _is_admin_participant_id(participant_id):
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
         return False
     return not is_cached_observer(session_id, str(participant_id or ""))
 
@@ -94,7 +99,7 @@ def _phase_snapshot_participant_ids(participant_ids: list[str]) -> list[str]:
     return [
         participant_id
         for participant_id in participant_ids
-        if not _is_admin_participant_id(participant_id)
+        if not _is_admin_participant_id(participant_id) and _is_real_participant_id(participant_id)
     ]
 
 
