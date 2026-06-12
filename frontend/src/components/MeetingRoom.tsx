@@ -932,7 +932,6 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
-	const micModeStatusLabel = micMode === "public" ? "目前：公開發言" : "目前：悄悄話";
 	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
@@ -1605,9 +1604,6 @@ export default function MeetingRoom() {
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
-						<span className="text-xs font-medium text-muted-foreground" role="status" aria-live="polite">
-							{micModeStatusLabel}
-						</span>
 					</div>
 					{hasAudioConnectionError && (
 						<AlertCircle className="absolute right-24 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
