@@ -16,8 +16,8 @@ class TaskItemConfig(TypedDict):
 TASK_ID = "enhance-the-poster"
 TASK_TITLE = "Enhance the Poster"
 TEMPLATE_DESCRIPTION = "針對淨灘活動招募海報，建立並排序優先改善的 task items。"
-REFERENCE_IMAGE_SRC = "/task-assets/beach-cleanup-poster.png"
-REFERENCE_IMAGE_ALT = "淨灘活動招募海報"
+REFERENCE_IMAGE_SRC = "/task-assets/enhance-poster-task-brief-page-3.png"
+REFERENCE_IMAGE_ALT = "2026 NYCU 世界淨灘日南寮海岸淨灘行動海報草稿"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
 CUSTOM_DETAIL_ACTION_ID = "custom_detail"
@@ -485,14 +485,26 @@ LLM_TOPIC_DESCRIPTION = f"""{TOPIC_DESCRIPTION}
 {chr(10).join(item["label_zh"] for item in TASK_ITEMS)}
 """
 
-TASK_TOPIC_DETAIL = (
-    "你們正在檢視一張淨灘活動招募海報初稿，並綜合 reviewer feedback 改善資訊清楚度、文字內容與視覺呈現。"
-    "Canva 材料包含初版海報、任務說明與需求、reviewer feedback 摘要、圖床、可替換的文字與 slogan library，以及海報元件和改善動作的 library。"
-    "Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將最應該優先改善的項目排在前面。"
-    "Private Phase 2 與 Public Phase 只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。Public Phase 每位參與者請至少公開發言兩次。"
-    "建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、"
-    "視覺層次是否有效，以及資訊是否足以讓人安心參與。"
-)
+TASK_TOPIC_DETAIL = """每年九月第三個星期六為 International Coastal Cleanup® 世界淨灘日。配合今年的世界淨灘日活動，陽明交大永續發展暨社會責任推動辦公室將主辦「2026 NYCU 世界淨灘日｜南寮海岸淨灘行動」，並由新竹市政府贊助。
+
+想像你剛加入活動宣傳組，目前的任務是協助修改活動宣傳海報。目前你所看到的是主辦單位參考過去相關活動宣傳素材所製作的第一版設計稿。然而，主辦單位認為目前版本在資訊傳達與宣傳效果方面仍有改善空間，因此邀請了五位不同背景的人士提供修改建議。你的任務是閱讀這些回饋意見，並規劃後續的海報修改方向。
+
+在評估各項建議時，請記住最終海報必須同時達成三項目標。第一，清楚傳達活動資訊；第二，提高 NYCU 學生、教職員工的參與意願；第三，維持良好的視覺設計品質，讓海報看起來專業、清楚，並具有活動本身的特色。
+
+這份海報必須要包含以下內容：
+- 標題
+- 副標題
+- Call for action
+- 活動日期
+- 兩個場次的
+    - 時間長度
+    - 活動地點
+    - 接駁車發車時間與集合地點
+- 主辦單位或相關單位資訊
+- 至少一張與活動相關的圖片
+- 背景不得留白，必須使用背景顏色或背景圖像
+- 海報中必須使用 NYCU 藍色作為其中一種視覺元素
+- 設計者可自行決定字型、排版方式、圖片使用方式與視覺風格"""
 
 SIMILARITY_TASK_CONTEXT = (
     "參與者正在針對淨灘活動招募海報建立改善項目，並在後續階段排序前 15 個最重要的改善項目。分析必須基於提升海報招募效果的目標：\n"
@@ -501,6 +513,10 @@ SIMILARITY_TASK_CONTEXT = (
     + "。"
 )
 
+TASK_INSTRUCTIONS_LAYOUT = {
+    "type": "leaf",
+    "content": "task-instructions",
+}
 PHASE1_TASK_ITEM_BUILDER_LAYOUT = {
     "type": "leaf",
     "content": "phase-task-items",
@@ -508,6 +524,20 @@ PHASE1_TASK_ITEM_BUILDER_LAYOUT = {
 PRIVATE_RANKING_LAYOUT = {
     "type": "leaf",
     "content": "private-ranking",
+}
+PRIVATE_PHASE_1_WITH_INSTRUCTIONS_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 38,
+    "first": TASK_INSTRUCTIONS_LAYOUT,
+    "second": PHASE1_TASK_ITEM_BUILDER_LAYOUT,
+}
+PRIVATE_PHASE_2_WITH_INSTRUCTIONS_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 38,
+    "first": TASK_INSTRUCTIONS_LAYOUT,
+    "second": PRIVATE_RANKING_LAYOUT,
 }
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
@@ -518,8 +548,8 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
 }
 
 TASK_PHASES = [
-    {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PHASE1_TASK_ITEM_BUILDER_LAYOUT},
-    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_RANKING_LAYOUT},
+    {"id": "private_phase_1", "label": "Private Phase 1", "default_layout": PRIVATE_PHASE_1_WITH_INSTRUCTIONS_LAYOUT},
+    {"id": "private_phase_2", "label": "Private Phase 2", "default_layout": PRIVATE_PHASE_2_WITH_INSTRUCTIONS_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
     {"id": "reflect", "label": "Reflect Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
 ]

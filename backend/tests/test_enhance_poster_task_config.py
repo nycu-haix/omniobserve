@@ -5,6 +5,9 @@ from app.task_config.enhance_the_poster import (
     CUSTOM_DETAIL_ACTION_ID,
     PHASE1_ACTION_ITEMS,
     PHASE1_POSTER_COMPONENTS,
+    REFERENCE_IMAGE_SRC,
+    TASK_PHASES,
+    TASK_TOPIC_DETAIL,
 )
 
 
@@ -27,6 +30,21 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertIn("move", background["allowed_action_ids"])
         self.assertIn("transparency", background["allowed_action_ids"])
         self.assertIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
+
+    def test_private_phases_show_task_instructions_first(self) -> None:
+        phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
+
+        for phase_id in ("private_phase_1", "private_phase_2"):
+            with self.subTest(phase_id=phase_id):
+                layout = phases_by_id[phase_id]["default_layout"]
+
+                self.assertEqual(layout["type"], "split")
+                self.assertEqual(layout["first"], {"type": "leaf", "content": "task-instructions"})
+
+    def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
+        self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png")
+        self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
+        self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
 
 
 if __name__ == "__main__":
