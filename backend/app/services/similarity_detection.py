@@ -10,6 +10,7 @@ from ..clients import openai_client
 from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, PosterIdeaBlockTaskItem, Similarity, TaskItem
 from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session, resolve_task_id
+from .pipeline_latency import record_similarity_stage_event, stage_started
 from .similarity_notifications import notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
@@ -116,9 +117,9 @@ If no candidate has a compatible ranking stance:
 """.strip()
 
 
-async def trigger_similarity_detection(idea_block_id: int, db: AsyncSession) -> None:
+async def trigger_similarity_detection(idea_block_id: int, db: AsyncSession, *, pipeline_run_id: str | None = None) -> None:
     try:
-        await _run_similarity_detection(idea_block_id, db)
+        await _run_similarity_detection(idea_block_id, db, pipeline_run_id=pipeline_run_id)
     except Exception as exc:
         logger.exception(
             "similarity_detection_failed idea_block_id=%s error_type=%s error=%s",
@@ -129,7 +130,7 @@ async def trigger_similarity_detection(idea_block_id: int, db: AsyncSession) -> 
         await db.rollback()
 
 
-async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> None:
+async def _run_similarity_detection(idea_block_id: int, db: AsyncSession, *, pipeline_run_id: str | None = None) -> None:
     idea_block = await db.get(IdeaBlock, idea_block_id)
     if idea_block is None:
         logger.info("similarity_detection_no_match idea_block_id=%s reason=%s", idea_block_id, "Idea block not found")
@@ -164,7 +165,17 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         if not component_ids:
             await _clear_similarity_for_idea_block(idea_block, "No poster component mappings", db)
             return
+        same_item_started = stage_started()
         same_item_blocks = await _find_same_component_blocks(idea_block, component_ids, db)
+        await record_similarity_stage_event(
+            db,
+            pipeline_run_id=pipeline_run_id,
+            idea_block=idea_block,
+            stage="similarity_same_item_query",
+            started_perf=same_item_started,
+            candidate_count=len(same_item_blocks),
+            metadata={"source": "poster_component", "component_count": len(component_ids)},
+        )
     else:
         task_item_ids = await _get_task_item_ids(idea_block.id, db)
         logger.info(
@@ -176,7 +187,17 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         if not task_item_ids:
             await _clear_similarity_for_idea_block(idea_block, "No task items", db)
             return
+        same_item_started = stage_started()
         same_item_blocks = await _find_same_item_blocks(idea_block, task_item_ids, db)
+        await record_similarity_stage_event(
+            db,
+            pipeline_run_id=pipeline_run_id,
+            idea_block=idea_block,
+            stage="similarity_same_item_query",
+            started_perf=same_item_started,
+            candidate_count=len(same_item_blocks),
+            metadata={"source": "task_item", "task_item_count": len(task_item_ids)},
+        )
 
     same_item_ids = [block.id for block in same_item_blocks]
     logger.info(
@@ -197,6 +218,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(idea_block, "No same-item candidates", db)
         return
 
+    cosine_started = stage_started()
     scored_cosine_candidates = await _score_cosine_candidates(idea_block, same_item_ids, db)
     logger.info(
         "similarity_detection_cosine_scored idea_block_id=%s candidates=%s threshold=%s",
@@ -216,6 +238,18 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         for candidate, score in scored_cosine_candidates
         if score > COSINE_SIMILARITY_THRESHOLD
     ]
+    await record_similarity_stage_event(
+        db,
+        pipeline_run_id=pipeline_run_id,
+        idea_block=idea_block,
+        stage="similarity_cosine_query",
+        started_perf=cosine_started,
+        candidate_count=len(scored_cosine_candidates),
+        metadata={
+            "passed_count": len(cosine_candidates),
+            "threshold": COSINE_SIMILARITY_THRESHOLD,
+        },
+    )
     logger.info(
         "similarity_detection_cosine_candidates idea_block_id=%s candidates=%s threshold=%s",
         idea_block.id,
@@ -239,7 +273,18 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         return
 
     candidates = [candidate for candidate, _ in cosine_candidates]
+    llm_started = stage_started()
     llm_result = await _select_similar_candidates_with_llm(idea_block, candidates, task_name=task_name)
+    await record_similarity_stage_event(
+        db,
+        pipeline_run_id=pipeline_run_id,
+        idea_block=idea_block,
+        stage="similarity_llm_compare",
+        started_perf=llm_started,
+        candidate_count=len(candidates),
+        llm_model=OPENAI_MODEL,
+        metadata={"candidate_ids": [candidate.id for candidate in candidates]},
+    )
     candidate_ids = {candidate.id for candidate in candidates}
     selected_matches = _normalize_llm_similarity_matches(llm_result)
 
@@ -300,7 +345,7 @@ async def _run_similarity_detection(idea_block_id: int, db: AsyncSession) -> Non
         await _clear_similarity_for_idea_block(idea_block, "No valid similar ideas found", db)
         return
 
-    await _replace_similarity_pairs(idea_block, valid_matches, db)
+    await _replace_similarity_pairs(idea_block, valid_matches, db, pipeline_run_id=pipeline_run_id)
 
 
 async def _get_task_item_ids(idea_block_id: int, db: AsyncSession) -> list[int]:
@@ -477,6 +522,8 @@ async def _replace_similarity_pairs(
     idea_block: IdeaBlock,
     matches: list[tuple[IdeaBlock, str, bool]],
     db: AsyncSession,
+    *,
+    pipeline_run_id: str | None = None,
 ) -> None:
     deleted_count = await _delete_pairs_for_idea_block(idea_block.id, db)
     similarities: list[tuple[Similarity, IdeaBlock]] = []
@@ -519,18 +566,38 @@ async def _replace_similarity_pairs(
             similarity.is_same_reason,
         )
 
+    pair_save_started = stage_started()
     await db.commit()
+    await record_similarity_stage_event(
+        db,
+        pipeline_run_id=pipeline_run_id,
+        idea_block=idea_block,
+        stage="similarity_pair_saved",
+        started_perf=pair_save_started,
+        candidate_count=len(similarities),
+        metadata={"deleted_count": deleted_count},
+    )
     await db.refresh(idea_block)
     for similarity, similar_idea_block in similarities:
         await db.refresh(similar_idea_block)
         await db.refresh(similarity)
         try:
+            cue_started = stage_started()
             await notify_similarity_cue_for_blocks(
                 similarity_id=similarity.id,
                 is_same_reason=similarity.is_same_reason,
                 idea_a=idea_block,
                 idea_b=similar_idea_block,
                 reason=similarity.reason,
+            )
+            await record_similarity_stage_event(
+                db,
+                pipeline_run_id=pipeline_run_id,
+                idea_block=idea_block,
+                stage="similarity_cue_sent",
+                started_perf=cue_started,
+                candidate_count=1,
+                metadata={"similarity_id": similarity.id, "other_idea_block_id": similar_idea_block.id},
             )
         except Exception as exc:
             logger.warning(
