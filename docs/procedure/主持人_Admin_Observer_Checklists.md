@@ -25,10 +25,15 @@
 | Task 1 system links |  |
 | Task 2 system links |  |
 | Individual Meet links |  |
+| Group familiarity level | none / low / medium / high / mixed / unknown |
+| Familiarity recruitment decision | less_familiar_target / acceptable_covariate / over_familiar_use_with_caveat / exclude_or_reschedule / PI_decision_needed |
 
 ## 2. Host / Admin 場前檢查
 
 - [ ] 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
+- [ ] 完成 familiarity screener，確認三位真實參與者彼此是否認識、是否同 lab / 同專案 / 固定合作。
+- [ ] 若本場目標是測量 private expression，優先安排不熟或較少固定合作的參與者。
+- [ ] 若三位真實參與者過度熟悉，已決定改排、排除，或在 session summary 標記 `over_familiar_use_with_caveat`。
 - [ ] 確認通知信預留約 150 分鐘，且提醒筆電、耳機、充電器、HDMI/轉接頭與麥克風測試。
 - [ ] 確認通知信沒有透露 task order、cue/no-cue 條件、暗樁安排或研究假設。
 - [ ] 確認每位使用者的遠距會議室都有第二螢幕；可使用會議室大電視或研究團隊自備螢幕。
@@ -158,6 +163,7 @@
 - [ ] 判斷剛完成 task 是 no cue 還是 with cue。
 - [ ] no cue 使用小表單 A：<https://docs.google.com/forms/d/1hultQhpxqw-Q-i9u8StCVhbxSf2eQTAtsZM1SWQ1TdM/edit>
 - [ ] with cue 使用小表單 B：<https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
+- [ ] 小表單或 notes 有記錄本輪熟悉度、公開反對舒適度，以及熟悉度是否影響 private notes / idea blocks / cue / chat 使用。
 - [ ] 三位 Observer 分別口頭詢問自己的真實參與者。
 - [ ] 每位真實參與者都是一對一口頭詢問；參與者不自行填小表單。
 - [ ] Observer 代填表單。
@@ -208,6 +214,8 @@
 | related_item | Lost item 或 Poster component/action |
 | cue_type | none / same_reason / different_reason |
 | followup_question | 最後訪談要追問的問題 |
+| group_familiarity_context | none / low / medium / high / mixed / unknown |
+| familiarity_followup_needed | yes / no |
 
 ## 9. 個別訪談分流與最後 Debrief
 
@@ -216,6 +224,8 @@
 - [ ] 確認暗樁不參與三位真實參與者個別訪談。
 - [ ] 訪談前與訪談中不揭露暗樁，不暗示有人是研究團隊安排成員。
 - [ ] 訪談追問使用中性說法，例如「某位成員」「有人」「剛才那段討論」。
+- [ ] 詢問熟悉度是否影響公開反對、private notes、idea blocks、cue 或聊天室使用。
+- [ ] 若參與者表示「因為很熟所以直接公開說」或「因為不熟所以先記在 private」，將原話摘要寫入 notes。
 - [ ] 確認三場訪談彼此分開，不能互相聽見。
 - [ ] 各自開始約 30 分鐘個別訪談。
 - [ ] 訪談錄音或筆記開始。
@@ -237,11 +247,13 @@
 - [ ] 匯出 cue logs；no-cue task 標記 cue disabled。
 - [ ] 匯出 public chat logs。
 - [ ] 匯出 Google Forms responses。
+- [ ] 保存 familiarity screener 與 task 後熟悉度回答。
 - [ ] 保存每位真實參與者的個別 Google Meet 錄影。
 - [ ] 保存 participant mapping table。
 - [ ] 收齊三位 Observer notes。
 - [ ] 保存三份個別訪談錄音 / transcript。
 - [ ] 確認最後 Debrief 已完成。
 - [ ] 建立 session summary。
+- [ ] 在 session summary 填入 group familiarity level、recruitment decision、private-channel usage caveat。
 - [ ] 建立 incident log。
 - [ ] 檢查命名符合 [資料命名與輸出規格](../data/資料命名與輸出規格.md)。
