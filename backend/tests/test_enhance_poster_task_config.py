@@ -49,7 +49,7 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
                 self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
 
     def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
-        self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png")
+        self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
         self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
         self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
 

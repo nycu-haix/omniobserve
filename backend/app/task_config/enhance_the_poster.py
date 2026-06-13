@@ -16,7 +16,7 @@ class TaskItemConfig(TypedDict):
 TASK_ID = "enhance-the-poster"
 TASK_TITLE = "Enhance the Poster"
 TEMPLATE_DESCRIPTION = "針對淨灘活動招募海報，建立並排序優先改善的 task items。"
-REFERENCE_IMAGE_SRC = "/task-assets/enhance-poster-task-brief-page-3.png"
+REFERENCE_IMAGE_SRC = "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main"
 REFERENCE_IMAGE_ALT = "2026 NYCU 世界淨灘日南寮海岸淨灘行動海報草稿"
 PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
