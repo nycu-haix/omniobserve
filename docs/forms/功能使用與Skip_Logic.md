@@ -107,7 +107,7 @@ Google Forms 匯出與訪談逐字稿整理時，至少保留下列標記：
 
 - `availability_status`: `available` / `not_available` / `technical_issue` / `unsure`
 - `use_status`: `used` / `not_used` / `not_seen` / `not_applicable`
-- `not_applicable_reason`: `not_available` / `did_not_use` / `did_not_see` / `no_cue_by_condition` / `technical_issue` / `unsure`
+- `not_applicable_reason`: `not_available` / `did_not_use` / `did_not_see` / `no_cue_seen` / `no_cue_by_condition` / `technical_issue` / `unsure`
 - `followup_allowed`: `yes` / `no`
 
 若表單工具無法直接做條件跳題，Observer 仍需人工依本文件代填 `N/A`，並在 free-text note 寫明原因。
