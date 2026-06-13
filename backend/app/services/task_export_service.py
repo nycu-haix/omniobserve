@@ -990,7 +990,7 @@ def _transcript_generation_decisions_file(
             "group_id": context.group_id,
             "task": context.task_token,
             "condition": decision.condition or context.condition.token,
-            "phase": _latency_phase(decision.phase, decision.decision_done_at, phase_windows),
+            "phase": _transcript_generation_decision_phase(decision, phase_windows),
             "participant_id": decision.participant_id,
             "participant_code": _participant_code(context.group_id, decision.participant_id),
             "participant_role": _participant_role_for_id(participant_roles, decision.participant_id),
@@ -1451,6 +1451,17 @@ def _latency_phase(stored_phase: str | None, timestamp: datetime | None, phase_w
     if phase and phase != "unknown":
         return phase
     return _infer_phase_for_timestamp(timestamp, phase_windows) or phase or "unknown"
+
+
+def _transcript_generation_decision_phase(
+    decision: TranscriptGenerationDecision,
+    phase_windows: list[dict[str, Any]],
+) -> str:
+    phase = str(decision.phase or "").strip()
+    if phase and phase != "unknown":
+        return phase
+    timestamp = decision.segment_cut_at or decision.transcript_saved_at or decision.decision_done_at
+    return _latency_phase(phase, timestamp, phase_windows)
 
 
 def _collect_participants(

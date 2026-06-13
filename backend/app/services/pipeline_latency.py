@@ -191,6 +191,7 @@ async def record_similarity_stage_event(
 ) -> None:
     if not pipeline_run_id:
         return
+    duration_ms = _duration_ms(started_perf)
     size_context = await _load_pipeline_size_context(
         db,
         session_name=idea_block.session_name,
@@ -216,7 +217,7 @@ async def record_similarity_stage_event(
     )
     stage_record = PipelineStageRecord(
         stage=stage,
-        duration_ms=_duration_ms(started_perf),
+        duration_ms=duration_ms,
         candidate_count=candidate_count,
         llm_model=llm_model,
         metadata=dict(metadata or {}),

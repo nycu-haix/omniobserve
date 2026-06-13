@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
@@ -74,6 +76,53 @@ class PipelineLatencyTests(unittest.TestCase):
         self.assertIn("run-1", export_file.content)
         self.assertNotIn("transcript_text", export_file.content)
         self.assertNotIn("raw transcript", export_file.content.lower())
+
+    def test_decision_export_infers_phase_from_segment_cut_time(self) -> None:
+        private_time = datetime(2026, 6, 13, 3, 1, tzinfo=timezone.utc)
+        group_time = private_time + timedelta(minutes=4)
+        decision = SimpleNamespace(
+            session_name="lost-at-sea-G1-with-cue",
+            condition="with_cue",
+            phase="unknown",
+            participant_id="5",
+            scope="private",
+            transcript_id=7569,
+            client_segment_ids=["client-1"],
+            segment_cut_at=private_time,
+            transcript_saved_at=private_time + timedelta(seconds=1),
+            decision_done_at=group_time,
+            cut_to_decision_ms=240000,
+            save_to_decision_ms=239000,
+            decision="generated",
+            generated_idea_block_count=3,
+            duplicate_idea_block_count=0,
+            transcript_chars=128,
+            session_transcript_count_before=388,
+            session_idea_block_count_before=217,
+            participant_idea_block_count_before=42,
+            skipped_reason=None,
+            error_type=None,
+            pipeline_run_id="run-1",
+            event_metadata={},
+            created_at=group_time,
+        )
+        phase_windows = [
+            {
+                "phase": "private",
+                "started_at_dt": private_time - timedelta(minutes=2),
+                "ended_at_dt": private_time + timedelta(minutes=1),
+            },
+            {
+                "phase": "group",
+                "started_at_dt": group_time - timedelta(minutes=1),
+                "ended_at_dt": None,
+            },
+        ]
+
+        export_file = _transcript_generation_decisions_file(_context(), {"5": "participant"}, [decision], phase_windows)
+        row = next(csv.DictReader(io.StringIO(export_file.content)))
+
+        self.assertEqual(row["phase"], "private")
 
     def test_stage_export_has_scaling_context_without_raw_text(self) -> None:
         timestamp = datetime(2026, 6, 13, 3, 2, tzinfo=timezone.utc)
