@@ -310,6 +310,12 @@ PHASE1_POSTER_COMPONENTS = [
         "label_en": "Organizer, advising organization, and participating event group",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_font", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble", CUSTOM_DETAIL_ACTION_ID],
     },
+    {
+        "id": "background",
+        "label_zh": "背景",
+        "label_en": "Background",
+        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "transparency", CUSTOM_DETAIL_ACTION_ID],
+    },
 ]
 
 PHASE1_ACTION_ITEMS = [
@@ -422,7 +428,7 @@ PHASE1_ACTION_ITEMS = [
         "label_zh": "自訂動作",
         "label_en": "Custom action",
         "description_zh": "用自己的文字描述要怎麼調整這個元件。",
-        "template_zh": "自訂調整「{component}」",
+        "template_zh": "「{component}」",
         "requires_detail": True,
     },
 ]
