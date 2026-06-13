@@ -6,7 +6,7 @@
 
 1. 先讀 [正式實驗 Procedure](procedure/OmniObserve_正式實驗Procedure.md)，掌握完整流程、時間配置與每個階段要說什麼、做什麼、記什麼。
 2. 寄信前讀 [受試者事前通知信](communications/受試者事前通知信.md)，確認時間、地點、攜帶設備與不可透露資訊。
-3. 實際執行前讀 [主持人 Admin Observer Checklists](procedure/主持人_Admin_Observer_Checklists.md)，依角色分工檢查設備、系統、錄音錄影、後台與資料匯出。
+3. 實際執行前讀 [主持人 Admin Observer Checklists](procedure/主持人_Admin_Observer_Checklists.md)，先完成 staff-only Run-of-show Preflight 與 Observer Per-room Preflight，再依角色分工檢查設備、系統、錄音錄影、後台與資料匯出。
 4. 準備 Lost-at-Sea 時讀 [Lost-at-Sea 任務設計](task-materials/Lost_at_Sea_任務設計.md)。
 5. 準備 Enhance-the-Poster 時讀 [Enhance-the-Poster 任務設計](task-materials/Enhance_the_Poster_任務設計.md)，並確認 Canva / component library 版本。
 6. 準備暗樁時先讀 [暗樁參與者發言提綱索引](confederate.md)，再依 task 讀 [Lost-at-Sea 暗樁發言提綱](confederate-sea.md) 與 [Enhance-the-Poster 暗樁發言提綱](confederate-poster.md)。這些文件只供研究團隊內部使用，不得提供給一般參與者。

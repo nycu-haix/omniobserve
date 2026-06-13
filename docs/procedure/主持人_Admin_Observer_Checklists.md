@@ -28,6 +28,72 @@
 
 ## 2. Host / Admin 場前檢查
 
+### 2.1 Run-of-show Preflight（參與者進場前完成）
+
+此清單只供 Host/Admin/Observer 使用，不寄給受試者，不放在受試者可見畫面。cue/no-cue 條件、暗樁安排、mapping table 與 staff fallback room 都是 staff-only 資訊。
+
+#### Link / Permission / Communication
+
+- [ ] 已把正式集合時間、地點、攜帶設備與注意事項用 email 寄給所有參與者；不要只依賴現場口頭或即時訊息分享。
+- [ ] 每位參與者的 Task 1 OmniObserve link 已產生、測試可開啟，且只包含該 participant system id。
+- [ ] 每位參與者的 Task 2 OmniObserve link 已產生、測試可開啟，且在 Task 1 前不提供給參與者操作。
+- [ ] 每位真實參與者的個別 Google Meet link 已建立，Observer 知道自己負責哪一間。
+- [ ] Staff-only fallback room（例如 `meet.omni.elvismao.com` 或團隊指定會議室）已建立，用於 Host/Observer 旁聽與協調，不進入參與者的 OmniObserve participant room。
+- [ ] 教學影片、Debrief 影片、Google Forms、小表單 A/B、大表單、Canva、圖床與 task materials 的權限已用非擁有者帳號測試。
+- [ ] 參與者可見的 link/email 沒有透露 task order、cue/no-cue 條件、暗樁安排、研究假設或 staff-only room。
+- [ ] Slack/Line/Email fallback channel 已指定；若正式 link 失效，由 Host 統一發送更新，不讓 Observer 私下改發 cue/condition 資訊。
+
+#### Browser / Task Surfaces
+
+- [ ] Host/Admin 已開啟 Admin dashboard，確認 room name、task、condition、phase、timer 與 export 按鈕可見。
+- [ ] Task 1 的 OmniObserve participant link 已用測試帳號開過一次，確認可載入、可看到正確 task UI。
+- [ ] Task 2 的 OmniObserve participant link 已用測試帳號開過一次，確認可載入、可看到正確 task UI，但不提前發給參與者操作。
+- [ ] Lost-at-Sea 15 items 可顯示且排序互動正常。
+- [ ] Enhance-the-Poster 的 Canva source、海報 stimulus、component library、文字/slogan library、圖床與 reviewer feedback 摘要都已開啟在 Host 可操作的瀏覽器分頁。
+- [ ] 只保留當場需要的瀏覽器分頁；關閉私人帳號、通知、聊天、無關文件與會誤投影的頁面。
+
+#### Device / Audio / Recording
+
+- [ ] 每位參與者筆電、充電器、耳機、麥克風、HDMI/USB-C 轉接頭已確認可用。
+- [ ] 每間個別 Google Meet 已開啟錄影，錄影畫面能看清 OmniObserve/Canva，音訊能收到參與者聲音。
+- [ ] 參與者 screen share 時，確認沒有勾選分享系統音訊或 share-tab audio，除非 Host 明確要求。
+- [ ] Host/Observer 的麥克風預設關閉；需要說明時才短暫開啟，說完立即關閉。
+- [ ] Staff-only fallback room 的麥克風狀態已確認；不得讓 staff 麥克風進入 participant ASR/cue pipeline。
+- [ ] 第二螢幕或投影設備不播放會議聲音，避免回授或 echo。
+- [ ] 若需要播放教學影片，先確認音訊輸出路徑，不讓影片聲音被 participant microphone 重複收音。
+- [ ] 每個 Google Meet 錄影開始時間、負責 Observer 與檔名暫記在場次資訊表。
+
+#### Condition / Hidden Setup Safety
+
+- [ ] Host 私下確認本場 task order 與 condition assignment；不在參與者可見畫面開啟 counterbalance table。
+- [ ] 暗樁 ID、腳本、發言提綱與 mapping table 只在 staff-only 視窗或紙本使用。
+- [ ] no-cue task 的 cue UI / same-different reason cue 已確認不顯示。
+- [ ] with-cue task 的 cue UI 已確認可用，但不向 no-cue 參與者透露差異。
+- [ ] Observer note 表單/文件已開啟；欄位不需要參與者看到 cue/condition 或暗樁資訊。
+
+#### Export / Stop Recording Readiness
+
+- [ ] Host 知道每個 task 結束後要匯出 task package，並確認下載位置與檔名規則。
+- [ ] Host 知道每個個別 Google Meet 錄影在該段結束後要停止，並在收尾確認檔案已保存。
+- [ ] 建立 incident log 草稿；任何 link、permission、device、recording、echo、screen-share audio、ASR/cue contamination 都要記錄時間與處理方式。
+
+### 2.2 Observer Per-room Preflight（不揭露隱藏條件）
+
+Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/no-cue 條件、暗樁安排、其他 participant mapping 或 staff-only room。
+
+- [ ] 確認自己負責的 participant code 與 system id，不在受試者可見畫面顯示完整 mapping table。
+- [ ] 確認受試者進入正確個別 Google Meet。
+- [ ] 確認受試者螢幕分享畫面可讀，且不分享無關私人視窗。
+- [ ] 確認 Google Meet 錄影已開始，並口頭告知受試者錄影正在進行。
+- [ ] 確認受試者耳機/麥克風可用；若用外接麥克風，確認輸入來源正確。
+- [ ] 確認 screen share 沒有分享系統音訊或分頁音訊。
+- [ ] 確認 Observer 自己的麥克風關閉，只有需要協助設備時短暫開啟。
+- [ ] 確認 OmniObserve Task 1 link 可開啟，participant id 與顯示名稱正確。
+- [ ] 不提前開啟或操作 Task 2 link；Task 2 只在中間休息由 Host 指示後協助切換。
+- [ ] 若連結或權限失效，通知 Host 統一處理，不自行改發未確認連結。
+
+### 2.3 Host / Admin System Setup
+
 - [ ] 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
 - [ ] 確認通知信預留約 150 分鐘，且提醒筆電、耳機、充電器、HDMI/轉接頭與麥克風測試。
 - [ ] 確認通知信沒有透露 task order、cue/no-cue 條件、暗樁安排或研究假設。
