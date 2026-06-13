@@ -227,10 +227,11 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const hasDetailValue = form.detail.trim().length > 0;
 	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
-	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving;
+	const isDeletingTaskItem = deletingItemId !== null;
+	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving && !isDeletingTaskItem;
 	const requiredItemCount = minimumItemCount(builder);
 	const editingItem = editingItemId === null ? undefined : items.find(item => item.id === editingItemId);
-	const canDeleteEditingItem = !!editingItem && deletingItemId !== editingItem.id && !isSaving;
+	const canDeleteEditingItem = !!editingItem && !isDeletingTaskItem && !isSaving;
 
 	const resetForm = useCallback(() => {
 		setForm(createPhaseTaskForm());
@@ -430,7 +431,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 								isFirst={index === 0}
 								isLast={index === sortedItems.length - 1}
 								isMoving={movingItemId === item.id}
-								isDeleting={deletingItemId === item.id}
+								isDeleting={isDeletingTaskItem}
 								onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
 								onEdit={editTaskItem}
 								onDelete={itemId => void deleteTaskItem(itemId)}
