@@ -64,7 +64,9 @@
 - [ ] 說明會完成兩個 task，中間休息 5 分鐘。
 - [ ] 說明 Google Meet 錄影與系統資料保存。
 - [ ] 說明 private / public / reflect phase。
-- [ ] 說明 think-aloud 與文字輸入會生成 idea blocks / notes。
+- [ ] 說明 think-aloud 不是只講最後答案，而是把正在比較、排序、建立 item 的理由說出來。
+- [ ] 說明如果不想出聲，也可以用文字輸入記錄理由，文字也會生成 idea blocks / notes。
+- [ ] 準備 quiet participant fallback prompt：提醒「可以講正在比較的理由；不想出聲也可以打字」，不得補任務答案或排序方向。
 - [ ] 說明 chat 是正式公開發言管道，沒有 private chat。
 - [ ] 若第一個 task 是 with cue，說明 similarity cue。
 - [ ] 不揭露暗樁。
@@ -122,7 +124,8 @@
 - [ ] 確認每人可做 15 items 個人排序。
 - [ ] 開始 8 分鐘 timer。
 - [ ] 確認 think-aloud transcript / idea blocks 有產生。
-- [ ] 確認文字輸入也被記錄並可對應到 participant。
+- [ ] 確認文字輸入理由也被記錄並可對應到 participant。
+- [ ] 若參與者長時間沒有出聲或輸入，Host 使用標準 quiet fallback prompt，不提供排序建議。
 - [ ] 切到 public phase。
 - [ ] 確認 group ranking 需排序 15 items。
 - [ ] 開始 20 分鐘 timer。
@@ -139,6 +142,7 @@
 - [ ] 開始 5 分鐘 timer。
 - [ ] 確認每位參與者建立至少 4 個 component + action items。
 - [ ] 確認 component + action item 文字會進入 logs / idea block pipeline。
+- [ ] 確認參與者有用出聲或文字記錄建立 item 的理由；若長時間沒有，Host 使用標準 quiet fallback prompt。
 - [ ] 切到 Poster private phase 2。
 - [ ] 鎖定 item 內容。
 - [ ] 產生可排序 item list。
@@ -169,7 +173,7 @@
 ### 觀察原則
 
 - [ ] 只記錄，不引導。
-- [ ] 不主動提醒參與者把 private idea 說出來。
+- [ ] 不主動提醒參與者把 private idea 說出來；若需要提醒，由 Host 使用標準 quiet fallback prompt。
 - [ ] 不評價 Lost 物品排序或 Poster action items。
 - [ ] 不揭露暗樁。
 - [ ] 記錄具體事件，最後訪談用事件追問。
@@ -177,7 +181,7 @@
 ### Lost-at-Sea 觀察
 
 - [ ] 參與者 private ranking 的理由。
-- [ ] 參與者是否 think aloud。
+- [ ] 參與者是否 think aloud，或是否改用文字輸入理由。
 - [ ] idea blocks 是否幫助回顧理由。
 - [ ] public phase 中是否提出 private 階段理由。
 - [ ] cue 條件下是否因 same/different reason cue 發言或改變排序。
@@ -207,6 +211,7 @@
 | observed_event | 具體看到/聽到的事件 |
 | related_item | Lost item 或 Poster component/action |
 | cue_type | none / same_reason / different_reason |
+| reasoning_capture_mode | speech / text / both / none |
 | followup_question | 最後訪談要追問的問題 |
 
 ## 9. 個別訪談分流與最後 Debrief
