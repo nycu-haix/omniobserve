@@ -1,5 +1,6 @@
 import { Eye, Lightbulb, Send, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { SimilarityCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -42,7 +43,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 		return null;
 	}
 
-	return (
+	const content = (
 		<div className="fixed bottom-20 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
 			{topContent}
 			{cues.map(cue => {
@@ -99,4 +100,6 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 			})}
 		</div>
 	);
+
+	return createPortal(content, document.body);
 }
