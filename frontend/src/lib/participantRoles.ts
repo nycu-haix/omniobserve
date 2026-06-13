@@ -1,6 +1,16 @@
-export type ParticipantRole = "participant" | "observer";
+export type ParticipantRole = "participant" | "confederate" | "observer" | "facilitator" | "test";
 
-const OBSERVER_ROLE_ALIASES = new Set(["observer", "nonparticipant", "non-participant", "facilitator"]);
+const PARTICIPANT_ROLES = new Set<ParticipantRole>(["participant", "confederate", "observer", "facilitator", "test"]);
+const PARTICIPANT_ROLE_ALIASES = new Map<string, ParticipantRole>([
+	["nonparticipant", "observer"],
+	["non-participant", "observer"],
+	["staff", "facilitator"],
+	["moderator", "facilitator"],
+	["experimenter", "facilitator"],
+	["confederate-script", "confederate"],
+	["manipulation", "confederate"],
+	["test-client", "test"]
+]);
 
 export function normalizeParticipantRole(value: unknown): ParticipantRole {
 	const role = String(value || "participant")
@@ -8,7 +18,8 @@ export function normalizeParticipantRole(value: unknown): ParticipantRole {
 		.toLowerCase()
 		.replace(/_/g, "-");
 
-	return OBSERVER_ROLE_ALIASES.has(role) ? "observer" : "participant";
+	const aliasedRole = PARTICIPANT_ROLE_ALIASES.get(role) ?? role;
+	return PARTICIPANT_ROLES.has(aliasedRole as ParticipantRole) ? (aliasedRole as ParticipantRole) : "participant";
 }
 
 export function isObserverRole(value: unknown): boolean {
@@ -16,7 +27,7 @@ export function isObserverRole(value: unknown): boolean {
 }
 
 export function isParticipantAnalysisRole(value: unknown): boolean {
-	return !isObserverRole(value);
+	return normalizeParticipantRole(value) === "participant";
 }
 
 export function isAdminParticipantId(participantId: string | number | null | undefined): boolean {

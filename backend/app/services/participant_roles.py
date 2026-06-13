@@ -7,19 +7,43 @@ from ..models import SessionParticipantRole
 from ..schemas import ApiError
 
 PARTICIPANT_ROLE = "participant"
+CONFEDERATE_ROLE = "confederate"
 OBSERVER_ROLE = "observer"
-VALID_PARTICIPANT_ROLES = {PARTICIPANT_ROLE, OBSERVER_ROLE}
+FACILITATOR_ROLE = "facilitator"
+TEST_ROLE = "test"
+VALID_PARTICIPANT_ROLES = {
+    PARTICIPANT_ROLE,
+    CONFEDERATE_ROLE,
+    OBSERVER_ROLE,
+    FACILITATOR_ROLE,
+    TEST_ROLE,
+}
+NON_ANALYSIS_PARTICIPANT_ROLES = {
+    CONFEDERATE_ROLE,
+    OBSERVER_ROLE,
+    FACILITATOR_ROLE,
+    TEST_ROLE,
+}
+PARTICIPANT_ROLE_ALIASES = {
+    "nonparticipant": OBSERVER_ROLE,
+    "non-participant": OBSERVER_ROLE,
+    "staff": FACILITATOR_ROLE,
+    "moderator": FACILITATOR_ROLE,
+    "experimenter": FACILITATOR_ROLE,
+    "confederate-script": CONFEDERATE_ROLE,
+    "manipulation": CONFEDERATE_ROLE,
+    "test-client": TEST_ROLE,
+}
 
 
 def normalize_participant_role(value: Any) -> str:
     role = str(value or PARTICIPANT_ROLE).strip().lower().replace("_", "-")
-    if role in {"nonparticipant", "non-participant", "facilitator"}:
-        return OBSERVER_ROLE
+    role = PARTICIPANT_ROLE_ALIASES.get(role, role)
     if role not in VALID_PARTICIPANT_ROLES:
         raise ApiError(
             400,
             "INVALID_PARTICIPANT_ROLE",
-            "participant role must be participant or observer",
+            "participant role must be participant, confederate, observer, facilitator, or test",
             details={"role": value},
         )
     return role
@@ -28,6 +52,20 @@ def normalize_participant_role(value: Any) -> str:
 def is_observer_role(value: Any) -> bool:
     try:
         return normalize_participant_role(value) == OBSERVER_ROLE
+    except ApiError:
+        return False
+
+
+def is_participant_analysis_role(value: Any) -> bool:
+    try:
+        return normalize_participant_role(value) == PARTICIPANT_ROLE
+    except ApiError:
+        return False
+
+
+def is_non_analysis_participant_role(value: Any) -> bool:
+    try:
+        return normalize_participant_role(value) in NON_ANALYSIS_PARTICIPANT_ROLES
     except ApiError:
         return False
 
