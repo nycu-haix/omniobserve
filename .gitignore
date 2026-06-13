@@ -33,3 +33,6 @@ dist/
 
 # Generated documents
 *.pdf
+
+# Agents
+AGENTS.md
