@@ -1719,7 +1719,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	}, []);
 
 	const canJumpToRenderedBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocks, blockId), [ideaBlocks]);
-	const canJumpToBlock = useCallback((blockId: string) => canJumpToRenderedBlock(blockId) || hasIdeaBlockJumpTarget(ideaBlocksRef.current, blockId), [canJumpToRenderedBlock]);
+	const canJumpToBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocksRef.current, blockId), []);
 
 	const jumpToBlock = useCallback(
 		(blockId: string) => {
