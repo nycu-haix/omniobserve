@@ -23,7 +23,7 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
-import { isAdminParticipantId, isObserverRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
+import { isAdminParticipantId, isParticipantAnalysisRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
 	DEFAULT_SESSION_PHASE,
 	DEFAULT_SESSION_PHASE_OPTIONS,
@@ -229,12 +229,19 @@ const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
 };
 const PARTICIPANT_ROLE_LABELS: Record<ParticipantRole, string> = {
 	participant: "Participant",
-	observer: "Observer"
+	confederate: "Confederate",
+	observer: "Observer",
+	facilitator: "Facilitator",
+	test: "Test"
 };
 const PARTICIPANT_ROLE_SEGMENT_CLASSES: Record<ParticipantRole, string> = {
 	participant: "bg-emerald-50 text-emerald-900 shadow-sm ring-1 ring-emerald-700/20",
-	observer: "bg-amber-50 text-amber-900 shadow-sm ring-1 ring-amber-700/25"
+	confederate: "bg-sky-50 text-sky-900 shadow-sm ring-1 ring-sky-700/25",
+	observer: "bg-amber-50 text-amber-900 shadow-sm ring-1 ring-amber-700/25",
+	facilitator: "bg-violet-50 text-violet-900 shadow-sm ring-1 ring-violet-700/25",
+	test: "bg-neutral-100 text-neutral-900 shadow-sm ring-1 ring-neutral-700/20"
 };
+const PARTICIPANT_ROLE_OPTIONS: ParticipantRole[] = ["participant", "confederate", "observer", "facilitator", "test"];
 
 function getAdminAvailableLayoutWidth() {
 	return window.innerWidth - 32 - 32;
@@ -926,9 +933,12 @@ export function AdminPage() {
 		});
 		return nextParticipantRoleById;
 	}, [participants]);
-	const observerCount = useMemo(() => participants.filter(participant => isObserverRole(participant.participant_role)).length, [participants]);
-	const analysisParticipantCount = participants.length - observerCount;
-	const isObserverParticipantId = useCallback((participantId: string | number | null | undefined) => isObserverRole(participantRoleById.get(String(participantId ?? ""))), [participantRoleById]);
+	const analysisParticipantCount = useMemo(() => participants.filter(participant => isParticipantAnalysisRole(participant.participant_role)).length, [participants]);
+	const nonAnalysisParticipantCount = participants.length - analysisParticipantCount;
+	const isAnalysisParticipantId = useCallback(
+		(participantId: string | number | null | undefined) => isParticipantAnalysisRole(participantRoleById.get(String(participantId ?? ""))),
+		[participantRoleById]
+	);
 	const getParticipantLabel = useCallback(
 		(participantId: string | number | null | undefined) => {
 			const normalizedParticipantId = participantId == null ? "" : String(participantId);
@@ -1342,7 +1352,7 @@ export function AdminPage() {
 	const publicRankingItems = publicRankingSnapshot ? normalizeRankingItemIds(publicRankingSnapshot.items, defaultRankingItemIds) : [];
 	const privateRankingMap: Record<string, RankingSnapshot> = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
 	const privateRankingEntries = Object.entries(privateRankingMap)
-		.filter(([participantId]) => !isAdminParticipantId(participantId) && !isObserverParticipantId(participantId))
+		.filter(([participantId]) => !isAdminParticipantId(participantId) && isAnalysisParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
 	const privateRankingColumns = privateRankingEntries.map(([participantId, ranking]) => {
 		const items = normalizeRankingItemIds(ranking.items, defaultRankingItemIds);
@@ -1776,8 +1786,8 @@ export function AdminPage() {
 								<span className="font-medium">{analysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
-								<span className="text-muted-foreground">Observers</span>
-								<span className="font-medium">{observerCount}</span>
+								<span className="text-muted-foreground">Other roles</span>
+								<span className="font-medium">{nonAnalysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Admin participant</span>
@@ -1947,7 +1957,7 @@ export function AdminPage() {
 														</div>
 													</div>
 													<div className="mt-2 grid min-w-[264px] grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label={`Role for ${getParticipantLabel(participant.id)}`}>
-														{(["participant", "observer"] as const).map(role => {
+														{PARTICIPANT_ROLE_OPTIONS.map(role => {
 															const isSelected = participantRole === role;
 															return (
 																<button
@@ -1964,7 +1974,17 @@ export function AdminPage() {
 																	onClick={() => void setParticipantRole(participant, role)}
 																	disabled={roleUpdatingParticipantId !== null || isSelected}
 																>
-																	{role === "participant" ? <UserCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+																	{role === "participant" ? (
+																		<UserCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+																	) : role === "confederate" ? (
+																		<Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+																	) : role === "facilitator" ? (
+																		<Radio className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+																	) : role === "test" ? (
+																		<AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+																	) : (
+																		<Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+																	)}
 																	<span className="truncate">{PARTICIPANT_ROLE_LABELS[role]}</span>
 																</button>
 															);
@@ -2001,8 +2021,8 @@ export function AdminPage() {
 								<span className="font-medium">{analysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
-								<span className="text-muted-foreground">Observers</span>
-								<span className="font-medium">{observerCount}</span>
+								<span className="text-muted-foreground">Other roles</span>
+								<span className="font-medium">{nonAnalysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Transcripts</span>

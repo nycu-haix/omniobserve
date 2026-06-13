@@ -27,7 +27,7 @@ from ..models import (
     Transcript,
 )
 from ..task_config import get_task_phases_for_session, resolve_task_id
-from .participant_roles import OBSERVER_ROLE, PARTICIPANT_ROLE, list_session_participant_roles, normalize_participant_role
+from .participant_roles import CONFEDERATE_ROLE, FACILITATOR_ROLE, OBSERVER_ROLE, PARTICIPANT_ROLE, TEST_ROLE, is_participant_analysis_role, list_session_participant_roles, normalize_participant_role
 
 TASK_EXPORT_SCHEMA_VERSION = 1
 APP_VERSION = "0.1.0"
@@ -442,7 +442,7 @@ def _ranking_snapshot_files(
             TaskExportFile(
                 path=_package_path(context, filename),
                 artifact=artifact,
-                scope="diagnostic" if artifact == "observer_ranking_diagnostic" else snapshot.scope,
+                scope="diagnostic" if artifact.endswith("_ranking_diagnostic") else snapshot.scope,
                 record_count=len(rows),
                 required=artifact in {"initial_ranking", "group_ranking", "final_ranking"},
                 media_type="text/csv",
@@ -616,8 +616,7 @@ def _idea_blocks_file(
     rows = []
     for block in idea_blocks:
         transcript_ids = _idea_block_transcript_ids(block)
-        source_type = "speech" if transcript_ids else "unknown"
-        source_ref = ";".join(f"transcript:{transcript_id}" for transcript_id in transcript_ids)
+        source_type, source_ref = _idea_block_source_metadata(block, transcript_ids)
         phase = _infer_phase_for_timestamp(block.time_stamp, phase_windows)
         rows.append(
             {
@@ -1068,8 +1067,10 @@ def _latest_ranking_snapshots(snapshots: list[RankingPhaseSnapshot]) -> list[Ran
 
 
 def _ranking_artifact_name(snapshot: RankingPhaseSnapshot, participant_roles: dict[str, str] | None = None) -> str:
-    if snapshot.scope == "private" and snapshot.participant_id and _is_observer_participant_id(participant_roles or {}, snapshot.participant_id):
-        return "observer_ranking_diagnostic"
+    if snapshot.scope == "private" and snapshot.participant_id:
+        diagnostic_role = _diagnostic_role_for_id(participant_roles or {}, snapshot.participant_id)
+        if diagnostic_role:
+            return f"{diagnostic_role}_ranking_diagnostic"
     if snapshot.scope == "public" or snapshot.phase == "group":
         return "group_ranking"
     if snapshot.phase == "reflect" and snapshot.scope == "private":
@@ -1086,8 +1087,10 @@ def _snapshot_subject_token(context: ExportContext, snapshot: RankingPhaseSnapsh
         return "group"
     subject_id = snapshot.participant_id or snapshot.subject_id
     subject_token = _participant_code(context.group_id, subject_id)
-    if snapshot.scope == "private" and _is_observer_participant_id(participant_roles or {}, subject_id):
-        return f"observer_{subject_token}_{_file_token(snapshot.phase)}"
+    if snapshot.scope == "private":
+        diagnostic_role = _diagnostic_role_for_id(participant_roles or {}, subject_id)
+        if diagnostic_role:
+            return f"{diagnostic_role}_{subject_token}_{_file_token(snapshot.phase)}"
     return subject_token
 
 
@@ -1129,6 +1132,12 @@ def _idea_block_transcript_ids(block: IdeaBlock) -> list[int]:
         if link.transcript_id not in ids:
             ids.append(int(link.transcript_id))
     return ids
+
+
+def _idea_block_source_metadata(block: IdeaBlock, transcript_ids: list[int]) -> tuple[str, str]:
+    if transcript_ids:
+        return "speech", ";".join(f"transcript:{transcript_id}" for transcript_id in transcript_ids)
+    return "manual", f"idea_block:{block.id}"
 
 
 def _infer_similarity_phase(
@@ -1337,7 +1346,12 @@ def _build_manifest(
         "counts": {
             "participants": len(participants),
             "analysis_participants": _analysis_participant_count(participants),
+            "normal_participants": sum(1 for participant in participants if participant.get("participant_role") == PARTICIPANT_ROLE),
+            "confederates": sum(1 for participant in participants if participant.get("participant_role") == CONFEDERATE_ROLE),
             "observers": sum(1 for participant in participants if participant.get("participant_role") == OBSERVER_ROLE),
+            "facilitators": sum(1 for participant in participants if participant.get("participant_role") == FACILITATOR_ROLE),
+            "test_users": sum(1 for participant in participants if participant.get("participant_role") == TEST_ROLE),
+            "non_analysis_participants": sum(1 for participant in participants if not participant.get("participant_analysis_included", True)),
             "ranking_snapshots": len(ranking_snapshots),
             "phase_task_item_snapshots": len(phase_task_snapshots),
             "transcripts": len(transcripts),
@@ -1354,7 +1368,7 @@ def _build_manifest(
             "Transcripts and public chat are session-scoped because those tables do not store task_id; this export assumes one task run per session URL.",
             "Idea block phase is inferred from persisted phase-boundary snapshot timestamps when available.",
             "Cue lifecycle export uses similarity_cue_events when available; older runs without durable event rows fall back to similarity-pair evidence.",
-            "Manual participant_role metadata comes from session_participant_roles. Observer private ranking rows carry participant_analysis_included=false, latest observer private ranking files use the observer_ranking_diagnostic artifact, and observer rows are excluded from participant checklist denominators.",
+            "Manual participant_role metadata comes from session_participant_roles. Only participant role rows are included in normal participant analysis by default; confederate, observer, facilitator, and test rows are preserved as diagnostic/non-analysis records.",
         ],
     }
 
@@ -1564,7 +1578,7 @@ def _build_session_summary_markdown(manifest: dict[str, Any]) -> str:
         for participant in manifest["participants"]:
             role = participant.get("participant_role") or PARTICIPANT_ROLE
             included = bool(participant.get("participant_analysis_included", True))
-            scope = "included in participant analysis" if included else "observer diagnostic only"
+            scope = "included in participant analysis" if included else f"{role} diagnostic only"
             lines.append(
                 f"- `{participant['participant_code']}`: system id `{participant['system_id']}`, role `{role}`, {scope}"
             )
@@ -1728,12 +1742,13 @@ def _participant_role_for_id(participant_roles: dict[str, str], participant_id: 
     return normalize_participant_role(participant_roles.get(str(participant_id), PARTICIPANT_ROLE))
 
 
-def _is_observer_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
-    return _participant_role_for_id(participant_roles, participant_id) == OBSERVER_ROLE
+def _diagnostic_role_for_id(participant_roles: dict[str, str], participant_id: Any) -> str:
+    role = _participant_role_for_id(participant_roles, participant_id)
+    return "" if role == PARTICIPANT_ROLE else role
 
 
 def _is_analysis_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
-    return _is_real_participant_id(participant_id) and not _is_observer_participant_id(participant_roles, participant_id)
+    return _is_real_participant_id(participant_id) and is_participant_analysis_role(_participant_role_for_id(participant_roles, participant_id))
 
 
 def _analysis_participant_count(participants: list[dict[str, Any]]) -> int:
