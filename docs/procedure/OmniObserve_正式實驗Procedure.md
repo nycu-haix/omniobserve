@@ -55,6 +55,16 @@ Host/Admin 和 Observer 不要在任務內容上提供答案或設計建議。Ob
 
 近期實驗不提供報酬。若後續提供報酬、禮券、課程點數或其他補償，需更新本文件的開場說明、招募資訊與資料紀錄表。
 
+### 1.5 參與者熟悉度與招募原則
+
+Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果取決於社交風險。若同組參與者本來就很熟，低 private channel 使用量可能代表他們可以直接公開說，而不是系統沒有支援作用。
+
+- 正式實驗不把熟識組一律排除；熟悉度預設作為 covariate 記錄。
+- 若當場研究目標是測量「不確定是否敢公開表達」或「少數意見是否被帶入 public phase」，招募與排程應優先使用不熟或較少固定合作的參與者。
+- 若三位真實參與者中有兩位以上是熟識朋友、同 lab 固定合作或同專案固定討論，Host/Admin 需先標記為 `over_familiar_use_with_caveat`，必要時請 PI 決定是否改排。
+- 若因排程限制仍使用熟識組，session summary 和後續分析必須明確註記，不得把 private channel 低使用量直接解讀為系統設計失效。
+- 熟悉度篩選、task 後詢問與個別訪談題目見 [問卷與訪談題綱](../forms/問卷與訪談題綱.md)。
+
 ## 2. 150 分鐘時間表
 
 下列為完整場次時間配置。兩個 task、兩次 task 後小訪談 / 小表單與三位真實參與者個別訪談合計 112 分鐘，其餘約 38 分鐘作為報到、影片/口頭說明、系統教學、任務切換、正式休息、最後 Debrief 與收尾緩衝。38 分鐘內除了 5 分鐘正式休息外，其餘是建議分配；只要總長維持約 150 分鐘，可依影片長度與現場狀況在說明、教學、切換、Debrief 與收尾之間微調。
@@ -79,9 +89,12 @@ Host/Admin 和 Observer 不要在任務內容上提供答案或設計建議。Ob
 
 ## 3. 場前準備
 
+正式執行前，Host/Admin 必須先完成 [主持人 Admin Observer Checklists](主持人_Admin_Observer_Checklists.md) 的 Run-of-show Preflight 與 Observer Per-room Preflight。該清單是 staff-only 文件，不提供給參與者；participant-facing email 和現場說明仍以本 Procedure 與 [受試者事前通知信](../communications/受試者事前通知信.md) 為準。
+
 ### 3.1 受試者事前通知
 
 - 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
+- 排程前先用內部 familiarity screener 記錄同組受試者是否認識、是否固定合作，以及是否需要改排或作為 covariate 保留。
 - 信件時間區間需預留約 150 分鐘。
 - 信件需提醒攜帶筆電、會議用耳機與充電器，並提醒筆電需能連接 HDMI 或自備對應轉接頭。
 - 信件需提醒事前測試耳機、麥克風或電腦內建麥克風。
@@ -131,6 +144,7 @@ Host/Admin 和 Observer 不要在任務內容上提供答案或設計建議。Ob
 - 小表單 A no cue: <https://docs.google.com/forms/d/1hultQhpxqw-Q-i9u8StCVhbxSf2eQTAtsZM1SWQ1TdM/edit>
 - 小表單 B with cue: <https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
 - 大表單: <https://docs.google.com/forms/d/1sxCMgYOR8AJ4iY7zuAXSY_2OeLXziCGHreokV0fsc0I/edit>
+- 功能使用與表單 skip logic 見 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md)。
 - Notion 題目想法: <https://www.notion.so/elvismao/37b00504b5ac80e194ecd5d9e6b6987f?source=copy_link>
 
 ## 4. 開場與系統教學講稿
@@ -203,18 +217,18 @@ Enhance-the-Poster 固定 32 分鐘。
 
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
-| Private phase 1 | 5 分鐘 | 看 Canva 海報、reviewer feedback 摘要、圖床、文字 / slogan library 與 component library，建立至少 4 個 component + action items，並以出聲或文字記錄建立理由，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
+| Private phase 1 | 5 分鐘 | 看 Canva 海報、任務需求、圖床、文字 / slogan library 與 component library；若材料包含 reviewer feedback，將其作為參考；建立至少 4 個 component + action items，並以出聲或文字記錄建立理由，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
 | Private phase 2 | 5 分鐘 | 對整理後的 items 做個人排序 | 鎖定 item 內容，產生可排序列表 | initial personal ranking |
 | Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
 
 Host 說明：
 
-> 接下來是 Enhance-the-Poster 任務。你們會看到一份 Canva 材料，裡面包含淨灘活動招募海報、任務說明與需求、reviewer feedback 摘要、圖床、可替換的文字與 slogan library，以及可以更動的 component library。Reviewer feedback 不需要逐字朗讀，請把它當作判斷改善方向的參考。
+> 接下來是 Enhance-the-Poster 任務。你們會看到一份 Canva 材料，裡面包含淨灘活動招募海報、任務說明與需求、圖床、可替換的文字與 slogan library，以及可以更動的 component library。若這一輪材料有 reviewer feedback 摘要，請把它當作判斷改善方向的參考；若沒有，請直接根據海報內容、任務需求、素材與自己的設計判斷。
 >
 > 請不要直接修改 Canva 海報。你的任務是用文字建立 component + action item，也就是「對哪個 component 做什麼修改」。
 >
-> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、reviewer feedback 摘要、圖床、文字 / slogan library、component library，或你自己的設計判斷來建立。建立時請把你正在考慮的理由說出來；如果不想出聲，也可以用文字輸入理由。
+> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、任務需求、圖床、文字 / slogan library、component library、你自己的設計判斷來建立；若本輪材料有 reviewer feedback，也可以把它納入考量。建立時請把你正在考慮的理由說出來；如果不想出聲，也可以用文字輸入理由。
 >
 > Private phase 2 有 5 分鐘，系統會整理大家建立的 items，請你先做自己的排序。
 >
@@ -228,12 +242,19 @@ Host 說明：
 
 - 如果剛完成的是 no-cue 條件，填小表單 A：<https://docs.google.com/forms/d/1hultQhpxqw-Q-i9u8StCVhbxSf2eQTAtsZM1SWQ1TdM/edit>
 - 如果剛完成的是 with-cue 條件，填小表單 B：<https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
+- 兩份小表單都需包含本輪熟悉度與公開反對舒適度題目；若 Google Form 尚未更新，Observer 需先記在 observation notes。
 
 Host 說明：
 
 > 接下來我們會花大約 10 分鐘問幾個剛才任務的問題。你不用自己填表單，實驗人員會口頭問，並把你的回答填進表單。請根據剛才那一輪的經驗回答。
 
 三位 Observer / Interviewer 分別負責三位真實參與者；暗樁不填正式參與者表單，除非團隊另有內部紀錄需求。
+
+Observer 代填前需先依 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md) 確認功能可用性與實際使用情況：
+
+- idea blocks：先問是否看到 / 使用；若沒有看到或沒有使用，不問 usefulness rating，改填 `N/A_did_not_see` 或 `N/A_did_not_use`。
+- reviewer feedback：只有 Poster task 且 Canva material version 實際包含 feedback 時才追問；若未提供，所有 reviewer feedback 題目填 `N/A_not_available`。
+- similarity cue：no-cue 條件只記錄 `N/A_no_cue_by_condition`；with-cue 條件若沒有看到 cue，不問 cue usefulness。
 
 ## 7. 休息與任務切換
 
@@ -264,7 +285,8 @@ Host 切換回來說明：
 - 三位 Observer / Interviewer 各帶一位真實參與者到不同地方，三場訪談要彼此分開，不能互相聽見。
 - 暗樁不參與真實參與者個別訪談。
 - 每位訪談約 30 分鐘。
-- 訪談者依 [問卷與訪談題綱](../forms/問卷與訪談題綱.md) 與自己的 observation notes 追問。
+- 訪談者依 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md)、[問卷與訪談題綱](../forms/問卷與訪談題綱.md) 與自己的 observation notes 追問。
+- 訪談者必問熟悉度追問：受試者是否因為認識或不認識組員，而更容易或更不容易公開反對、使用 private notes、idea blocks、cue 或聊天室。
 - 訪談語言必須維持中性；若要追問某段討論，只能說「某位成員」「有人」「剛才那段討論」，不能說「暗樁」「研究團隊安排成員」或任何同義說法。
 
 Host 分流說明：
@@ -300,6 +322,8 @@ Debrief 講稿：
 - chat：所有 public chat messages；不應存在 private chat logs。
 - screen recording workaround：每位真實參與者的個別 Google Meet 錄影；暗樁錄影依內部需求記錄。這不是 OmniObserve 系統輸出。
 - Google Forms responses：小表單 A/B、大表單。
+- form skip metadata：功能是否可用、是否看到、是否使用、`N/A` 原因。
+- participant familiarity screener 與 task 後 familiarity responses。
 - session summary。
 - incident log。
 - observer notes。
@@ -312,9 +336,10 @@ Host/Admin 在所有人離開後完成：
 
 1. 停止 Google Meet 錄影並確認檔案保存。
 2. 確認三位真實參與者的小表單和大表單都已填寫。
-3. 確認三份個別訪談錄音保存。
-4. 確認最後 Debrief 已完成並記錄完成時間。
-5. 匯出兩個 task 的 system logs。
-6. 收齊三位 Observer 的 notes。
-7. 建立 session summary 和 incident log。
-8. 檢查所有檔案命名符合規格。
+3. 確認 familiarity screener、task 後熟悉度回答與公開反對舒適度回答已保存。
+4. 確認三份個別訪談錄音保存。
+5. 確認最後 Debrief 已完成並記錄完成時間。
+6. 匯出兩個 task 的 system logs。
+7. 收齊三位 Observer 的 notes。
+8. 建立 session summary 和 incident log，並填入 group familiarity 與 analysis caveat。
+9. 檢查所有檔案命名符合規格。
