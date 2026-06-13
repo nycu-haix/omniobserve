@@ -33,10 +33,12 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 
 - 初版淨灘活動招募海報。
 - 本任務的任務說明與 phase 需求。
-- Reviewer feedback 摘要；講稿不逐字朗讀完整 reviewer 原文。
+- Reviewer feedback 摘要，若本輪材料版本有提供；講稿不逐字朗讀完整 reviewer 原文。
 - 圖床 / image library，提供可替換主視覺、背景或輔助圖片。
 - 文字與 slogan library，提供可替換的主標題、副標題、說明文字、CTA、QR caption 等候選文字。
 - Component/action library，讓參與者能對照系統中的 component 與改善動作建立 task items。
+
+正式執行前，Host 需在 session summary 記錄 `review_feedback_available=yes/no` 與 Canva material version。若本輪沒有提供 reviewer feedback，小表單與訪談中所有 reviewer feedback 題目需依 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md) 標記 `N/A_not_available`。
 
 ### 材料 1: 任務說明
 
@@ -51,7 +53,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 
 正式任務說明：
 
-> 你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，我們將目前的設計交給 reviewer 閱讀，並收集了一些關於資訊清楚度、文字內容與視覺呈現的改善建議。綜合目前的海報內容與 reviewer feedback，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。
+> 你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，請綜合目前的海報內容、任務需求與提供的素材，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。若這一輪 Canva 材料有提供 reviewer feedback，請把它當作其中一項參考；若沒有提供，請直接以海報內容、任務需求、圖床、文字 / slogan library 與自己的設計判斷建立改善項目。
 >
 > Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將你認為最應該優先改善的項目排在前面。建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。
 >
@@ -67,9 +69,9 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 - 同時包含 layout、hierarchy、readability、image choice、tone、call to action、information grouping 等多個可討論方向。
 - 初始海報中所有重要區塊要有 component ID。
 
-### 材料 3: Reviewer feedback 摘要
+### 材料 3: Reviewer feedback 摘要（可選）
 
-Canva 可以放 reviewer feedback 原始內容或摘要，但講稿不需要逐字朗讀完整 review。正式說明只提醒參與者：reviewer feedback 主要集中在資訊清楚度、文字內容與視覺呈現。
+Canva 可以放 reviewer feedback 原始內容或摘要，但這是材料版本的一部分，不得在沒有提供 feedback 的場次中由講稿承諾存在。正式說明只提醒參與者：若材料包含 reviewer feedback，它主要集中在資訊清楚度、文字內容與視覺呈現。
 
 建議在 Canva 中用摘要卡呈現：
 
@@ -237,7 +239,7 @@ Action item 應使用下列 action 語彙；若系統可支援選單，優先使
 
 - 是否自然出現 8 個以上不同 action items。
 - 是否至少有 3 個設計方向彼此競爭。
-- 是否有人會引用不同 slogans、images、background 或 feedback。
+- 是否有人會引用不同 slogans、images、background；若材料提供 reviewer feedback，也檢查是否有人會引用不同 feedback。
 - 是否不需要直接編輯海報也能說清楚修改意圖。
 - 是否不會全部集中在「主標題放大」「QR code 縮小」等單一明顯修正。
 - 是否可在 5 分鐘內產生每人至少 4 個 component + action items。
@@ -247,7 +249,7 @@ Action item 應使用下列 action 語彙；若系統可支援選單，優先使
 
 - 只有單一巨大錯誤，導致所有人提出同一件事。
 - 可用圖片太少，讓討論變成二選一。
-- 每個 feedback 都指向同一修正方向。
+- 若材料提供 reviewer feedback，每個 feedback 都指向同一修正方向。
 - 元件太多但沒有 ID，參與者無法引用。
 - 要求參與者在任務中實際美編、拖拉或搜尋素材。
 - 把所有圖片與素材塞進 OmniObserve UI，造成系統介面過載。
