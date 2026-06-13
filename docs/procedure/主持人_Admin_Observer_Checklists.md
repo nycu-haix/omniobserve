@@ -28,9 +28,11 @@
 
 ## 2. Host / Admin 場前檢查
 
-### 2.1 Run-of-show Preflight（參與者進場前完成）
+### 2.1 Run-of-show Preflight（正式流程開始前完成）
 
 此清單只供 Host/Admin/Observer 使用，不寄給受試者，不放在受試者可見畫面。cue/no-cue 條件、暗樁安排、mapping table 與 staff fallback room 都是 staff-only 資訊。
+
+Link、permission、staff-only room、condition assignment、hidden setup 與 export readiness 應在參與者進場前完成。Device / Audio / Recording 與 participant screen-share 類檢查需在參與者加入各自個別 Meet 後、正式開場前完成；不得為了勾選場前清單而提前標記尚未實測的錄影、畫面或收音狀態。
 
 #### Link / Permission / Communication
 
