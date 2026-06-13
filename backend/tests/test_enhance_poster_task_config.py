@@ -31,15 +31,22 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertIn("transparency", background["allowed_action_ids"])
         self.assertIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
 
-    def test_private_phases_show_task_instructions_first(self) -> None:
+    def test_private_phases_show_task_instructions_on_the_right(self) -> None:
         phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
 
-        for phase_id in ("private_phase_1", "private_phase_2"):
+        expected_left_pane_by_phase = {
+            "private_phase_1": {"type": "leaf", "content": "phase-task-items"},
+            "private_phase_2": {"type": "leaf", "content": "private-ranking"},
+        }
+
+        for phase_id, expected_left_pane in expected_left_pane_by_phase.items():
             with self.subTest(phase_id=phase_id):
                 layout = phases_by_id[phase_id]["default_layout"]
 
                 self.assertEqual(layout["type"], "split")
-                self.assertEqual(layout["first"], {"type": "leaf", "content": "task-instructions"})
+                self.assertEqual(layout["ratio"], 58)
+                self.assertEqual(layout["first"], expected_left_pane)
+                self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
 
     def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
         self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png")

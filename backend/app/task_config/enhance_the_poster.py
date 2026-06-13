@@ -528,16 +528,16 @@ PRIVATE_RANKING_LAYOUT = {
 PRIVATE_PHASE_1_WITH_INSTRUCTIONS_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
-    "ratio": 38,
-    "first": TASK_INSTRUCTIONS_LAYOUT,
-    "second": PHASE1_TASK_ITEM_BUILDER_LAYOUT,
+    "ratio": 58,
+    "first": PHASE1_TASK_ITEM_BUILDER_LAYOUT,
+    "second": TASK_INSTRUCTIONS_LAYOUT,
 }
 PRIVATE_PHASE_2_WITH_INSTRUCTIONS_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
-    "ratio": 38,
-    "first": TASK_INSTRUCTIONS_LAYOUT,
-    "second": PRIVATE_RANKING_LAYOUT,
+    "ratio": 58,
+    "first": PRIVATE_RANKING_LAYOUT,
+    "second": TASK_INSTRUCTIONS_LAYOUT,
 }
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
