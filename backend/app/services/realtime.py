@@ -29,7 +29,7 @@ from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import (
     get_participant_display_name,
     get_participant_presence,
-    is_cached_observer,
+    is_cached_non_analysis_participant,
     mark_audio_disconnected,
     sync_participant_roles,
     update_participant_metadata,
@@ -92,7 +92,7 @@ def _is_real_participant_id(participant_id: str | None) -> bool:
 def _is_participant_ranking_subject(session_id: str, participant_id: str | None) -> bool:
     if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
         return False
-    return not is_cached_observer(session_id, str(participant_id or ""))
+    return not is_cached_non_analysis_participant(session_id, str(participant_id or ""))
 
 
 def _phase_snapshot_participant_ids(participant_ids: list[str]) -> list[str]:

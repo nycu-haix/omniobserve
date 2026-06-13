@@ -273,7 +273,7 @@ async def get_session_presence(
     response_model=ParticipantRoleResponse,
     responses=COMMON_ERROR_RESPONSES,
     summary="Set Participant Role",
-    description="Manually marks a session participant as a participant or observer for admin filtering and exports.",
+    description="Manually marks a session member as participant, confederate, observer, facilitator, or test for admin filtering and exports.",
 )
 async def update_session_participant_role(
     session_name: str,

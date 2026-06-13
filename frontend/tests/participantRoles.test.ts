@@ -6,7 +6,14 @@ test("normalizes observer aliases", () => {
 	assert.equal(normalizeParticipantRole("observer"), "observer");
 	assert.equal(normalizeParticipantRole("nonparticipant"), "observer");
 	assert.equal(normalizeParticipantRole("non_participant"), "observer");
-	assert.equal(normalizeParticipantRole("facilitator"), "observer");
+});
+
+test("normalizes experiment roles", () => {
+	assert.equal(normalizeParticipantRole("confederate"), "confederate");
+	assert.equal(normalizeParticipantRole("confederate_script"), "confederate");
+	assert.equal(normalizeParticipantRole("facilitator"), "facilitator");
+	assert.equal(normalizeParticipantRole("staff"), "facilitator");
+	assert.equal(normalizeParticipantRole("test_client"), "test");
 });
 
 test("defaults missing and unknown roles to participant for frontend display", () => {
@@ -17,7 +24,11 @@ test("defaults missing and unknown roles to participant for frontend display", (
 
 test("identifies observers as excluded from participant analysis", () => {
 	assert.equal(isObserverRole("observer"), true);
+	assert.equal(isObserverRole("confederate"), false);
 	assert.equal(isParticipantAnalysisRole("observer"), false);
+	assert.equal(isParticipantAnalysisRole("confederate"), false);
+	assert.equal(isParticipantAnalysisRole("facilitator"), false);
+	assert.equal(isParticipantAnalysisRole("test"), false);
 });
 
 test("identifies admin presence participant IDs", () => {

@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..config import logger
+from ..config import OPENAI_MODEL, logger
 from ..db import SessionLocal
 from ..models import IdeaBlock, TaskItem, Transcript, Visibility
 from ..schemas import ApiError, StreamTranscript
@@ -21,6 +22,7 @@ from .idea_block_generation_limits import (
 )
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .idea_blocks import build_idea_blocks_with_llm
+from .pipeline_latency import create_pipeline_trace, persist_pipeline_trace, pipeline_decision, stage_started
 from .similarity_detection import trigger_similarity_detection
 from .task_item_generation import build_task_item_ids_with_llm, save_task_items_for_idea_block_ids
 
@@ -123,15 +125,34 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
 ) -> PipelineResult:
     resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
+    main_transcript_id = _main_transcript_id_from_batch(transcripts)
+    segment_cut_at = _segment_cut_at_from_batch(transcripts)
+    trace = await create_pipeline_trace(
+        db,
+        session_name=session_name,
+        task_name=resolved_task_name,
+        participant_id=user_id,
+        scope=visibility.value,
+        transcript_id=main_transcript_id,
+        transcript_chars=len(transcript_text),
+        transcript_count_in_batch=len(transcripts),
+        client_segment_ids=[str(item.segment_id) for item in transcripts if item.segment_id],
+        segment_cut_at=segment_cut_at,
+    )
     if not transcript_text:
         logger.info(
             "pipeline_skip_empty_batch session_name=%s user_id=%s",
             session_name,
             user_id,
         )
+        await persist_pipeline_trace(
+            db,
+            trace,
+            decision="skipped_empty",
+            skipped_reason="empty_transcript_text",
+        )
         return PipelineResult(idea_blocks=[], task_items=[])
 
-    main_transcript_id = _main_transcript_id_from_batch(transcripts)
     logger.info(
         "pipeline_main_transcript_selected session_name=%s user_id=%s transcript_id=%s transcript_count=%s",
         session_name,
@@ -154,7 +175,14 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             user_id,
             len(transcript_text),
         )
+        idea_llm_started = stage_started()
         raw_generated_blocks = await build_idea_blocks_with_llm(transcript_text, session_name=session_name, task_name=resolved_task_name)
+        trace.add_stage(
+            "idea_llm",
+            idea_llm_started,
+            llm_model=OPENAI_MODEL,
+            metadata={"raw_generated_count": len(raw_generated_blocks)},
+        )
         deduplicated_generated_blocks = deduplicate_generated_idea_blocks(raw_generated_blocks)
         generated_blocks = deduplicated_generated_blocks[:MAX_IDEA_BLOCKS_PER_TRANSCRIPT_BATCH]
         logger.info(
@@ -177,7 +205,13 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 transcript_id=main_transcript_id,
             )
             try:
+                provisional_started = stage_started()
                 await on_provisional_idea_blocks_update(provisional_idea_blocks)
+                trace.add_stage(
+                    "provisional_idea_blocks_sent",
+                    provisional_started,
+                    candidate_count=len(provisional_idea_blocks),
+                )
                 logger.info(
                     "pipeline_provisional_idea_blocks_sent session_name=%s user_id=%s count=%s",
                     session_name,
@@ -213,12 +247,14 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 len(summary),
             )
+            embedding_started = stage_started()
             embedding_vector = await _create_embedding_or_none(
                 summary,
                 session_name=session_name,
                 user_id=user_id,
                 block_index=block_index,
             )
+            trace.add_stage("embedding", embedding_started, metadata={"block_index": block_index})
             title = _title_from_content(content)
             logger.info(
                 "pipeline_task_item_ids_start session_name=%s user_id=%s block_index=%s summary_chars=%s",
@@ -227,7 +263,15 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 len(summary),
             )
+            task_item_llm_started = stage_started()
             task_item_ids = await build_task_item_ids_with_llm(summary, session_name=session_name, task_name=resolved_task_name)
+            trace.add_stage(
+                "task_item_llm",
+                task_item_llm_started,
+                candidate_count=len(task_item_ids),
+                llm_model=OPENAI_MODEL,
+                metadata={"block_index": block_index},
+            )
             logger.info(
                 "pipeline_task_item_ids_done session_name=%s user_id=%s block_index=%s task_item_ids=%s",
                 session_name,
@@ -235,6 +279,25 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 block_index,
                 task_item_ids,
             )
+
+            def record_dedupe_stage(
+                stage: str,
+                started_perf: float,
+                *,
+                candidate_count: int | None = None,
+                llm_model: str | None = None,
+                metadata: dict[str, Any] | None = None,
+            ) -> None:
+                stage_metadata = {"block_index": block_index}
+                stage_metadata.update(metadata or {})
+                trace.add_stage(
+                    stage,
+                    started_perf,
+                    candidate_count=candidate_count,
+                    llm_model=llm_model,
+                    metadata=stage_metadata,
+                )
+
             duplicate_match = await find_duplicate_idea_block(
                 db,
                 session_name=session_name,
@@ -243,6 +306,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 summary=summary,
                 embedding_vector=embedding_vector,
                 task_item_ids=task_item_ids,
+                record_stage=record_dedupe_stage,
             )
             if duplicate_match is not None:
                 logger.info(
@@ -265,6 +329,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     duplicate_idea_blocks.append(duplicate_block)
                 continue
 
+            idea_block_save_started = stage_started()
             idea_block = IdeaBlock(
                 user_id=user_id,
                 session_name=session_name,
@@ -277,6 +342,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             )
             db.add(idea_block)
             await db.flush()
+            trace.add_stage("idea_block_saved", idea_block_save_started, metadata={"block_index": block_index, "idea_block_id": idea_block.id})
             idea_blocks.append(idea_block)
             logger.info(
                 "pipeline_idea_block_saved session_name=%s user_id=%s block_index=%s idea_block_id=%s transcript_id=%s",
@@ -295,6 +361,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                 idea_block.id,
             )
             task_item_count_before = len(task_items)
+            task_items_save_started = stage_started()
             task_items.extend(
                 await save_task_items_for_idea_block_ids(
                     db,
@@ -304,6 +371,12 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
                     task_name=resolved_task_name,
                     text=summary,
                 )
+            )
+            trace.add_stage(
+                "task_items_saved",
+                task_items_save_started,
+                candidate_count=len(task_items) - task_item_count_before,
+                metadata={"block_index": block_index, "idea_block_id": idea_block.id},
             )
             logger.info(
                 "pipeline_task_items_done session_name=%s user_id=%s block_index=%s idea_block_id=%s block_task_items=%s total_task_items=%s",
@@ -329,7 +402,9 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             len(idea_blocks),
             len(task_items),
         )
+        commit_started = stage_started()
         await db.commit()
+        trace.add_stage("pipeline_commit", commit_started)
         logger.info(
             "pipeline_commit_done session_name=%s user_id=%s idea_blocks=%s task_items=%s",
             session_name,
@@ -340,6 +415,24 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         _schedule_similarity_detection(
             idea_block_ids=[idea_block.id for idea_block in idea_blocks],
             on_similarity_update=on_similarity_update,
+            pipeline_run_id=trace.pipeline_run_id,
+        )
+        await persist_pipeline_trace(
+            db,
+            trace,
+            decision=pipeline_decision(
+                len(idea_blocks),
+                len(duplicate_idea_blocks),
+                raw_generated_count=len(raw_generated_blocks),
+            ),
+            generated_idea_block_count=len(idea_blocks),
+            duplicate_idea_block_count=len(duplicate_idea_blocks),
+            metadata={
+                "raw_generated_idea_block_count": len(raw_generated_blocks),
+                "displayed_generated_idea_block_count": len(generated_blocks),
+                "deduped_candidate_count": max(0, len(raw_generated_blocks) - len(deduplicated_generated_blocks)),
+                "capped_candidate_count": max(0, len(deduplicated_generated_blocks) - len(generated_blocks)),
+            },
         )
         return PipelineResult(
             idea_blocks=idea_blocks,
@@ -354,6 +447,12 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             exc,
         )
         await db.rollback()
+        await persist_pipeline_trace(
+            db,
+            trace,
+            decision="error",
+            error_type=exc.__class__.__name__,
+        )
         raise
 
 
@@ -545,10 +644,18 @@ def _main_transcript_id_from_batch(transcripts: list[StreamTranscript]) -> int |
     return None
 
 
+def _segment_cut_at_from_batch(transcripts: list[StreamTranscript]) -> datetime | None:
+    for transcript in reversed(transcripts):
+        if transcript.ended_at is not None:
+            return transcript.ended_at
+    return None
+
+
 def _schedule_similarity_detection(
     *,
     idea_block_ids: list[int],
     on_similarity_update: IdeaBlockUpdateCallback | None,
+    pipeline_run_id: str | None = None,
 ) -> None:
     if not idea_block_ids:
         logger.info("similarity_detection_background_skipped reason=%s", "no_idea_blocks")
@@ -559,7 +666,7 @@ def _schedule_similarity_detection(
             updated_blocks: list[IdeaBlock] = []
             async with SessionLocal() as detection_db:
                 for idea_block_id in idea_block_ids:
-                    await trigger_similarity_detection(idea_block_id, detection_db)
+                    await trigger_similarity_detection(idea_block_id, detection_db, pipeline_run_id=pipeline_run_id)
                     idea_block = await get_idea_block_for_payload(idea_block_id, detection_db)
                     if idea_block is not None:
                         updated_blocks.append(idea_block)

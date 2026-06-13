@@ -1,6 +1,6 @@
 from typing import Any
 
-from .participant_roles import PARTICIPANT_ROLE, normalize_participant_role, is_observer_role
+from .participant_roles import PARTICIPANT_ROLE, is_non_analysis_participant_role, normalize_participant_role
 from ..utils import to_iso_z, utc_now
 
 
@@ -72,8 +72,8 @@ def get_cached_participant_role(session_name: str, participant_id: str) -> str:
     return normalize_participant_role(status.get("participant_role", PARTICIPANT_ROLE))
 
 
-def is_cached_observer(session_name: str, participant_id: str) -> bool:
-    return is_observer_role(get_cached_participant_role(session_name, participant_id))
+def is_cached_non_analysis_participant(session_name: str, participant_id: str) -> bool:
+    return is_non_analysis_participant_role(get_cached_participant_role(session_name, participant_id))
 
 
 def mark_audio_disconnected(session_name: str, participant_id: str) -> None:

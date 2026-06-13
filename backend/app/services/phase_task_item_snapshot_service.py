@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from ..config import logger
 from ..models import PhaseTaskItemSnapshot, PhaseTaskItemSnapshotItem, PrivatePhaseTaskItem
 from ..task_config import resolve_task_id
-from .participant_roles import is_observer_role, list_session_participant_roles
+from .participant_roles import is_non_analysis_participant_role, list_session_participant_roles
 
 ENHANCE_THE_POSTER_TASK_ID = "enhance-the-poster"
 PRIVATE_PHASE_1 = "private_phase_1"
@@ -301,7 +301,7 @@ def _observer_participant_ids(participant_roles: dict[str, str]) -> list[str]:
     return sorted(
         participant_id
         for participant_id, participant_role in participant_roles.items()
-        if is_observer_role(participant_role)
+        if is_non_analysis_participant_role(participant_role)
     )
 
 

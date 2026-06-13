@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X }
 import type { UIEvent } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
+import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
@@ -1178,6 +1179,14 @@ function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
 	};
 }
 
+function buildMissingIdeaBlockJumpTargetNotice(cue: SimilarityPairCueData): IdeaBlockNotice {
+	return {
+		id: `missing-jump-target-${cue.blockId}-${Date.now()}`,
+		title: "找不到可以查看的想法",
+		message: "這個提示指向的 idea block 尚未載入或已移除，請稍後重新整理 Idea Blocks。"
+	};
+}
+
 function buildSimilarityReasonShareNotice(payload: SimilarityReasonShareSentData): IdeaBlockNotice {
 	const deliveredCount = typeof payload.deliveredCount === "number" ? payload.deliveredCount : payload.recipientCount;
 	const message =
@@ -1709,14 +1718,22 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		setActiveTab(tab);
 	}, []);
 
+	const canJumpToRenderedBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocks, blockId), [ideaBlocks]);
+	const canJumpToBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocksRef.current, blockId), []);
+
 	const jumpToBlock = useCallback(
 		(blockId: string) => {
+			if (!canJumpToBlock(blockId)) {
+				return false;
+			}
+
 			onRequestOpen?.();
 			selectBoardTab("ideablock");
 			setHighlightedBlockId(blockId);
 			markIdeaBlocksRead(new Set([blockId]));
+			return true;
 		},
-		[markIdeaBlocksRead, onRequestOpen, selectBoardTab]
+		[canJumpToBlock, markIdeaBlocksRead, onRequestOpen, selectBoardTab]
 	);
 
 	const openLatestUnreadIdeaBlock = useCallback(() => {
@@ -3435,8 +3452,11 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	};
 
 	const viewSimilarityCue = (cue: SimilarityPairCueData) => {
+		if (!jumpToBlock(cue.blockId)) {
+			setIdeaBlockNotice(buildMissingIdeaBlockJumpTargetNotice(cue));
+			return;
+		}
 		sendSimilarityCueResponse(cue, "accepted");
-		jumpToBlock(cue.blockId);
 	};
 
 	const shareSimilarityReasonFromBlock = useCallback(
@@ -3716,7 +3736,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				)}
 			</section>
 
-			<SimilarityCue cues={visibleSimilarityCues} onJump={viewSimilarityCue} onDismiss={dismissSimilarityCue} onShareReason={shareSimilarityReason} topContent={notificationCueContent} />
+			<SimilarityCue
+				cues={visibleSimilarityCues}
+				onJump={viewSimilarityCue}
+				onDismiss={dismissSimilarityCue}
+				onShareReason={shareSimilarityReason}
+				canJumpToBlock={canJumpToRenderedBlock}
+				topContent={notificationCueContent}
+			/>
 		</>
 	);
 });

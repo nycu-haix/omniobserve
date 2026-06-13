@@ -20,14 +20,16 @@ from ..models import (
     ChatMessage,
     IdeaBlock,
     IdeaBlockToTranscript,
+    PipelineLatencyEvent,
     PhaseTaskItemSnapshot,
     RankingPhaseSnapshot,
     Similarity,
     SimilarityCueEvent,
     Transcript,
+    TranscriptGenerationDecision,
 )
 from ..task_config import get_task_phases_for_session, resolve_task_id
-from .participant_roles import OBSERVER_ROLE, PARTICIPANT_ROLE, list_session_participant_roles, normalize_participant_role
+from .participant_roles import CONFEDERATE_ROLE, FACILITATOR_ROLE, OBSERVER_ROLE, PARTICIPANT_ROLE, TEST_ROLE, is_participant_analysis_role, list_session_participant_roles, normalize_participant_role
 
 TASK_EXPORT_SCHEMA_VERSION = 1
 APP_VERSION = "0.1.0"
@@ -142,6 +144,16 @@ async def build_task_export_bundle(
         task_id=resolved_task_id,
         similarities=similarities,
     )
+    pipeline_decisions = await _load_transcript_generation_decisions(
+        db,
+        session_name=session_name,
+        task_id=resolved_task_id,
+    )
+    pipeline_latency_events = await _load_pipeline_latency_events(
+        db,
+        session_name=session_name,
+        task_id=resolved_task_id,
+    )
     participant_roles = await list_session_participant_roles(db, session_name=session_name)
 
     phase_windows = _build_phase_windows(
@@ -165,6 +177,8 @@ async def build_task_export_bundle(
         idea_blocks=idea_blocks,
         similarities=similarities,
         cue_events=cue_events,
+        pipeline_decisions=pipeline_decisions,
+        pipeline_latency_events=pipeline_latency_events,
         ranking_snapshots=ranking_snapshots,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
@@ -200,6 +214,8 @@ async def build_task_export_bundle(
         idea_blocks=idea_blocks,
         similarities=similarities,
         cue_events=cue_events,
+        pipeline_decisions=pipeline_decisions,
+        pipeline_latency_events=pipeline_latency_events,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
     )
@@ -340,6 +356,40 @@ async def _load_task_cue_events(
     return list(result.scalars().all())
 
 
+async def _load_transcript_generation_decisions(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_id: str,
+) -> list[TranscriptGenerationDecision]:
+    result = await db.execute(
+        select(TranscriptGenerationDecision)
+        .where(
+            TranscriptGenerationDecision.session_name == session_name,
+            TranscriptGenerationDecision.task_name == task_id,
+        )
+        .order_by(TranscriptGenerationDecision.decision_done_at.asc(), TranscriptGenerationDecision.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def _load_pipeline_latency_events(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    task_id: str,
+) -> list[PipelineLatencyEvent]:
+    result = await db.execute(
+        select(PipelineLatencyEvent)
+        .where(
+            PipelineLatencyEvent.session_name == session_name,
+            PipelineLatencyEvent.task_name == task_id,
+        )
+        .order_by(PipelineLatencyEvent.created_at.asc(), PipelineLatencyEvent.id.asc())
+    )
+    return list(result.scalars().all())
+
+
 def _build_data_files(
     *,
     context: ExportContext,
@@ -350,6 +400,8 @@ def _build_data_files(
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
     cue_events: list[SimilarityCueEvent],
+    pipeline_decisions: list[TranscriptGenerationDecision],
+    pipeline_latency_events: list[PipelineLatencyEvent],
     ranking_snapshots: list[RankingPhaseSnapshot],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
@@ -362,6 +414,8 @@ def _build_data_files(
     files.append(_idea_blocks_file(context, participant_roles, idea_blocks, phase_windows))
     files.append(_public_chat_file(context, participant_roles, chat_messages, phase_windows))
     files.extend(_cue_files(context, idea_blocks, similarities, cue_events, phase_windows))
+    files.append(_transcript_generation_decisions_file(context, participant_roles, pipeline_decisions, phase_windows))
+    files.append(_pipeline_latency_events_file(context, participant_roles, pipeline_latency_events, phase_windows))
     files.append(_phase_timestamps_file(context, phase_windows))
     return files
 
@@ -442,7 +496,7 @@ def _ranking_snapshot_files(
             TaskExportFile(
                 path=_package_path(context, filename),
                 artifact=artifact,
-                scope="diagnostic" if artifact == "observer_ranking_diagnostic" else snapshot.scope,
+                scope="diagnostic" if artifact.endswith("_ranking_diagnostic") else snapshot.scope,
                 record_count=len(rows),
                 required=artifact in {"initial_ranking", "group_ranking", "final_ranking"},
                 media_type="text/csv",
@@ -616,8 +670,7 @@ def _idea_blocks_file(
     rows = []
     for block in idea_blocks:
         transcript_ids = _idea_block_transcript_ids(block)
-        source_type = "speech" if transcript_ids else "unknown"
-        source_ref = ";".join(f"transcript:{transcript_id}" for transcript_id in transcript_ids)
+        source_type, source_ref = _idea_block_source_metadata(block, transcript_ids)
         phase = _infer_phase_for_timestamp(block.time_stamp, phase_windows)
         rows.append(
             {
@@ -894,6 +947,166 @@ def _cue_event_row(
     }
 
 
+def _transcript_generation_decisions_file(
+    context: ExportContext,
+    participant_roles: dict[str, str],
+    decisions: list[TranscriptGenerationDecision],
+    phase_windows: list[dict[str, Any]],
+) -> TaskExportFile:
+    headers = [
+        "session_name",
+        "group_id",
+        "task",
+        "condition",
+        "phase",
+        "participant_id",
+        "participant_code",
+        "participant_role",
+        "participant_analysis_included",
+        "scope",
+        "transcript_id",
+        "client_segment_ids",
+        "segment_cut_at",
+        "transcript_saved_at",
+        "decision_done_at",
+        "cut_to_decision_ms",
+        "save_to_decision_ms",
+        "decision",
+        "generated_idea_block_count",
+        "duplicate_idea_block_count",
+        "transcript_chars",
+        "session_transcript_count_before",
+        "session_idea_block_count_before",
+        "participant_idea_block_count_before",
+        "skipped_reason",
+        "error_type",
+        "pipeline_run_id",
+        "metadata",
+        "created_at",
+    ]
+    rows = [
+        {
+            "session_name": decision.session_name,
+            "group_id": context.group_id,
+            "task": context.task_token,
+            "condition": decision.condition or context.condition.token,
+            "phase": _transcript_generation_decision_phase(decision, phase_windows),
+            "participant_id": decision.participant_id,
+            "participant_code": _participant_code(context.group_id, decision.participant_id),
+            "participant_role": _participant_role_for_id(participant_roles, decision.participant_id),
+            "participant_analysis_included": _is_analysis_participant_id(participant_roles, decision.participant_id),
+            "scope": decision.scope,
+            "transcript_id": decision.transcript_id,
+            "client_segment_ids": decision.client_segment_ids,
+            "segment_cut_at": decision.segment_cut_at,
+            "transcript_saved_at": decision.transcript_saved_at,
+            "decision_done_at": decision.decision_done_at,
+            "cut_to_decision_ms": decision.cut_to_decision_ms,
+            "save_to_decision_ms": decision.save_to_decision_ms,
+            "decision": decision.decision,
+            "generated_idea_block_count": decision.generated_idea_block_count,
+            "duplicate_idea_block_count": decision.duplicate_idea_block_count,
+            "transcript_chars": decision.transcript_chars,
+            "session_transcript_count_before": decision.session_transcript_count_before,
+            "session_idea_block_count_before": decision.session_idea_block_count_before,
+            "participant_idea_block_count_before": decision.participant_idea_block_count_before,
+            "skipped_reason": decision.skipped_reason,
+            "error_type": decision.error_type,
+            "pipeline_run_id": decision.pipeline_run_id,
+            "metadata": decision.event_metadata,
+            "created_at": decision.created_at,
+        }
+        for decision in decisions
+    ]
+    return TaskExportFile(
+        path=_package_path(context, f"{_artifact_prefix(context)}_transcript_generation_decisions.csv"),
+        artifact="transcript_generation_decisions",
+        scope="group",
+        record_count=len(rows),
+        required=False,
+        media_type="text/csv",
+        content=_csv_content(headers, rows),
+    )
+
+
+def _pipeline_latency_events_file(
+    context: ExportContext,
+    participant_roles: dict[str, str],
+    events: list[PipelineLatencyEvent],
+    phase_windows: list[dict[str, Any]],
+) -> TaskExportFile:
+    headers = [
+        "pipeline_run_id",
+        "session_name",
+        "group_id",
+        "task",
+        "condition",
+        "phase",
+        "participant_id",
+        "participant_code",
+        "participant_role",
+        "participant_analysis_included",
+        "scope",
+        "transcript_id",
+        "stage",
+        "duration_ms",
+        "meeting_elapsed_ms",
+        "phase_elapsed_ms",
+        "transcript_chars",
+        "session_transcript_count_before",
+        "session_idea_block_count_before",
+        "participant_idea_block_count_before",
+        "candidate_count",
+        "llm_model",
+        "llm_input_tokens",
+        "llm_output_tokens",
+        "retry_count",
+        "metadata",
+        "created_at",
+    ]
+    rows = [
+        {
+            "pipeline_run_id": event.pipeline_run_id,
+            "session_name": event.session_name,
+            "group_id": context.group_id,
+            "task": context.task_token,
+            "condition": event.condition or context.condition.token,
+            "phase": _latency_phase(event.phase, event.created_at, phase_windows),
+            "participant_id": event.participant_id,
+            "participant_code": _participant_code(context.group_id, event.participant_id),
+            "participant_role": _participant_role_for_id(participant_roles, event.participant_id),
+            "participant_analysis_included": _is_analysis_participant_id(participant_roles, event.participant_id),
+            "scope": event.scope,
+            "transcript_id": event.transcript_id,
+            "stage": event.stage,
+            "duration_ms": event.duration_ms,
+            "meeting_elapsed_ms": event.meeting_elapsed_ms,
+            "phase_elapsed_ms": event.phase_elapsed_ms,
+            "transcript_chars": event.transcript_chars,
+            "session_transcript_count_before": event.session_transcript_count_before,
+            "session_idea_block_count_before": event.session_idea_block_count_before,
+            "participant_idea_block_count_before": event.participant_idea_block_count_before,
+            "candidate_count": event.candidate_count,
+            "llm_model": event.llm_model,
+            "llm_input_tokens": event.llm_input_tokens,
+            "llm_output_tokens": event.llm_output_tokens,
+            "retry_count": event.retry_count,
+            "metadata": event.event_metadata,
+            "created_at": event.created_at,
+        }
+        for event in events
+    ]
+    return TaskExportFile(
+        path=_package_path(context, f"{_artifact_prefix(context)}_pipeline_latency_events.csv"),
+        artifact="pipeline_latency_events",
+        scope="group",
+        record_count=len(rows),
+        required=False,
+        media_type="text/csv",
+        content=_csv_content(headers, rows),
+    )
+
+
 def _count_values(values: Any) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
@@ -1068,8 +1281,10 @@ def _latest_ranking_snapshots(snapshots: list[RankingPhaseSnapshot]) -> list[Ran
 
 
 def _ranking_artifact_name(snapshot: RankingPhaseSnapshot, participant_roles: dict[str, str] | None = None) -> str:
-    if snapshot.scope == "private" and snapshot.participant_id and _is_observer_participant_id(participant_roles or {}, snapshot.participant_id):
-        return "observer_ranking_diagnostic"
+    if snapshot.scope == "private" and snapshot.participant_id:
+        diagnostic_role = _diagnostic_role_for_id(participant_roles or {}, snapshot.participant_id)
+        if diagnostic_role:
+            return f"{diagnostic_role}_ranking_diagnostic"
     if snapshot.scope == "public" or snapshot.phase == "group":
         return "group_ranking"
     if snapshot.phase == "reflect" and snapshot.scope == "private":
@@ -1086,8 +1301,10 @@ def _snapshot_subject_token(context: ExportContext, snapshot: RankingPhaseSnapsh
         return "group"
     subject_id = snapshot.participant_id or snapshot.subject_id
     subject_token = _participant_code(context.group_id, subject_id)
-    if snapshot.scope == "private" and _is_observer_participant_id(participant_roles or {}, subject_id):
-        return f"observer_{subject_token}_{_file_token(snapshot.phase)}"
+    if snapshot.scope == "private":
+        diagnostic_role = _diagnostic_role_for_id(participant_roles or {}, subject_id)
+        if diagnostic_role:
+            return f"{diagnostic_role}_{subject_token}_{_file_token(snapshot.phase)}"
     return subject_token
 
 
@@ -1129,6 +1346,12 @@ def _idea_block_transcript_ids(block: IdeaBlock) -> list[int]:
         if link.transcript_id not in ids:
             ids.append(int(link.transcript_id))
     return ids
+
+
+def _idea_block_source_metadata(block: IdeaBlock, transcript_ids: list[int]) -> tuple[str, str]:
+    if transcript_ids:
+        return "speech", ";".join(f"transcript:{transcript_id}" for transcript_id in transcript_ids)
+    return "manual", f"idea_block:{block.id}"
 
 
 def _infer_similarity_phase(
@@ -1223,6 +1446,24 @@ def _infer_phase_for_timestamp(
     return ""
 
 
+def _latency_phase(stored_phase: str | None, timestamp: datetime | None, phase_windows: list[dict[str, Any]]) -> str:
+    phase = str(stored_phase or "").strip()
+    if phase and phase != "unknown":
+        return phase
+    return _infer_phase_for_timestamp(timestamp, phase_windows) or phase or "unknown"
+
+
+def _transcript_generation_decision_phase(
+    decision: TranscriptGenerationDecision,
+    phase_windows: list[dict[str, Any]],
+) -> str:
+    phase = str(decision.phase or "").strip()
+    if phase and phase != "unknown":
+        return phase
+    timestamp = decision.segment_cut_at or decision.transcript_saved_at or decision.decision_done_at
+    return _latency_phase(phase, timestamp, phase_windows)
+
+
 def _collect_participants(
     *,
     context: ExportContext,
@@ -1282,6 +1523,8 @@ def _build_manifest(
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
     cue_events: list[SimilarityCueEvent],
+    pipeline_decisions: list[TranscriptGenerationDecision],
+    pipeline_latency_events: list[PipelineLatencyEvent],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -1296,6 +1539,8 @@ def _build_manifest(
         idea_blocks=idea_blocks,
         similarities=similarities,
         cue_events=cue_events,
+        pipeline_decisions=pipeline_decisions,
+        pipeline_latency_events=pipeline_latency_events,
         phase_task_snapshots=phase_task_snapshots,
         phase_windows=phase_windows,
     )
@@ -1337,7 +1582,12 @@ def _build_manifest(
         "counts": {
             "participants": len(participants),
             "analysis_participants": _analysis_participant_count(participants),
+            "normal_participants": sum(1 for participant in participants if participant.get("participant_role") == PARTICIPANT_ROLE),
+            "confederates": sum(1 for participant in participants if participant.get("participant_role") == CONFEDERATE_ROLE),
             "observers": sum(1 for participant in participants if participant.get("participant_role") == OBSERVER_ROLE),
+            "facilitators": sum(1 for participant in participants if participant.get("participant_role") == FACILITATOR_ROLE),
+            "test_users": sum(1 for participant in participants if participant.get("participant_role") == TEST_ROLE),
+            "non_analysis_participants": sum(1 for participant in participants if not participant.get("participant_analysis_included", True)),
             "ranking_snapshots": len(ranking_snapshots),
             "phase_task_item_snapshots": len(phase_task_snapshots),
             "transcripts": len(transcripts),
@@ -1349,12 +1599,15 @@ def _build_manifest(
             "cue_events": len(cue_events),
             "cue_events_delivered": sum(1 for event in cue_events if event.delivery_status == "delivered"),
             "cue_events_with_response": sum(1 for event in cue_events if event.response_status),
+            "transcript_generation_decisions": len(pipeline_decisions),
+            "pipeline_latency_events": len(pipeline_latency_events),
         },
         "scope_notes": [
             "Transcripts and public chat are session-scoped because those tables do not store task_id; this export assumes one task run per session URL.",
             "Idea block phase is inferred from persisted phase-boundary snapshot timestamps when available.",
             "Cue lifecycle export uses similarity_cue_events when available; older runs without durable event rows fall back to similarity-pair evidence.",
-            "Manual participant_role metadata comes from session_participant_roles. Observer private ranking rows carry participant_analysis_included=false, latest observer private ranking files use the observer_ranking_diagnostic artifact, and observer rows are excluded from participant checklist denominators.",
+            "Manual participant_role metadata comes from session_participant_roles. Only participant role rows are included in normal participant analysis by default; confederate, observer, facilitator, and test rows are preserved as diagnostic/non-analysis records.",
+            "Pipeline latency CSVs store timings, IDs, counts, and metadata only; raw transcript text is intentionally excluded from the new latency event records.",
         ],
     }
 
@@ -1371,6 +1624,8 @@ def _build_checklist(
     idea_blocks: list[IdeaBlock],
     similarities: list[Similarity],
     cue_events: list[SimilarityCueEvent],
+    pipeline_decisions: list[TranscriptGenerationDecision],
+    pipeline_latency_events: list[PipelineLatencyEvent],
     phase_task_snapshots: list[PhaseTaskItemSnapshot],
     phase_windows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -1475,6 +1730,19 @@ def _build_checklist(
             ),
         ),
         _checklist_item(
+            "pipeline_latency",
+            "Transcript decision and pipeline latency rows",
+            _pipeline_latency_status(pipeline_decisions, pipeline_latency_events),
+            _files_for_artifacts(files, {"transcript_generation_decisions", "pipeline_latency_events"}),
+            len(pipeline_decisions),
+            (
+                f"{len(pipeline_decisions)} decision rows and {len(pipeline_latency_events)} stage rows exported."
+                if pipeline_decisions or pipeline_latency_events
+                else "No pipeline latency rows were found; older sessions may predate this instrumentation."
+            ),
+            required=False,
+        ),
+        _checklist_item(
             "phase_timestamps",
             "Phase start/end timestamps",
             "present" if phase_end_count > 0 else "missing",
@@ -1537,6 +1805,17 @@ def _cue_log_status(
     return "partial" if similarities else "missing"
 
 
+def _pipeline_latency_status(
+    decisions: list[TranscriptGenerationDecision],
+    events: list[PipelineLatencyEvent],
+) -> str:
+    if decisions and events:
+        return "present"
+    if decisions or events:
+        return "partial"
+    return "missing"
+
+
 def _files_for_artifacts(files: list[TaskExportFile], artifacts: set[str]) -> list[str]:
     return [file.path for file in files if file.artifact in artifacts]
 
@@ -1564,7 +1843,7 @@ def _build_session_summary_markdown(manifest: dict[str, Any]) -> str:
         for participant in manifest["participants"]:
             role = participant.get("participant_role") or PARTICIPANT_ROLE
             included = bool(participant.get("participant_analysis_included", True))
-            scope = "included in participant analysis" if included else "observer diagnostic only"
+            scope = "included in participant analysis" if included else f"{role} diagnostic only"
             lines.append(
                 f"- `{participant['participant_code']}`: system id `{participant['system_id']}`, role `{role}`, {scope}"
             )
@@ -1728,12 +2007,13 @@ def _participant_role_for_id(participant_roles: dict[str, str], participant_id: 
     return normalize_participant_role(participant_roles.get(str(participant_id), PARTICIPANT_ROLE))
 
 
-def _is_observer_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
-    return _participant_role_for_id(participant_roles, participant_id) == OBSERVER_ROLE
+def _diagnostic_role_for_id(participant_roles: dict[str, str], participant_id: Any) -> str:
+    role = _participant_role_for_id(participant_roles, participant_id)
+    return "" if role == PARTICIPANT_ROLE else role
 
 
 def _is_analysis_participant_id(participant_roles: dict[str, str], participant_id: Any) -> bool:
-    return _is_real_participant_id(participant_id) and not _is_observer_participant_id(participant_roles, participant_id)
+    return _is_real_participant_id(participant_id) and is_participant_analysis_role(_participant_role_for_id(participant_roles, participant_id))
 
 
 def _analysis_participant_count(participants: list[dict[str, Any]]) -> int:
