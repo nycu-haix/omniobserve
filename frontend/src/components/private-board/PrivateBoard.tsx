@@ -1718,7 +1718,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		setActiveTab(tab);
 	}, []);
 
-	const canJumpToBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocksRef.current, blockId), []);
+	const canJumpToRenderedBlock = useCallback((blockId: string) => hasIdeaBlockJumpTarget(ideaBlocks, blockId), [ideaBlocks]);
+	const canJumpToBlock = useCallback((blockId: string) => canJumpToRenderedBlock(blockId) || hasIdeaBlockJumpTarget(ideaBlocksRef.current, blockId), [canJumpToRenderedBlock]);
 
 	const jumpToBlock = useCallback(
 		(blockId: string) => {
@@ -3740,7 +3741,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				onJump={viewSimilarityCue}
 				onDismiss={dismissSimilarityCue}
 				onShareReason={shareSimilarityReason}
-				canJumpToBlock={canJumpToBlock}
+				canJumpToBlock={canJumpToRenderedBlock}
 				topContent={notificationCueContent}
 			/>
 		</>
