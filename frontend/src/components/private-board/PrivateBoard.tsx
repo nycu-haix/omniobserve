@@ -2,7 +2,9 @@ import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X }
 import type { UIEvent } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
+import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
+import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
@@ -277,8 +279,6 @@ const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
 const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
 const PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS = 5000;
-const IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS = 8000;
-const IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS = 12000;
 const VOICE_GENERATING_ID_PREFIX = "voice-generating";
 const VOICE_GENERATING_TIMEOUT_MS = 15000;
 const MAX_PENDING_IDEA_BLOCK_PREVIEW_COUNT = 3;
@@ -1405,9 +1405,7 @@ function IdeaBlockChatShareCueContent({
 	onDismiss: (noticeId: string) => void;
 }) {
 	useEffect(() => {
-		const timers = notices
-			.filter(notice => notice.status !== "sending")
-			.map(notice => window.setTimeout(() => onDismiss(notice.id), notice.status === "failed" ? IDEA_BLOCK_CHAT_SHARE_FAILED_AUTO_DISMISS_MS : IDEA_BLOCK_CHAT_SHARE_SUCCESS_AUTO_DISMISS_MS));
+		const timers = notices.filter(notice => notice.status !== "sending").map(notice => window.setTimeout(() => onDismiss(notice.id), NOTIFICATION_AUTO_DISMISS_MS));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [notices, onDismiss]);
 
@@ -1603,6 +1601,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 	const isIdeaBlocksTabActive = visibleActiveTab === "ideablock";
 	const ideaBlockUnreadState = useMemo(() => getIdeaBlockUnreadState(ideaBlocks), [ideaBlocks]);
+	const displayedIdeaBlocks = useMemo(() => getDisplayedIdeaBlocks(ideaBlocks), [ideaBlocks]);
 	const unreadIdeaBlockCount = ideaBlockUnreadState.count;
 	const latestUnreadIdeaBlockId = ideaBlockUnreadState.latestBlockId;
 
@@ -2973,7 +2972,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			return;
 		}
 
-		const timer = window.setTimeout(() => setIdeaBlockNotice(null), 4000);
+		const timer = window.setTimeout(() => setIdeaBlockNotice(null), NOTIFICATION_AUTO_DISMISS_MS);
 		return () => window.clearTimeout(timer);
 	}, [ideaBlockNotice]);
 
@@ -3639,7 +3638,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 							<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={ideaBlocksScrollViewportRef} viewportProps={{ onScroll: handleIdeaBlocksScroll }}>
 								<div className="grid gap-2 pb-3">
 									{ideaBlocks.length === 0 && <div className="grid min-h-40 place-items-center rounded-lg border border-dashed text-muted-foreground">尚無 Idea Blocks</div>}
-									{ideaBlocks.map(block => (
+									{displayedIdeaBlocks.map(block => (
 										<div
 											key={block.id}
 											ref={node => {

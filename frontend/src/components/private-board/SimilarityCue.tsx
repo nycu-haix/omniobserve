@@ -1,5 +1,6 @@
 import { Eye, Lightbulb, UserRound, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
+import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import type { SimilarityCueData, SimilarityPairCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -10,17 +11,6 @@ interface SimilarityCueProps {
 	onShareReason: (cue: SimilarityCueData) => void;
 	canJumpToBlock?: (blockId: string) => boolean;
 	topContent?: ReactNode;
-}
-
-const CUE_AUTO_DISMISS_MS = 5000;
-const DIFFERENT_REASON_CUE_AUTO_DISMISS_MS = 12000;
-const SUMMARY_CUE_AUTO_DISMISS_MS = 8000;
-
-function getCueAutoDismissMs(cue: SimilarityCueData): number {
-	if (cue.kind === "phase-transition-summary") {
-		return SUMMARY_CUE_AUTO_DISMISS_MS;
-	}
-	return cue.isSameReason === false ? DIFFERENT_REASON_CUE_AUTO_DISMISS_MS : CUE_AUTO_DISMISS_MS;
 }
 
 export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpToBlock, topContent }: SimilarityCueProps) {
@@ -35,7 +25,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpT
 			return;
 		}
 
-		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), getCueAutoDismissMs(cue)));
+		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), NOTIFICATION_AUTO_DISMISS_MS));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
