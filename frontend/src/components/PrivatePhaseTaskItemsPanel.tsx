@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { getPrivatePhaseTaskItemActionLabel, reindexPrivatePhaseTaskItems, sortPrivatePhaseTaskItems } from "../lib/privatePhaseTaskItems";
 import { cn } from "../lib/utils";
 import {
 	createPrivatePhaseTaskItem,
@@ -102,17 +103,6 @@ function shouldKeepDetailForActionChange(currentAction: Phase1BuilderOption | un
 	return getDetailInputKind(currentAction) === getDetailInputKind(nextAction);
 }
 
-function sortPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
-	return [...items].sort((left, right) => left.priority - right.priority || left.id - right.id);
-}
-
-function reindexPrivatePhaseTaskItems(items: PrivatePhaseTaskItem[]): PrivatePhaseTaskItem[] {
-	return sortPrivatePhaseTaskItems(items).map((item, index) => ({
-		...item,
-		priority: index + 1
-	}));
-}
-
 function minimumItemCount(builder: Phase1BuilderConfig): number {
 	const configuredMinimum = Number(builder.minimum_items);
 	return Number.isFinite(configuredMinimum) && configuredMinimum > 0 ? Math.floor(configuredMinimum) : 4;
@@ -171,6 +161,7 @@ function PrivatePhaseTaskItemRow({
 	isFirst,
 	isLast,
 	isMoving,
+	isDeleting,
 	onMove,
 	onEdit,
 	onDelete
@@ -180,12 +171,18 @@ function PrivatePhaseTaskItemRow({
 	isFirst: boolean;
 	isLast: boolean;
 	isMoving: boolean;
+	isDeleting: boolean;
 	onMove: (itemId: number, direction: -1 | 1) => void;
 	onEdit: (item: PrivatePhaseTaskItem) => void;
 	onDelete: (itemId: number) => void;
 }) {
+	const upLabel = getPrivatePhaseTaskItemActionLabel("提高優先順序：", item, index);
+	const downLabel = getPrivatePhaseTaskItemActionLabel("降低優先順序：", item, index);
+	const editLabel = getPrivatePhaseTaskItemActionLabel("編輯", item, index);
+	const deleteLabel = getPrivatePhaseTaskItemActionLabel("刪除", item, index);
+
 	return (
-		<div className={cn("flex min-h-10 select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors", isMoving && "opacity-60")}>
+		<div className={cn("flex min-h-10 select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors", (isMoving || isDeleting) && "opacity-60")}>
 			<span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.priority || index + 1}</span>
 			<div className="grid min-w-0 flex-1 gap-0.5">
 				<div className="break-words text-sm font-medium leading-6">{item.statement}</div>
@@ -194,16 +191,16 @@ function PrivatePhaseTaskItemRow({
 				</div>
 			</div>
 			<div className="flex shrink-0 items-center gap-1">
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="提高優先順序" aria-label="提高優先順序" disabled={isFirst || isMoving} onClick={() => onMove(item.id, -1)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title={upLabel} aria-label={upLabel} disabled={isFirst || isMoving || isDeleting} onClick={() => onMove(item.id, -1)}>
 					<ArrowUp className="h-4 w-4" />
 				</Button>
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="降低優先順序" aria-label="降低優先順序" disabled={isLast || isMoving} onClick={() => onMove(item.id, 1)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title={downLabel} aria-label={downLabel} disabled={isLast || isMoving || isDeleting} onClick={() => onMove(item.id, 1)}>
 					<ArrowDown className="h-4 w-4" />
 				</Button>
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="編輯" aria-label="編輯" onClick={() => onEdit(item)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title={editLabel} aria-label={editLabel} disabled={isMoving || isDeleting} onClick={() => onEdit(item)}>
 					<Pencil className="h-4 w-4" />
 				</Button>
-				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="刪除" aria-label="刪除" onClick={() => onDelete(item.id)}>
+				<Button type="button" variant="ghost" size="icon" className="h-7 w-7" title={deleteLabel} aria-label={deleteLabel} disabled={isMoving || isDeleting} onClick={() => onDelete(item.id)}>
 					<Trash2 className="h-4 w-4" />
 				</Button>
 			</div>
@@ -218,6 +215,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const [isLoading, setIsLoading] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 	const [movingItemId, setMovingItemId] = useState<number | null>(null);
+	const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const participantUserId = getParticipantUserId(participantId);
 	const selectedComponent = builder.components.find(item => item.id === form.componentId);
@@ -229,8 +227,11 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const hasDetailValue = form.detail.trim().length > 0;
 	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
-	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving;
+	const isDeletingTaskItem = deletingItemId !== null;
+	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving && !isDeletingTaskItem;
 	const requiredItemCount = minimumItemCount(builder);
+	const editingItem = editingItemId === null ? undefined : items.find(item => item.id === editingItemId);
+	const canDeleteEditingItem = !!editingItem && !isDeletingTaskItem && !isSaving;
 
 	const resetForm = useCallback(() => {
 		setForm(createPhaseTaskForm());
@@ -354,6 +355,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 
 	const deleteTaskItem = async (itemId: number) => {
 		const previousItems = items;
+		const deletedEditingItem = editingItemId === itemId ? items.find(item => item.id === itemId) : undefined;
+		setDeletingItemId(itemId);
 		setItems(current => reindexPrivatePhaseTaskItems(current.filter(item => item.id !== itemId)));
 		if (editingItemId === itemId) {
 			resetForm();
@@ -363,7 +366,17 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 			await deletePrivatePhaseTaskItem(sessionId, participantUserId, itemId);
 		} catch (deleteError) {
 			setItems(previousItems);
+			if (deletedEditingItem) {
+				setEditingItemId(deletedEditingItem.id);
+				setForm({
+					componentId: deletedEditingItem.component_id,
+					actionId: deletedEditingItem.action_id,
+					detail: deletedEditingItem.detail
+				});
+			}
 			setError(deleteError instanceof Error ? deleteError.message : "改善項目刪除失敗");
+		} finally {
+			setDeletingItemId(current => (current === itemId ? null : current));
 		}
 	};
 
@@ -418,6 +431,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 								isFirst={index === 0}
 								isLast={index === sortedItems.length - 1}
 								isMoving={movingItemId === item.id}
+								isDeleting={isDeletingTaskItem}
 								onMove={(itemId, direction) => void moveTaskItem(itemId, direction)}
 								onEdit={editTaskItem}
 								onDelete={itemId => void deleteTaskItem(itemId)}
@@ -456,6 +470,20 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 						{editingItemId !== null && (
 							<Button type="button" variant="outline" size="icon" className="h-10 w-10" title="取消編輯" aria-label="取消編輯" onClick={resetForm}>
 								<X className="h-4 w-4" />
+							</Button>
+						)}
+						{editingItem && (
+							<Button
+								type="button"
+								variant="destructive"
+								className="h-10 gap-2 px-3"
+								title={getPrivatePhaseTaskItemActionLabel("刪除", editingItem, Math.max(0, editingItem.priority - 1))}
+								aria-label={getPrivatePhaseTaskItemActionLabel("刪除", editingItem, Math.max(0, editingItem.priority - 1))}
+								disabled={!canDeleteEditingItem}
+								onClick={() => void deleteTaskItem(editingItem.id)}
+							>
+								<Trash2 className="h-4 w-4" />
+								刪除
 							</Button>
 						)}
 						<Button type="button" className="h-10 gap-2 px-3" disabled={!canSave} onClick={() => void saveTaskItem()}>
