@@ -26,10 +26,83 @@
 | Task 1 system links |  |
 | Task 2 system links |  |
 | Individual Meet links |  |
+| Group familiarity level | none / low / medium / high / mixed / unknown |
+| Familiarity recruitment decision | less_familiar_target / acceptable_covariate / over_familiar_use_with_caveat / exclude_or_reschedule / PI_decision_needed |
 
 ## 2. Host / Admin 場前檢查
 
+### 2.1 Run-of-show Preflight（正式流程開始前完成）
+
+此清單只供 Host/Admin/Observer 使用，不寄給受試者，不放在受試者可見畫面。cue/no-cue 條件、暗樁安排、mapping table 與 staff fallback room 都是 staff-only 資訊。
+
+Link、permission、staff-only room、condition assignment、hidden setup 與 export readiness 應在參與者進場前完成。Device / Audio / Recording 與 participant screen-share 類檢查需在參與者加入各自個別 Meet 後、正式開場前完成；不得為了勾選場前清單而提前標記尚未實測的錄影、畫面或收音狀態。
+
+#### Link / Permission / Communication
+
+- [ ] 已把正式集合時間、地點、攜帶設備與注意事項用 email 寄給所有參與者；不要只依賴現場口頭或即時訊息分享。
+- [ ] 每位參與者的 Task 1 OmniObserve link 已產生、測試可開啟，且只包含該 participant system id。
+- [ ] 每位參與者的 Task 2 OmniObserve link 已產生、測試可開啟，且在 Task 1 前不提供給參與者操作。
+- [ ] 每位真實參與者的個別 Google Meet link 已建立，Observer 知道自己負責哪一間。
+- [ ] Staff-only fallback room（例如 `meet.omni.elvismao.com` 或團隊指定會議室）已建立，用於 Host/Observer 旁聽與協調，不進入參與者的 OmniObserve participant room。
+- [ ] 教學影片、Debrief 影片、Google Forms、小表單 A/B、大表單、Canva、圖床與 task materials 的權限已用非擁有者帳號測試。
+- [ ] 參與者可見的 link/email 沒有透露 task order、cue/no-cue 條件、暗樁安排、研究假設或 staff-only room。
+- [ ] Slack/Line/Email fallback channel 已指定；若正式 link 失效，由 Host 統一發送更新，不讓 Observer 私下改發 cue/condition 資訊。
+
+#### Browser / Task Surfaces
+
+- [ ] Host/Admin 已開啟 Admin dashboard，確認 room name、task、condition、phase、timer 與 export 按鈕可見。
+- [ ] Task 1 的 OmniObserve participant link 已用測試帳號開過一次，確認可載入、可看到正確 task UI。
+- [ ] Task 2 的 OmniObserve participant link 已用測試帳號開過一次，確認可載入、可看到正確 task UI，但不提前發給參與者操作。
+- [ ] Lost-at-Sea 15 items 可顯示且排序互動正常。
+- [ ] Enhance-the-Poster 的 Canva source、海報 stimulus、component library、文字/slogan library、圖床與 reviewer feedback 摘要都已開啟在 Host 可操作的瀏覽器分頁。
+- [ ] 只保留當場需要的瀏覽器分頁；關閉私人帳號、通知、聊天、無關文件與會誤投影的頁面。
+
+#### Device / Audio / Recording
+
+- [ ] 每位參與者筆電、充電器、耳機、麥克風、HDMI/USB-C 轉接頭已確認可用。
+- [ ] 每間個別 Google Meet 已開啟錄影，錄影畫面能看清 OmniObserve/Canva，音訊能收到參與者聲音。
+- [ ] 參與者 screen share 時，確認沒有勾選分享系統音訊或 share-tab audio，除非 Host 明確要求。
+- [ ] Host/Observer 的麥克風預設關閉；需要說明時才短暫開啟，說完立即關閉。
+- [ ] Staff-only fallback room 的麥克風狀態已確認；不得讓 staff 麥克風進入 participant ASR/cue pipeline。
+- [ ] 第二螢幕或投影設備不播放會議聲音，避免回授或 echo。
+- [ ] 若需要播放教學影片，先確認音訊輸出路徑，不讓影片聲音被 participant microphone 重複收音。
+- [ ] 每個 Google Meet 錄影開始時間、負責 Observer 與檔名暫記在場次資訊表。
+
+#### Condition / Hidden Setup Safety
+
+- [ ] Host 私下確認本場 task order 與 condition assignment；不在參與者可見畫面開啟 counterbalance table。
+- [ ] 暗樁 ID、腳本、發言提綱與 mapping table 只在 staff-only 視窗或紙本使用。
+- [ ] no-cue task 的 cue UI / same-different reason cue 已確認不顯示。
+- [ ] with-cue task 的 cue UI 已確認可用，但不向 no-cue 參與者透露差異。
+- [ ] Observer note 表單/文件已開啟；欄位不需要參與者看到 cue/condition 或暗樁資訊。
+
+#### Export / Stop Recording Readiness
+
+- [ ] Host 知道每個 task 結束後要匯出 task package，並確認下載位置與檔名規則。
+- [ ] Host 知道每個個別 Google Meet 錄影在該段結束後要停止，並在收尾確認檔案已保存。
+- [ ] 建立 incident log 草稿；任何 link、permission、device、recording、echo、screen-share audio、ASR/cue contamination 都要記錄時間與處理方式。
+
+### 2.2 Observer Per-room Preflight（不揭露隱藏條件）
+
+Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/no-cue 條件、暗樁安排、其他 participant mapping 或 staff-only room。
+
+- [ ] 確認自己負責的 participant code 與 system id，不在受試者可見畫面顯示完整 mapping table。
+- [ ] 確認受試者進入正確個別 Google Meet。
+- [ ] 確認受試者螢幕分享畫面可讀，且不分享無關私人視窗。
+- [ ] 確認 Google Meet 錄影已開始，並口頭告知受試者錄影正在進行。
+- [ ] 確認受試者耳機/麥克風可用；若用外接麥克風，確認輸入來源正確。
+- [ ] 確認 screen share 沒有分享系統音訊或分頁音訊。
+- [ ] 確認 Observer 自己的麥克風關閉，只有需要協助設備時短暫開啟。
+- [ ] 確認 OmniObserve Task 1 link 可開啟，participant id 與顯示名稱正確。
+- [ ] 不提前開啟或操作 Task 2 link；Task 2 只在中間休息由 Host 指示後協助切換。
+- [ ] 若連結或權限失效，通知 Host 統一處理，不自行改發未確認連結。
+
+### 2.3 Host / Admin System Setup
+
 - [ ] 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
+- [ ] 完成 familiarity screener，確認三位真實參與者彼此是否認識、是否同 lab / 同專案 / 固定合作。
+- [ ] 若本場目標是測量 private expression，優先安排不熟或較少固定合作的參與者。
+- [ ] 若三位真實參與者過度熟悉，已決定改排、排除，或在 session summary 標記 `over_familiar_use_with_caveat`。
 - [ ] 確認通知信預留約 150 分鐘，且提醒筆電、耳機、充電器、HDMI/轉接頭與麥克風測試。
 - [ ] 確認通知信沒有透露 task order、cue/no-cue 條件、暗樁安排或研究假設。
 - [ ] 確認每位使用者的遠距會議室都有第二螢幕；可使用會議室大電視或研究團隊自備螢幕。
@@ -162,6 +235,7 @@
 - [ ] 判斷剛完成 task 是 no cue 還是 with cue。
 - [ ] no cue 使用小表單 A：<https://docs.google.com/forms/d/1hultQhpxqw-Q-i9u8StCVhbxSf2eQTAtsZM1SWQ1TdM/edit>
 - [ ] with cue 使用小表單 B：<https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
+- [ ] 小表單或 notes 有記錄本輪熟悉度、公開反對舒適度，以及熟悉度是否影響 private notes / idea blocks / cue / chat 使用。
 - [ ] 三位 Observer 分別口頭詢問自己的真實參與者。
 - [ ] 每位真實參與者都是一對一口頭詢問；參與者不自行填小表單。
 - [ ] 先確認 idea blocks、reviewer feedback、similarity cue 是否可用 / 有看到 / 有使用，再問後續評價題。
@@ -217,6 +291,8 @@
 | idea_blocks_use_status | used / not_used / not_seen / not_available / technical_issue |
 | review_feedback_status | used / not_used / not_available / not_poster_task / technical_issue |
 | followup_question | 最後訪談要追問的問題 |
+| group_familiarity_context | none / low / medium / high / mixed / unknown |
+| familiarity_followup_needed | yes / no |
 
 ## 9. 個別訪談分流與最後 Debrief
 
@@ -225,6 +301,8 @@
 - [ ] 確認暗樁不參與三位真實參與者個別訪談。
 - [ ] 訪談前與訪談中不揭露暗樁，不暗示有人是研究團隊安排成員。
 - [ ] 訪談追問使用中性說法，例如「某位成員」「有人」「剛才那段討論」。
+- [ ] 詢問熟悉度是否影響公開反對、private notes、idea blocks、cue 或聊天室使用。
+- [ ] 若參與者表示「因為很熟所以直接公開說」或「因為不熟所以先記在 private」，將原話摘要寫入 notes。
 - [ ] 確認三場訪談彼此分開，不能互相聽見。
 - [ ] 各自開始約 30 分鐘個別訪談。
 - [ ] 訪談錄音或筆記開始。
@@ -246,11 +324,13 @@
 - [ ] 匯出 cue logs；no-cue task 標記 cue disabled。
 - [ ] 匯出 public chat logs。
 - [ ] 匯出 Google Forms responses。
+- [ ] 保存 familiarity screener 與 task 後熟悉度回答。
 - [ ] 保存每位真實參與者的個別 Google Meet 錄影。
 - [ ] 保存 participant mapping table。
 - [ ] 收齊三位 Observer notes。
 - [ ] 保存三份個別訪談錄音 / transcript。
 - [ ] 確認最後 Debrief 已完成。
 - [ ] 建立 session summary。
+- [ ] 在 session summary 填入 group familiarity level、recruitment decision、private-channel usage caveat。
 - [ ] 建立 incident log。
 - [ ] 檢查命名符合 [資料命名與輸出規格](../data/資料命名與輸出規格.md)。
