@@ -79,6 +79,8 @@ Host/Admin 和 Observer 不要在任務內容上提供答案或設計建議。Ob
 
 ## 3. 場前準備
 
+正式執行前，Host/Admin 必須先完成 [主持人 Admin Observer Checklists](主持人_Admin_Observer_Checklists.md) 的 Run-of-show Preflight 與 Observer Per-room Preflight。該清單是 staff-only 文件，不提供給參與者；participant-facing email 和現場說明仍以本 Procedure 與 [受試者事前通知信](../communications/受試者事前通知信.md) 為準。
+
 ### 3.1 受試者事前通知
 
 - 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
