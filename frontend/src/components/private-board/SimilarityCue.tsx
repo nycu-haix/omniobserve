@@ -8,6 +8,7 @@ interface SimilarityCueProps {
 	onJump: (cue: SimilarityPairCueData) => void;
 	onDismiss: (cue: SimilarityCueData, status: "dismissed" | "ignored") => void;
 	onShareReason: (cue: SimilarityCueData) => void;
+	canJumpToBlock?: (blockId: string) => boolean;
 	topContent?: ReactNode;
 }
 
@@ -22,7 +23,7 @@ function getCueAutoDismissMs(cue: SimilarityCueData): number {
 	return cue.isSameReason === false ? DIFFERENT_REASON_CUE_AUTO_DISMISS_MS : CUE_AUTO_DISMISS_MS;
 }
 
-export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topContent }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpToBlock, topContent }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -69,6 +70,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 				}
 
 				const isDifferentReason = cue.isSameReason === false;
+				const canJump = canJumpToBlock ? canJumpToBlock(cue.blockId) : true;
 				const message = isDifferentReason ? "有人和你有相似的想法但原因略有不同。" : "有人和你想法一樣，要不要試著發表？";
 				return (
 					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
@@ -84,7 +86,14 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 								<UserRound className="h-3.5 w-3.5" />
 								分享我的理由
 							</Button>
-							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue)}>
+							<Button
+								className="gap-1.5"
+								size="sm"
+								variant={isDifferentReason ? "outline" : "default"}
+								onClick={() => canJump && onJump(cue)}
+								disabled={!canJump}
+								title={canJump ? "查看相關想法" : "找不到可跳轉的 idea block"}
+							>
 								<Eye className="h-3.5 w-3.5" />
 								查看想法
 							</Button>
