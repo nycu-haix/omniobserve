@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
+import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
 import { isAdminParticipantId, isObserverRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
@@ -1542,7 +1543,7 @@ export function AdminPage() {
 	}, []);
 	const jumpToIdeaBlocks = useCallback(
 		(blockIds: number[]) => {
-			const uniqueBlockIds = [...new Set(blockIds)].filter(blockId => ideaBlockById.has(blockId));
+			const uniqueBlockIds = getValidIdeaBlockJumpTargetIds(ideaBlocks, blockIds);
 			if (uniqueBlockIds.length === 0) {
 				return;
 			}
@@ -1559,7 +1560,7 @@ export function AdminPage() {
 				jumpHighlightTimerRef.current = null;
 			}, 4500);
 		},
-		[ideaBlockById]
+		[ideaBlocks]
 	);
 
 	useEffect(() => {
@@ -2182,6 +2183,7 @@ export function AdminPage() {
 								const differentReasonLinks = similarityLinks.filter(link => !link.isSameReason);
 								const similarityReasonKind = getSimilarityReasonKind(sameReasonLinks.length > 0, differentReasonLinks.length > 0);
 								const relatedBlockIds = similarityLinks.map(link => link.relatedBlockId);
+								const validRelatedBlockIds = getValidIdeaBlockJumpTargetIds(ideaBlocks, relatedBlockIds);
 								const isHighlightedAsJumpTarget = highlightedIdeaBlockIds.includes(block.id);
 								return (
 									<article
@@ -2205,11 +2207,16 @@ export function AdminPage() {
 													<button
 														type="button"
 														className={cn(
-															"inline-flex h-7 max-w-full shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+															"inline-flex h-7 max-w-full shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
 															SIMILARITY_REASON_TAG_CLASSES[similarityReasonKind]
 														)}
-														title={`Jump to ${relatedBlockIds.length} related idea block${relatedBlockIds.length > 1 ? "s" : ""}`}
-														onClick={() => jumpToIdeaBlocks(relatedBlockIds)}
+														title={
+															validRelatedBlockIds.length > 0
+																? `Jump to ${validRelatedBlockIds.length} related idea block${validRelatedBlockIds.length > 1 ? "s" : ""}`
+																: "No available related idea block to jump to"
+														}
+														onClick={() => jumpToIdeaBlocks(validRelatedBlockIds)}
+														disabled={validRelatedBlockIds.length === 0}
 													>
 														<Link2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 														<span className="truncate">{getSimilarityReasonTagLabel(similarityReasonKind, similarityLinks.length)}</span>
@@ -2237,17 +2244,23 @@ export function AdminPage() {
 												{similarityLinks.map(link => {
 													const linkKind: SimilarityReasonKind = link.isSameReason ? "same" : "different";
 													const relatedBlock = ideaBlockById.get(link.relatedBlockId);
+													const canJumpToRelatedBlock = isValidIdeaBlockJumpTarget(relatedBlock, link.relatedBlockId);
 													const relatedParticipantLabel = relatedBlock ? getParticipantLabel(relatedBlock.user_id) : "Unknown participant";
 													return (
 														<button
 															key={link.id}
 															type="button"
 															className={cn(
-																"inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+																"inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
 																SIMILARITY_REASON_TAG_CLASSES[linkKind]
 															)}
-															title={`${SIMILARITY_REASON_LABELS[linkKind]} cue to idea block #${link.relatedBlockId}: ${link.relatedSummary}`}
-															onClick={() => jumpToIdeaBlocks([link.relatedBlockId])}
+															title={
+																canJumpToRelatedBlock
+																	? `${SIMILARITY_REASON_LABELS[linkKind]} cue to idea block #${link.relatedBlockId}: ${link.relatedSummary}`
+																	: `${SIMILARITY_REASON_LABELS[linkKind]} cue target #${link.relatedBlockId} is not available`
+															}
+															onClick={() => canJumpToRelatedBlock && jumpToIdeaBlocks([link.relatedBlockId])}
+															disabled={!canJumpToRelatedBlock}
 														>
 															<span className="shrink-0">{SIMILARITY_REASON_LABELS[linkKind]}</span>
 															<ArrowRight className="h-3 w-3 shrink-0" aria-hidden="true" />
