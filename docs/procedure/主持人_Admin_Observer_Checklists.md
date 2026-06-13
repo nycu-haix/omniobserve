@@ -19,6 +19,7 @@
 | Poster condition | no cue / with cue |
 | 系統版本 / commit |  |
 | Canva material version |  |
+| Poster reviewer feedback available | yes / no / unsure |
 | Individual Google Meet recording files |  |
 | 第二螢幕配置 | 會議室大電視 / 研究團隊自備螢幕 / 其他： |
 | Participant mapping table |  |
@@ -55,7 +56,9 @@
 - [ ] 開始或準備開始各個個別 Google Meet 錄影。
 - [ ] 確認 Lost-at-Sea 15 items 可顯示。
 - [ ] 確認 Canva 海報與 component library 可開啟。
+- [ ] 確認 Poster Canva material 是否包含 reviewer feedback，並在場次資訊填 `yes/no`。
 - [ ] 確認三個 Google Forms 可開啟。
+- [ ] 確認小表單與訪談題目依 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md) 有 `N/A / did not use / not available` 分流。
 - [ ] 確認三位 Observer 知道各自負責的真實參與者。
 
 ## 3. Host 開場與教學
@@ -136,6 +139,7 @@
 
 - [ ] 切到 Poster private phase 1。
 - [ ] 確認 Canva 海報與 component library 可見。
+- [ ] 確認本輪 Poster material 是否包含 reviewer feedback；若沒有，Host 說明不得承諾 review 存在。
 - [ ] 開始 5 分鐘 timer。
 - [ ] 確認每位參與者建立至少 4 個 component + action items。
 - [ ] 確認 component + action item 文字會進入 logs / idea block pipeline。
@@ -160,6 +164,8 @@
 - [ ] with cue 使用小表單 B：<https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
 - [ ] 三位 Observer 分別口頭詢問自己的真實參與者。
 - [ ] 每位真實參與者都是一對一口頭詢問；參與者不自行填小表單。
+- [ ] 先確認 idea blocks、reviewer feedback、similarity cue 是否可用 / 有看到 / 有使用，再問後續評價題。
+- [ ] 若參與者沒有使用或功能沒有提供，依 [功能使用與 Skip Logic](../forms/功能使用與Skip_Logic.md) 填 `N/A` 原因，不強迫回答 usefulness。
 - [ ] Observer 代填表單。
 - [ ] 暗樁不填正式參與者表單。
 - [ ] 確認三份表單送出。
@@ -178,7 +184,7 @@
 
 - [ ] 參與者 private ranking 的理由。
 - [ ] 參與者是否 think aloud。
-- [ ] idea blocks 是否幫助回顧理由。
+- [ ] 若參與者有看到或使用 idea blocks，記錄是否幫助回顧理由；若沒有使用，記錄 `N/A` 原因。
 - [ ] public phase 中是否提出 private 階段理由。
 - [ ] cue 條件下是否因 same/different reason cue 發言或改變排序。
 - [ ] reflect phase 是否調整個人排序。
@@ -190,6 +196,7 @@
 - [ ] items 是否包含 component + action。
 - [ ] public phase 是否討論最多 15 個 items 的排序。
 - [ ] 是否出現不同設計方向。
+- [ ] 若材料包含 reviewer feedback，記錄參與者是否引用；若沒有包含，訪談與表單標記 `N/A_not_available`。
 - [ ] cue 條件下是否因 same/different reason cue 發言或補充理由。
 - [ ] reflect phase 是否調整個人排序。
 
@@ -207,6 +214,8 @@
 | observed_event | 具體看到/聽到的事件 |
 | related_item | Lost item 或 Poster component/action |
 | cue_type | none / same_reason / different_reason |
+| idea_blocks_use_status | used / not_used / not_seen / not_available / technical_issue |
+| review_feedback_status | used / not_used / not_available / not_poster_task / technical_issue |
 | followup_question | 最後訪談要追問的問題 |
 
 ## 9. 個別訪談分流與最後 Debrief

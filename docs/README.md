@@ -10,7 +10,7 @@
 4. 準備 Lost-at-Sea 時讀 [Lost-at-Sea 任務設計](task-materials/Lost_at_Sea_任務設計.md)。
 5. 準備 Enhance-the-Poster 時讀 [Enhance-the-Poster 任務設計](task-materials/Enhance_the_Poster_任務設計.md)，並確認 Canva / component library 版本。
 6. 準備暗樁時先讀 [暗樁參與者發言提綱索引](confederate.md)，再依 task 讀 [Lost-at-Sea 暗樁發言提綱](confederate-sea.md) 與 [Enhance-the-Poster 暗樁發言提綱](confederate-poster.md)。這些文件只供研究團隊內部使用，不得提供給一般參與者。
-7. 準備表單與訪談時讀 [問卷與訪談題綱](forms/問卷與訪談題綱.md) 與 [Google Forms 第一版題目快照](forms/Google_Forms_第一版題目快照.md)，以三份 Google Forms 為正式來源。
+7. 準備表單與訪談時讀 [功能使用與 Skip Logic](forms/功能使用與Skip_Logic.md)、[問卷與訪談題綱](forms/問卷與訪談題綱.md) 與 [Google Forms 第一版題目快照](forms/Google_Forms_第一版題目快照.md)，以三份 Google Forms 為正式來源。
 8. 收尾資料時讀 [資料命名與輸出規格](data/資料命名與輸出規格.md)。
 9. 需要追溯 Poster task 設計來源時讀 [2026-06-10 Plaud 會議記錄](meeting-records/2026-06-10_Enhance-the-poster_實驗設計優化討論.md)。
 10. 測試 similarity detection prompt 時讀 [Similarity Detection Eval Prompt](similarity_eval_prompt.md)，它已和目前 `lost-at-sea` / `enhance-the-poster` task prompt list 對齊。
