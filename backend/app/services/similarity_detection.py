@@ -11,7 +11,7 @@ from ..config import OPENAI_MODEL, logger
 from ..models import IdeaBlock, PosterIdeaBlockTaskItem, Similarity, TaskItem
 from ..task_config import get_similarity_task_context_for_session, get_task_config_for_session, resolve_task_id
 from .pipeline_latency import record_similarity_stage_event, stage_started
-from .similarity_notifications import notify_similarity_cue_for_blocks
+from .similarity_notifications import SimilarityCueDeliverySummary, notify_similarity_cue_for_blocks
 
 COSINE_SIMILARITY_THRESHOLD = 0.7
 COSINE_DISTANCE_THRESHOLD = 1 - COSINE_SIMILARITY_THRESHOLD
@@ -583,21 +583,29 @@ async def _replace_similarity_pairs(
         await db.refresh(similarity)
         try:
             cue_started = stage_started()
-            await notify_similarity_cue_for_blocks(
+            delivery_summary = await notify_similarity_cue_for_blocks(
                 similarity_id=similarity.id,
                 is_same_reason=similarity.is_same_reason,
                 idea_a=idea_block,
                 idea_b=similar_idea_block,
                 reason=similarity.reason,
             )
+            stage_name = _similarity_cue_latency_stage(delivery_summary)
             await record_similarity_stage_event(
                 db,
                 pipeline_run_id=pipeline_run_id,
                 idea_block=idea_block,
-                stage="similarity_cue_sent",
+                stage=stage_name,
                 started_perf=cue_started,
-                candidate_count=1,
-                metadata={"similarity_id": similarity.id, "other_idea_block_id": similar_idea_block.id},
+                candidate_count=delivery_summary.delivered,
+                metadata={
+                    "similarity_id": similarity.id,
+                    "other_idea_block_id": similar_idea_block.id,
+                    "attempted_count": delivery_summary.attempted,
+                    "delivered_count": delivery_summary.delivered,
+                    "failed_count": delivery_summary.failed,
+                    "suppressed_count": delivery_summary.suppressed,
+                },
             )
         except Exception as exc:
             logger.warning(
@@ -608,6 +616,14 @@ async def _replace_similarity_pairs(
                 exc.__class__.__name__,
                 exc,
             )
+
+
+def _similarity_cue_latency_stage(delivery_summary: SimilarityCueDeliverySummary) -> str:
+    if delivery_summary.delivered > 0:
+        return "similarity_cue_sent"
+    if delivery_summary.attempted > 0:
+        return "similarity_cue_failed"
+    return "similarity_cue_suppressed"
 
 
 async def _clear_similarity_for_idea_block(idea_block: IdeaBlock, reason: str, db: AsyncSession) -> None:

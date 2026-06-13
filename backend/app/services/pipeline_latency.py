@@ -91,6 +91,7 @@ async def create_pipeline_trace(
     transcript_chars: int,
     transcript_count_in_batch: int,
     client_segment_ids: list[str] | None = None,
+    segment_cut_at: datetime | None = None,
 ) -> PipelineTrace:
     size_context = await _load_pipeline_size_context(
         db,
@@ -99,6 +100,7 @@ async def create_pipeline_trace(
         participant_id=str(participant_id),
         transcript_id=transcript_id,
         transcript_count_in_batch=transcript_count_in_batch,
+        segment_cut_at=segment_cut_at,
     )
     return PipelineTrace(
         pipeline_run_id=uuid4().hex,
@@ -278,6 +280,7 @@ async def _load_pipeline_size_context(
     participant_id: str,
     transcript_id: int | None,
     transcript_count_in_batch: int,
+    segment_cut_at: datetime | None = None,
 ) -> PipelineSizeContext:
     transcript_saved_at: datetime | None = None
     if transcript_id is not None:
@@ -319,7 +322,7 @@ async def _load_pipeline_size_context(
     meeting_elapsed_ms = _datetime_delta_ms(first_transcript_at, transcript_saved_at)
     return PipelineSizeContext(
         transcript_saved_at=transcript_saved_at,
-        segment_cut_at=transcript_saved_at,
+        segment_cut_at=segment_cut_at or transcript_saved_at,
         meeting_elapsed_ms=meeting_elapsed_ms,
         phase_elapsed_ms=None,
         session_transcript_count_before=max(0, session_transcript_count - max(0, transcript_count_in_batch)),

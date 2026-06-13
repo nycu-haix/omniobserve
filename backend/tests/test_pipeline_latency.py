@@ -1,8 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import unittest
 
+from app.schemas import StreamTranscript
 from app.services.pipeline_latency import pipeline_decision
+from app.services.similarity_detection import _similarity_cue_latency_stage
+from app.services.similarity_notifications import SimilarityCueDeliverySummary
 from app.services.task_export_service import (
     ExportCondition,
     ExportContext,
@@ -10,6 +13,7 @@ from app.services.task_export_service import (
     _pipeline_latency_status,
     _transcript_generation_decisions_file,
 )
+from app.services.transcript_pipeline import _segment_cut_at_from_batch
 
 
 def _context() -> ExportContext:
@@ -110,6 +114,40 @@ class PipelineLatencyTests(unittest.TestCase):
         self.assertEqual(_pipeline_latency_status([object()], [object()]), "present")
         self.assertEqual(_pipeline_latency_status([object()], []), "partial")
         self.assertEqual(_pipeline_latency_status([], []), "missing")
+
+    def test_segment_cut_at_uses_transcript_window_end(self) -> None:
+        started_at = datetime(2026, 6, 13, 3, 3, tzinfo=timezone.utc)
+        ended_at = started_at + timedelta(seconds=12)
+
+        self.assertEqual(
+            _segment_cut_at_from_batch(
+                [
+                    StreamTranscript(segment_id="1", text="first", ended_at=started_at),
+                    StreamTranscript(segment_id="2", text="second", ended_at=ended_at),
+                ]
+            ),
+            ended_at,
+        )
+
+    def test_similarity_cue_latency_stage_distinguishes_suppressed(self) -> None:
+        self.assertEqual(
+            _similarity_cue_latency_stage(
+                SimilarityCueDeliverySummary(attempted=0, delivered=0, failed=0, suppressed=2)
+            ),
+            "similarity_cue_suppressed",
+        )
+        self.assertEqual(
+            _similarity_cue_latency_stage(
+                SimilarityCueDeliverySummary(attempted=2, delivered=0, failed=2, suppressed=0)
+            ),
+            "similarity_cue_failed",
+        )
+        self.assertEqual(
+            _similarity_cue_latency_stage(
+                SimilarityCueDeliverySummary(attempted=2, delivered=1, failed=1, suppressed=0)
+            ),
+            "similarity_cue_sent",
+        )
 
 
 if __name__ == "__main__":

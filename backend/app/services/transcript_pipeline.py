@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
@@ -125,6 +126,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
     resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
     transcript_text = "\n".join(item.text for item in transcripts if item.text).strip()
     main_transcript_id = _main_transcript_id_from_batch(transcripts)
+    segment_cut_at = _segment_cut_at_from_batch(transcripts)
     trace = await create_pipeline_trace(
         db,
         session_name=session_name,
@@ -135,6 +137,7 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
         transcript_chars=len(transcript_text),
         transcript_count_in_batch=len(transcripts),
         client_segment_ids=[str(item.segment_id) for item in transcripts if item.segment_id],
+        segment_cut_at=segment_cut_at,
     )
     if not transcript_text:
         logger.info(
@@ -147,21 +150,6 @@ async def generate_idea_blocks_with_task_items_from_transcripts(
             trace,
             decision="skipped_empty",
             skipped_reason="empty_transcript_text",
-        )
-        return PipelineResult(idea_blocks=[], task_items=[])
-
-    if visibility != Visibility.PRIVATE:
-        logger.info(
-            "pipeline_skip_scope session_name=%s user_id=%s visibility=%s",
-            session_name,
-            user_id,
-            visibility.value,
-        )
-        await persist_pipeline_trace(
-            db,
-            trace,
-            decision="skipped_scope",
-            skipped_reason=f"visibility:{visibility.value}",
         )
         return PipelineResult(idea_blocks=[], task_items=[])
 
@@ -653,6 +641,13 @@ def _main_transcript_id_from_batch(transcripts: list[StreamTranscript]) -> int |
             return int(transcript.segment_id)
         except (TypeError, ValueError):
             continue
+    return None
+
+
+def _segment_cut_at_from_batch(transcripts: list[StreamTranscript]) -> datetime | None:
+    for transcript in reversed(transcripts):
+        if transcript.ended_at is not None:
+            return transcript.ended_at
     return None
 
 
