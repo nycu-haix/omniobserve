@@ -10,7 +10,16 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperimentSpaceShortcut } from "../lib/keyboardShortcuts";
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
-import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
+import {
+	DEFAULT_SESSION_PHASE,
+	getSessionPhaseLabel,
+	isGroupPhase,
+	isPrivatePhase1,
+	isPrivatePhase2,
+	normalizeSessionPhase,
+	normalizeSessionPhaseOptions,
+	type SessionPhase
+} from "../lib/sessionPhase";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
@@ -183,6 +192,37 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 					)}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+function CompactPhaseTimer({ phase, endTimeMs }: { phase: SessionPhase; endTimeMs: number }) {
+	const [timeLeft, setTimeLeft] = useState(() => Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+
+	useEffect(() => {
+		const updateTimer = () => {
+			setTimeLeft(Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+		};
+		updateTimer();
+		const interval = window.setInterval(updateTimer, 1000);
+		return () => window.clearInterval(interval);
+	}, [endTimeMs]);
+
+	const minutes = Math.floor(timeLeft / 60);
+	const seconds = timeLeft % 60;
+	const phaseLabel = getSessionPhaseLabel(phase);
+	const formattedTime = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+	return (
+		<div
+			className={cn(
+				"flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs shadow-sm xl:hidden",
+				isGroupPhase(phase) ? "border-primary/25 text-primary" : "border-muted-foreground/20 text-muted-foreground"
+			)}
+			aria-label={`${phaseLabel} 剩餘時間 ${formattedTime}`}
+		>
+			<span className="max-w-32 truncate font-medium">{phaseLabel}</span>
+			<span className="font-mono text-sm font-semibold tabular-nums text-foreground">{formattedTime}</span>
 		</div>
 	);
 }
@@ -738,6 +778,7 @@ function TaskWorkspace({
 	taskId,
 	phase1Builder,
 	phaseLayoutConfig,
+	compactPhaseTimer,
 	renderPrivateRanking,
 	renderPublicRanking
 }: {
@@ -751,6 +792,7 @@ function TaskWorkspace({
 	taskId: string;
 	phase1Builder?: Phase1BuilderConfig;
 	phaseLayoutConfig?: TaskPaneLayoutConfig;
+	compactPhaseTimer?: React.ReactNode;
 	renderPrivateRanking: () => React.ReactNode;
 	renderPublicRanking: () => React.ReactNode;
 }) {
@@ -842,10 +884,11 @@ function TaskWorkspace({
 
 	return (
 		<section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Task workspace">
-			<header className="mb-3 flex shrink-0 items-center">
-				<div className="grid min-w-0 gap-1">
+			<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+				<div className="grid min-w-0 flex-1 gap-1">
 					<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
 				</div>
+				{compactPhaseTimer}
 			</header>
 			<div className="min-h-0 overflow-hidden">
 				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
@@ -1502,6 +1545,7 @@ export default function MeetingRoom() {
 					taskId={taskId}
 					phase1Builder={phase1BuilderConfig}
 					phaseLayoutConfig={phaseLayoutConfigById[currentPhase]}
+					compactPhaseTimer={timerEndTime > 0 ? <CompactPhaseTimer phase={currentPhase} endTimeMs={timerEndTime} /> : null}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
 							scope="public"
