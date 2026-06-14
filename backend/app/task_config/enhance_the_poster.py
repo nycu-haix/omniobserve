@@ -28,6 +28,7 @@ IMAGE_LIBRARY_COMPONENT_IDS = {
     "activity_icon1",
     "activity_icon2",
 }
+FIXED_CONTEXT_COMPONENT_IDS = {"background"}
 
 TOPIC_DESCRIPTION = """你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，我們將目前的設計交給 reviewer 閱讀，並收集了一些關於資訊清楚度、文字內容與視覺呈現的改善建議。請綜合目前的海報內容與 reviewer feedback，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。
 
@@ -314,7 +315,7 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "background",
         "label_zh": "背景",
         "label_en": "Background",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "transparency", CUSTOM_DETAIL_ACTION_ID],
+        "allowed_action_ids": ["change_color", "transparency"],
     },
 ]
 
@@ -439,7 +440,7 @@ for component in PHASE1_POSTER_COMPONENTS:
         continue
     if component.get("id") in IMAGE_LIBRARY_COMPONENT_IDS and REPLACE_IMAGE_LIBRARY_ACTION_ID not in allowed_action_ids:
         allowed_action_ids.append(REPLACE_IMAGE_LIBRARY_ACTION_ID)
-    if CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
+    if component.get("id") not in FIXED_CONTEXT_COMPONENT_IDS and CUSTOM_DETAIL_ACTION_ID not in allowed_action_ids:
         allowed_action_ids.append(CUSTOM_DETAIL_ACTION_ID)
 
 PHASE1_BUILDER_CONFIG = {

@@ -1,6 +1,8 @@
 import unittest
 
-from app.services.private_phase_task_item_service import _build_statement
+from fastapi import HTTPException
+
+from app.services.private_phase_task_item_service import _build_statement, _resolve_component_action
 from app.task_config.enhance_the_poster import (
     CUSTOM_DETAIL_ACTION_ID,
     PHASE1_ACTION_ITEMS,
@@ -27,9 +29,25 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
 
         self.assertEqual(background["label_zh"], "背景")
         self.assertIn("change_color", background["allowed_action_ids"])
-        self.assertIn("move", background["allowed_action_ids"])
         self.assertIn("transparency", background["allowed_action_ids"])
-        self.assertIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
+        self.assertNotIn("remove", background["allowed_action_ids"])
+        self.assertNotIn("move", background["allowed_action_ids"])
+        self.assertNotIn("enlarge", background["allowed_action_ids"])
+        self.assertNotIn("shrink", background["allowed_action_ids"])
+        self.assertNotIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
+
+    def test_background_component_rejects_fixed_context_actions(self) -> None:
+        for action_id in ("remove", "move", CUSTOM_DETAIL_ACTION_ID):
+            with self.subTest(action_id=action_id), self.assertRaises(HTTPException) as raised:
+                _resolve_component_action(
+                    session_name="enhance-the-poster-issue95",
+                    task_id="enhance-the-poster",
+                    component_id="background",
+                    action_id=action_id,
+                )
+
+            self.assertEqual(raised.exception.status_code, 422)
+            self.assertEqual(raised.exception.detail, "Action item is not available for this poster component")
 
     def test_private_phases_show_task_instructions_on_the_right(self) -> None:
         phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
