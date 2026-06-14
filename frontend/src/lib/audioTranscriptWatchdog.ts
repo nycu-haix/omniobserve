@@ -12,8 +12,23 @@ export interface AudioTranscriptWatchdogState {
 	stallMs?: number;
 }
 
+export interface ObserveAudioTranscriptChunkState {
+	chunkRms: number;
+	speechThreshold: number;
+	spokenAudioAt: number | null;
+	now: number;
+}
+
 export function isTranscriptWatchdogMessage(message: { type?: string } | null | undefined): boolean {
 	return typeof message?.type === "string" && TRANSCRIPT_MESSAGE_TYPES.has(message.type);
+}
+
+export function observeAudioTranscriptChunk({ chunkRms, speechThreshold, spokenAudioAt, now }: ObserveAudioTranscriptChunkState): number | null {
+	if (spokenAudioAt !== null) {
+		return spokenAudioAt;
+	}
+
+	return chunkRms >= speechThreshold ? now : null;
 }
 
 export function shouldReportAudioTranscriptStall({

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AUDIO_TRANSCRIPT_STALL_MESSAGE, isTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
+import { AUDIO_TRANSCRIPT_STALL_MESSAGE, isTranscriptWatchdogMessage, observeAudioTranscriptChunk, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
 
 export type AudioStreamMode = "public" | "private";
 
@@ -175,13 +175,16 @@ export function useAudioStream(
 		}
 
 		const rms = calculateRms(samples);
-		if (rms < LOCAL_SPEAKING_RMS_THRESHOLD) {
-			return;
-		}
-
 		const now = Date.now();
+		spokenAudioAtRef.current = observeAudioTranscriptChunk({
+			chunkRms: rms,
+			speechThreshold: LOCAL_SPEAKING_RMS_THRESHOLD,
+			spokenAudioAt: spokenAudioAtRef.current,
+			now
+		});
+
 		if (spokenAudioAtRef.current === null) {
-			spokenAudioAtRef.current = now;
+			return;
 		}
 
 		if (

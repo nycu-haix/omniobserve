@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AUDIO_TRANSCRIPT_STALL_MS, isTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../src/lib/audioTranscriptWatchdog.ts";
+import { AUDIO_TRANSCRIPT_STALL_MS, isTranscriptWatchdogMessage, observeAudioTranscriptChunk, shouldReportAudioTranscriptStall } from "../src/lib/audioTranscriptWatchdog.ts";
 
 test("audio transcript watchdog waits until connected spoken audio exceeds the stall window", () => {
 	const spokenAudioAt = 1000;
@@ -80,6 +80,37 @@ test("audio transcript watchdog ignores disconnected or silent states", () => {
 			now: 20000
 		}),
 		false
+	);
+});
+
+test("audio transcript watchdog keeps checking after speech stops", () => {
+	const speechThreshold = 0.02;
+	const spokenAudioAt = observeAudioTranscriptChunk({
+		chunkRms: speechThreshold,
+		speechThreshold,
+		spokenAudioAt: null,
+		now: 1000
+	});
+
+	assert.equal(spokenAudioAt, 1000);
+	assert.equal(
+		observeAudioTranscriptChunk({
+			chunkRms: 0,
+			speechThreshold,
+			spokenAudioAt,
+			now: 1000 + AUDIO_TRANSCRIPT_STALL_MS
+		}),
+		spokenAudioAt
+	);
+	assert.equal(
+		shouldReportAudioTranscriptStall({
+			isAudioConnected: true,
+			spokenAudioAt,
+			lastTranscriptAt: null,
+			lastReportedAt: null,
+			now: 1000 + AUDIO_TRANSCRIPT_STALL_MS
+		}),
+		true
 	);
 });
 
