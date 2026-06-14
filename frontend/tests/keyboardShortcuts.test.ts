@@ -23,7 +23,8 @@ test("space shortcut stays active on non-text input controls", () => {
 
 test("space shortcut leaves explicit local space-key controls alone", () => {
 	assert.equal(shouldHandleExperimentSpaceShortcut({ code: "Space", target: target("div", { usesLocalSpaceShortcut: true }) }), false);
-	assert.equal(shouldHandleExperimentSpaceShortcut({ code: "Space", target: target("button") }), true);
+	assert.equal(shouldHandleExperimentSpaceShortcut({ code: "Space", target: target("button", { usesLocalSpaceShortcut: true }) }), false);
+	assert.equal(shouldHandleExperimentSpaceShortcut({ code: "Space", target: target("button", { usesLocalSpaceShortcut: false }) }), true);
 });
 
 test("space shortcut is ignored in text-entry contexts", () => {

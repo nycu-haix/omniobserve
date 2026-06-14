@@ -26,8 +26,9 @@ export function getKeyboardShortcutTarget(target: EventTarget | null): KeyboardS
 		return null;
 	}
 
-	if (target.getAttribute(LOCAL_SPACE_SHORTCUT_ATTRIBUTE) === "true") {
-		return describeKeyboardShortcutElement(target, true);
+	const localShortcutTarget = target.closest(`[${LOCAL_SPACE_SHORTCUT_ATTRIBUTE}='true']`);
+	if (localShortcutTarget instanceof HTMLElement) {
+		return describeKeyboardShortcutElement(localShortcutTarget, true);
 	}
 
 	const shortcutTarget = target.closest(EDITABLE_SHORTCUT_TARGET_SELECTOR);
