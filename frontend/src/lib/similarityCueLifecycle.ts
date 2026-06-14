@@ -11,6 +11,10 @@ export function canShareSimilarityReasonInPhase(phase: unknown): boolean {
 	return isSimilarityCueDisplayPhase(phase);
 }
 
+export function removeSimilarityPairCues<T extends SimilarityCueLifecycleItem>(cues: T[]): T[] {
+	return cues.filter(cue => cue.kind === "phase-transition-summary");
+}
+
 export function shouldAutoDismissSimilarityCue(cue: SimilarityCueLifecycleItem): boolean {
 	return cue.kind === "phase-transition-summary";
 }

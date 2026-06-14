@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
+import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase, removeSimilarityPairCues, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
 
 test("similarity cues stay visible through public and reflect phases", () => {
 	assert.equal(isSimilarityCueDisplayPhase("group"), true);
@@ -20,4 +20,10 @@ test("only transition summaries auto-dismiss similarity cues", () => {
 	assert.equal(shouldAutoDismissSimilarityCue({ id: "pair-1", kind: "pair" }), false);
 	assert.equal(shouldAutoDismissSimilarityCue({ id: "legacy-pair" }), false);
 	assert.equal(shouldAutoDismissSimilarityCue({ id: "summary-1", kind: "phase-transition-summary" }), true);
+});
+
+test("leaving cue display phases removes pair cues before the next transition summary", () => {
+	assert.deepEqual(removeSimilarityPairCues([{ id: "pair-1", kind: "pair" }, { id: "legacy-pair" }, { id: "summary-1", kind: "phase-transition-summary" }]), [
+		{ id: "summary-1", kind: "phase-transition-summary" }
+	]);
 });
