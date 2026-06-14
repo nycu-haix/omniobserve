@@ -265,7 +265,7 @@ export function IdeaBlockItem({
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-y-2",
+				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
@@ -306,7 +306,7 @@ export function IdeaBlockItem({
 			{isEditingTitle ? (
 				<input
 					className={cn(
-						"min-w-0 max-w-full justify-self-stretch rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring sm:justify-self-stretch",
+						"min-w-0 max-w-full justify-self-stretch rounded-md border bg-background px-2 py-1 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring",
 						titleTooLong && "border-destructive focus:border-destructive"
 					)}
 					value={draftTitle}
@@ -326,10 +326,10 @@ export function IdeaBlockItem({
 					autoFocus
 				/>
 			) : (
-				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-6 sm:justify-self-start">{isGenerating ? generatingLabel : rowLabel}</span>
+				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? generatingLabel : rowLabel}</span>
 			)}
 			{!isGenerating && (
-				<div className="relative col-start-2 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1.5 sm:col-start-3 sm:row-start-1 sm:flex-nowrap sm:gap-2">
+				<div className="relative col-start-2 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
 					{isEditingTitle ? (
 						<>
 							<Button
