@@ -138,6 +138,7 @@ class Phase1BuilderOptionResponse(BaseModel):
     label_zh: str
     label_en: str | None = None
     description_zh: str | None = None
+    aliases: list[str] | None = None
     template_zh: str | None = None
     allowed_action_ids: list[str] | None = None
     requires_detail: bool | None = None

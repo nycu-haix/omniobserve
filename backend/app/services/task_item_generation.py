@@ -162,7 +162,10 @@ async def build_poster_component_ids_with_llm(text: str, *, session_name: str | 
         f"Components:\n{component_lines}\n\n"
         "Identify every poster component that is explicitly mentioned or clearly referred to. "
         "The input may be Mandarin Chinese, English, or mixed language. "
-        "Match against component ids, Chinese labels, English labels, and obvious synonyms. "
+        "Match against component ids, Chinese labels, English labels, descriptions, aliases, "
+        "location references, function references, and visual descriptions. "
+        "Participant wording may be imprecise, such as 左上角那張圖, 右下角報名區, "
+        "下面那個單位資訊, or 那段時間地點說明. "
         "Do not require an edit action such as move, enlarge, or change color. "
         "Do not invent components. "
         'Return JSON only in this exact shape: {"component_ids":["main_title"]} . '
@@ -201,6 +204,8 @@ def build_poster_component_ids_by_keyword(text: str, *, session_name: str | None
             component_id,
             component.get("label_zh"),
             component.get("label_en"),
+            component.get("description_zh"),
+            *(component.get("aliases") or []),
         ]
         if _text_matches_any_keyword(normalized_text, keywords):
             matched_ids.append(component_id)
@@ -385,7 +390,11 @@ async def build_poster_component_action_mappings_with_llm(
         f"Actions:\n{action_lines}\n\n"
         "Identify every poster improvement component/action pair being discussed. "
         "The input may be Mandarin Chinese, English, or mixed language. "
-        "Match against ids, Chinese labels, English labels, descriptions, and obvious synonyms. "
+        "Match components against ids, Chinese labels, English labels, descriptions, aliases, "
+        "location references, function references, and visual descriptions. "
+        "Participant wording may be imprecise, such as 左上角那張圖, 右下角報名區, "
+        "下面那個單位資訊, or 那段時間地點說明. "
+        "Match actions against ids, Chinese labels, English labels, descriptions, and obvious synonyms. "
         "Do not invent components or actions. Deduplicate exact pairs. "
         'Return JSON only in this exact shape: {"poster_task_items":[{"component_id":"main_title","action_id":"enlarge"}]} . '
         'If unrelated, return {"poster_task_items":[]}.'
@@ -409,16 +418,14 @@ async def build_poster_component_action_mappings_with_llm(
 
 
 def _format_builder_option_line(item: dict[str, Any]) -> str:
-    aliases = ", ".join(
-        str(value)
-        for value in [
-            item.get("label_zh"),
-            item.get("label_en"),
-            item.get("description_zh"),
-        ]
-        if value
-    )
-    return f'- id="{item["id"]}"; labels="{aliases}"'
+    label_parts = _join_option_terms(item.get("label_zh"), item.get("label_en"))
+    description = str(item.get("description_zh") or "")
+    aliases = _join_option_terms(*(item.get("aliases") or []))
+    return f'- id="{item["id"]}"; labels="{label_parts}"; description="{description}"; aliases="{aliases}"'
+
+
+def _join_option_terms(*values: Any) -> str:
+    return ", ".join(dict.fromkeys(str(value) for value in values if value))
 
 
 def _normalize_poster_component_action_mappings(
