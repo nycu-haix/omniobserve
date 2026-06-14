@@ -32,6 +32,8 @@ PARTICIPANT_ROLE_ALIASES = {
     "experimenter": FACILITATOR_ROLE,
     "confederate-script": CONFEDERATE_ROLE,
     "manipulation": CONFEDERATE_ROLE,
+    "mock": TEST_ROLE,
+    "mock-participant": TEST_ROLE,
     "test-client": TEST_ROLE,
 }
 

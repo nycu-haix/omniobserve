@@ -27,6 +27,7 @@ from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import (
+    get_cached_participant_role,
     get_participant_display_name,
     get_participant_presence,
     is_cached_non_analysis_participant,
@@ -35,7 +36,7 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
-from .participant_roles import list_session_participant_roles
+from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, list_session_participant_roles
 from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
@@ -93,6 +94,15 @@ def _is_participant_ranking_subject(session_id: str, participant_id: str | None)
     if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
         return False
     return not is_cached_non_analysis_participant(session_id, str(participant_id or ""))
+
+
+def _is_admin_monitor_ranking_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
+        return False
+    return get_cached_participant_role(session_id, str(participant_id or "")) in {
+        PARTICIPANT_ROLE,
+        CONFEDERATE_ROLE,
+    }
 
 
 def _phase_snapshot_participant_ids(participant_ids: list[str]) -> list[str]:
@@ -1183,7 +1193,7 @@ def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     private_rankings = {
         participant_id: _ranking_payload(session_id, state)
         for participant_id, state in sorted(private_ranking_state[session_id].items())
-        if _is_participant_ranking_subject(session_id, participant_id)
+        if _is_admin_monitor_ranking_subject(session_id, participant_id)
     }
     return {
         "type": "admin_ranking_state",

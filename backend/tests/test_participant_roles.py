@@ -6,7 +6,11 @@ from app.services.phase_task_item_snapshot_service import _observer_participant_
 from app.services.participant_status import sync_participant_roles
 from app.services.participant_roles import is_participant_analysis_role, normalize_participant_role
 from app.services.ranking_phase_snapshot_service import _is_participant_subject
-from app.services.realtime import _is_participant_ranking_subject, _phase_snapshot_participant_ids
+from app.services.realtime import (
+    _is_admin_monitor_ranking_subject,
+    _is_participant_ranking_subject,
+    _phase_snapshot_participant_ids,
+)
 from app.services.task_export_service import _ranking_artifact_name, _snapshot_subject_token
 
 
@@ -22,6 +26,7 @@ class ParticipantRoleTests(unittest.TestCase):
         self.assertEqual(normalize_participant_role("confederate_script"), "confederate")
         self.assertEqual(normalize_participant_role("staff"), "facilitator")
         self.assertEqual(normalize_participant_role("test_client"), "test")
+        self.assertEqual(normalize_participant_role("mock_participant"), "test")
         self.assertTrue(is_participant_analysis_role("participant"))
         self.assertFalse(is_participant_analysis_role("confederate"))
         self.assertFalse(is_participant_analysis_role("facilitator"))
@@ -90,6 +95,27 @@ class ParticipantRoleTests(unittest.TestCase):
         self.assertFalse(_is_participant_ranking_subject(session_name, "1"))
         self.assertTrue(_is_participant_ranking_subject(session_name, "2"))
         self.assertFalse(_is_participant_ranking_subject(session_name, "observer"))
+
+    def test_admin_monitor_keeps_confederate_private_ranking_visible(self) -> None:
+        session_name = "test-admin-monitor-confederate-ranking"
+        sync_participant_roles(
+            session_name,
+            {
+                "1": "participant",
+                "2": "confederate",
+                "3": "observer",
+                "4": "facilitator",
+                "5": "test",
+            },
+        )
+
+        self.assertTrue(_is_admin_monitor_ranking_subject(session_name, "1"))
+        self.assertTrue(_is_admin_monitor_ranking_subject(session_name, "2"))
+        self.assertFalse(_is_admin_monitor_ranking_subject(session_name, "3"))
+        self.assertFalse(_is_admin_monitor_ranking_subject(session_name, "4"))
+        self.assertFalse(_is_admin_monitor_ranking_subject(session_name, "5"))
+        self.assertFalse(_is_admin_monitor_ranking_subject(session_name, "admin-reviewer"))
+        self.assertFalse(_is_participant_ranking_subject(session_name, "2"))
 
     def test_phase_snapshot_item_catalog_filters_to_analysis_participants(self) -> None:
         self.assertEqual(_participant_user_id_filter(["2", "admin", "observer", "1", "0"]), [1, 2])
