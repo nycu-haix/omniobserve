@@ -1039,6 +1039,10 @@ export default function MeetingRoom() {
 		[hasAudioConnectionError, micMode, startAudioStream]
 	);
 
+	const handleAudioReconnect = useCallback(() => {
+		void handleMic(micMode);
+	}, [handleMic, micMode]);
+
 	const handlePublicMicActivation = useCallback(() => {
 		void handleMic(getNextMicModeAfterPublicActivation(micMode));
 	}, [handleMic, micMode]);
@@ -1651,9 +1655,22 @@ export default function MeetingRoom() {
 						</Button>
 					</div>
 					{hasAudioConnectionError && (
-						<AlertCircle className="absolute right-24 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
-							<title>{audioError}</title>
-						</AlertCircle>
+						<div
+							className="absolute right-0 top-10 z-30 flex max-w-[min(30rem,calc(100vw-2rem))] items-center gap-2 rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs text-destructive shadow-md"
+							role="alert"
+						>
+							<AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+							<span className="min-w-0 flex-1 text-left leading-snug">{audioError}</span>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-7 shrink-0 border-destructive/30 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+								onClick={handleAudioReconnect}
+							>
+								重新連線音訊
+							</Button>
+						</div>
 					)}
 					{isJitsiCollapsed && (
 						<Button

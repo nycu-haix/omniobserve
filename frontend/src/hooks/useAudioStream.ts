@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AUDIO_TRANSCRIPT_STALL_MESSAGE, isTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
 
 export type AudioStreamMode = "public" | "private";
 
@@ -137,6 +138,9 @@ export function useAudioStream(
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
 	const isLocalSpeakingRef = useRef(false);
 	const localSpeakingReleaseTimerRef = useRef<number | null>(null);
+	const spokenAudioAtRef = useRef<number | null>(null);
+	const lastTranscriptAtRef = useRef<number | null>(null);
+	const lastTranscriptStallReportedAtRef = useRef<number | null>(null);
 
 	const setLocalSpeakingState = useCallback((nextSpeaking: boolean) => {
 		if (isLocalSpeakingRef.current === nextSpeaking) {
@@ -151,6 +155,46 @@ export function useAudioStream(
 		if (localSpeakingReleaseTimerRef.current !== null) {
 			window.clearTimeout(localSpeakingReleaseTimerRef.current);
 			localSpeakingReleaseTimerRef.current = null;
+		}
+	}, []);
+
+	const resetTranscriptWatchdog = useCallback(() => {
+		spokenAudioAtRef.current = null;
+		lastTranscriptStallReportedAtRef.current = null;
+	}, []);
+
+	const markTranscriptReceived = useCallback(() => {
+		lastTranscriptAtRef.current = Date.now();
+		resetTranscriptWatchdog();
+		setAudioError(current => (current === AUDIO_TRANSCRIPT_STALL_MESSAGE ? null : current));
+	}, [resetTranscriptWatchdog]);
+
+	const updateTranscriptWatchdog = useCallback((samples: Float32Array) => {
+		if (samples.length === 0) {
+			return;
+		}
+
+		const rms = calculateRms(samples);
+		if (rms < LOCAL_SPEAKING_RMS_THRESHOLD) {
+			return;
+		}
+
+		const now = Date.now();
+		if (spokenAudioAtRef.current === null) {
+			spokenAudioAtRef.current = now;
+		}
+
+		if (
+			shouldReportAudioTranscriptStall({
+				isAudioConnected: socketRef.current?.readyState === WebSocket.OPEN,
+				spokenAudioAt: spokenAudioAtRef.current,
+				lastTranscriptAt: lastTranscriptAtRef.current,
+				lastReportedAt: lastTranscriptStallReportedAtRef.current,
+				now
+			})
+		) {
+			lastTranscriptStallReportedAtRef.current = now;
+			setAudioError(AUDIO_TRANSCRIPT_STALL_MESSAGE);
 		}
 	}, []);
 
@@ -206,9 +250,10 @@ export function useAudioStream(
 		audioContextRef.current = null;
 		pendingSamplesRef.current = new Float32Array(0);
 		sentChunksRef.current = 0;
+		resetTranscriptWatchdog();
 		clearLocalSpeakingReleaseTimer();
 		setLocalSpeakingState(false);
-	}, [clearLocalSpeakingReleaseTimer, setLocalSpeakingState]);
+	}, [clearLocalSpeakingReleaseTimer, resetTranscriptWatchdog, setLocalSpeakingState]);
 
 	const waitForAudioStopAck = useCallback((socket: WebSocket): Promise<void> => {
 		if (socket.readyState === WebSocket.CLOSED) {
@@ -380,6 +425,7 @@ export function useAudioStream(
 				const chunk = currentPending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
 				offset += OUTPUT_CHUNK_SIZE;
 
+				updateTranscriptWatchdog(chunk);
 				updateLocalSpeaking(chunk);
 				socket.send(chunk.buffer);
 
@@ -397,7 +443,7 @@ export function useAudioStream(
 
 			pendingSamplesRef.current = currentPending.slice(offset);
 		},
-		[updateLocalSpeaking]
+		[updateLocalSpeaking, updateTranscriptWatchdog]
 	);
 
 	const startAudioStream = useCallback(
@@ -417,6 +463,7 @@ export function useAudioStream(
 
 			stoppingRef.current = false;
 			setAudioError(null);
+			resetTranscriptWatchdog();
 			clearLocalSpeakingReleaseTimer();
 			setLocalSpeakingState(false);
 
@@ -567,6 +614,9 @@ export function useAudioStream(
 							const error = typeof parsedMessage.error === "string" ? parsedMessage.error : undefined;
 							setAudioError(error || reason || "Audio transcript was not saved.");
 						}
+						if (isTranscriptWatchdogMessage(parsedMessage)) {
+							markTranscriptReceived();
+						}
 						setLastAudioMessage(parsedMessage);
 					} catch {
 						console.info("[audio-ws] receive raw", event.data);
@@ -611,7 +661,18 @@ export function useAudioStream(
 				setIsAudioStreaming(false);
 			}
 		},
-		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, displayName, drainActiveAudioSocket, participantId, sendAudioSamples, sessionId, setLocalSpeakingState]
+		[
+			cleanupAudioResources,
+			clearLocalSpeakingReleaseTimer,
+			displayName,
+			drainActiveAudioSocket,
+			markTranscriptReceived,
+			participantId,
+			resetTranscriptWatchdog,
+			sendAudioSamples,
+			sessionId,
+			setLocalSpeakingState
+		]
 	);
 
 	useEffect(() => {
