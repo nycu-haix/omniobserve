@@ -6,7 +6,7 @@ import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
-import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
+import { canShareSimilarityReasonInPhase, getSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -1669,13 +1669,13 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 	const clearSimilarityPairCuesSoon = useCallback(() => {
 		window.setTimeout(() => {
-			setCues(prev => {
-				const nextCues = removeSimilarityPairCues(prev);
-				cuesRef.current = nextCues;
-				return nextCues;
-			});
+			const previousCues = cuesRef.current;
+			getSimilarityPairCues(previousCues).forEach(cue => sendSimilarityCueResponse(cue, "ignored"));
+			const nextCues = removeSimilarityPairCues(previousCues);
+			cuesRef.current = nextCues;
+			setCues(nextCues);
 		}, 0);
-	}, []);
+	}, [sendSimilarityCueResponse]);
 
 	const syncPhaseTransitionCueBatch = useCallback(
 		(nextPhase: SessionPhase) => {

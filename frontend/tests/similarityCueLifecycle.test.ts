@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase, removeSimilarityPairCues, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
+import { canShareSimilarityReasonInPhase, getSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
 
 test("similarity cues stay visible through public and reflect phases", () => {
 	assert.equal(isSimilarityCueDisplayPhase("group"), true);
@@ -23,7 +23,7 @@ test("only transition summaries auto-dismiss similarity cues", () => {
 });
 
 test("leaving cue display phases removes pair cues before the next transition summary", () => {
-	assert.deepEqual(removeSimilarityPairCues([{ id: "pair-1", kind: "pair" }, { id: "legacy-pair" }, { id: "summary-1", kind: "phase-transition-summary" }]), [
-		{ id: "summary-1", kind: "phase-transition-summary" }
-	]);
+	const cues = [{ id: "pair-1", kind: "pair" }, { id: "legacy-pair" }, { id: "summary-1", kind: "phase-transition-summary" }];
+	assert.deepEqual(getSimilarityPairCues(cues), [{ id: "pair-1", kind: "pair" }, { id: "legacy-pair" }]);
+	assert.deepEqual(removeSimilarityPairCues(cues), [{ id: "summary-1", kind: "phase-transition-summary" }]);
 });
