@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AUDIO_TRANSCRIPT_STALL_MS, isTranscriptWatchdogMessage, observeAudioTranscriptChunk, shouldReportAudioTranscriptStall } from "../src/lib/audioTranscriptWatchdog.ts";
+import {
+	AUDIO_TRANSCRIPT_STALL_MS,
+	isTranscriptWatchdogMessage,
+	observeAudioTranscriptChunk,
+	shouldAcceptTranscriptWatchdogMessage,
+	shouldReportAudioTranscriptStall
+} from "../src/lib/audioTranscriptWatchdog.ts";
 
 test("audio transcript watchdog waits until connected spoken audio exceeds the stall window", () => {
 	const spokenAudioAt = 1000;
@@ -120,4 +126,10 @@ test("audio transcript watchdog recognizes transcript lifecycle messages", () =>
 	assert.equal(isTranscriptWatchdogMessage({ type: "transcript_boundary" }), true);
 	assert.equal(isTranscriptWatchdogMessage({ type: "idea_blocks_update" }), false);
 	assert.equal(isTranscriptWatchdogMessage(null), false);
+});
+
+test("audio transcript watchdog ignores transcript messages from stale sockets", () => {
+	assert.equal(shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket: true, message: { type: "transcript" } }), true);
+	assert.equal(shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket: false, message: { type: "transcript" } }), false);
+	assert.equal(shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket: true, message: { type: "idea_blocks_update" } }), false);
 });

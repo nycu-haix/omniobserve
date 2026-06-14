@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AUDIO_TRANSCRIPT_STALL_MESSAGE, isTranscriptWatchdogMessage, observeAudioTranscriptChunk, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
+import { AUDIO_TRANSCRIPT_STALL_MESSAGE, observeAudioTranscriptChunk, shouldAcceptTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
 
 export type AudioStreamMode = "public" | "private";
 
@@ -617,7 +617,7 @@ export function useAudioStream(
 							const error = typeof parsedMessage.error === "string" ? parsedMessage.error : undefined;
 							setAudioError(error || reason || "Audio transcript was not saved.");
 						}
-						if (isTranscriptWatchdogMessage(parsedMessage)) {
+						if (shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket: socketRef.current === socket, message: parsedMessage })) {
 							markTranscriptReceived();
 						}
 						setLastAudioMessage(parsedMessage);

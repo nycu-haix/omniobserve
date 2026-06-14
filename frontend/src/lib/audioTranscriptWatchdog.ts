@@ -19,8 +19,17 @@ export interface ObserveAudioTranscriptChunkState {
 	now: number;
 }
 
+export interface TranscriptWatchdogMessageState {
+	isCurrentSocket: boolean;
+	message: { type?: string } | null | undefined;
+}
+
 export function isTranscriptWatchdogMessage(message: { type?: string } | null | undefined): boolean {
 	return typeof message?.type === "string" && TRANSCRIPT_MESSAGE_TYPES.has(message.type);
+}
+
+export function shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket, message }: TranscriptWatchdogMessageState): boolean {
+	return isCurrentSocket && isTranscriptWatchdogMessage(message);
 }
 
 export function observeAudioTranscriptChunk({ chunkRms, speechThreshold, spokenAudioAt, now }: ObserveAudioTranscriptChunkState): number | null {
