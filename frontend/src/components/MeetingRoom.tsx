@@ -620,6 +620,7 @@ function SortableLostAtSeaItem({
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
+			data-local-space-shortcut="true"
 			title={itemTitle}
 			{...attributes}
 			{...listeners}

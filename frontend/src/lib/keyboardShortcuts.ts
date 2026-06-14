@@ -4,6 +4,7 @@ export interface KeyboardShortcutTarget {
 	role?: string | null;
 	contentEditable?: string | null;
 	isContentEditable?: boolean;
+	usesLocalSpaceShortcut?: boolean;
 }
 
 interface ExperimentSpaceShortcutState {
@@ -18,10 +19,15 @@ interface ExperimentSpaceShortcutState {
 
 const EDITABLE_SHORTCUT_TARGET_SELECTOR = "input, textarea, select, [contenteditable], [role='textbox']";
 const NON_TEXT_INPUT_TYPES = new Set(["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"]);
+const LOCAL_SPACE_SHORTCUT_ATTRIBUTE = "data-local-space-shortcut";
 
 export function getKeyboardShortcutTarget(target: EventTarget | null): KeyboardShortcutTarget | null {
 	if (!(target instanceof HTMLElement)) {
 		return null;
+	}
+
+	if (target.getAttribute(LOCAL_SPACE_SHORTCUT_ATTRIBUTE) === "true") {
+		return describeKeyboardShortcutElement(target, true);
 	}
 
 	const shortcutTarget = target.closest(EDITABLE_SHORTCUT_TARGET_SELECTOR);
@@ -29,11 +35,16 @@ export function getKeyboardShortcutTarget(target: EventTarget | null): KeyboardS
 		return null;
 	}
 
+	return describeKeyboardShortcutElement(shortcutTarget, false);
+}
+
+function describeKeyboardShortcutElement(shortcutTarget: HTMLElement, usesLocalSpaceShortcut: boolean): KeyboardShortcutTarget {
 	const descriptor: KeyboardShortcutTarget = {
 		tagName: shortcutTarget.tagName.toLowerCase(),
 		role: shortcutTarget.getAttribute("role"),
 		contentEditable: shortcutTarget.getAttribute("contenteditable"),
-		isContentEditable: shortcutTarget.isContentEditable
+		isContentEditable: shortcutTarget.isContentEditable,
+		usesLocalSpaceShortcut
 	};
 
 	if (shortcutTarget instanceof HTMLInputElement) {
@@ -65,5 +76,5 @@ export function isEditableShortcutTarget(target: KeyboardShortcutTarget | null |
 
 export function shouldHandleExperimentSpaceShortcut(event: ExperimentSpaceShortcutState) {
 	const isSpaceKey = event.code === "Space" || event.key === " ";
-	return isSpaceKey && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableShortcutTarget(event.target);
+	return isSpaceKey && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey && !event.target?.usesLocalSpaceShortcut && !isEditableShortcutTarget(event.target);
 }
