@@ -10,6 +10,7 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
+import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
@@ -765,7 +766,12 @@ function TaskWorkspace({
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+	const [referenceImageStatus, setReferenceImageStatus] = useState({ src: "", retryToken: 0, failed: false });
+	const normalizedReferenceImageSrc = referenceImageSrc || "";
+	const referenceImageRetryToken = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.retryToken : 0;
+	const isReferenceImageFailed = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.failed : false;
 	const visibleLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
+	const referenceImageDisplaySrc = useMemo(() => buildTaskReferenceImageSrc(normalizedReferenceImageSrc, referenceImageRetryToken), [normalizedReferenceImageSrc, referenceImageRetryToken]);
 
 	useEffect(() => {
 		const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -803,7 +809,41 @@ function TaskWorkspace({
 		return (
 			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
 				<div className="grid min-h-0 flex-1 gap-3 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
-					{referenceImageSrc && <img className="max-h-[80vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
+					{referenceImageDisplaySrc && !isReferenceImageFailed && (
+						<img
+							className="max-h-[80vh] w-full rounded-md border bg-white object-contain"
+							src={referenceImageDisplaySrc}
+							alt={referenceImageAlt || taskTitle}
+							onLoad={() => setReferenceImageStatus({ src: normalizedReferenceImageSrc, retryToken: referenceImageRetryToken, failed: false })}
+							onError={() => setReferenceImageStatus({ src: normalizedReferenceImageSrc, retryToken: referenceImageRetryToken, failed: true })}
+						/>
+					)}
+					{referenceImageSrc && isReferenceImageFailed && (
+						<div className="grid gap-3 rounded-md border border-destructive/30 bg-background p-3 text-destructive" role="alert">
+							<div className="flex items-start gap-2">
+								<AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+								<div className="grid gap-1">
+									<div className="font-medium">任務海報圖片載入失敗</div>
+									<p className="text-xs leading-5 text-destructive/80">請重新載入圖片；文字任務說明仍可繼續閱讀。</p>
+								</div>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-fit border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+								onClick={() => {
+									setReferenceImageStatus(current => ({
+										src: normalizedReferenceImageSrc,
+										retryToken: current.src === normalizedReferenceImageSrc ? current.retryToken + 1 : 1,
+										failed: false
+									}));
+								}}
+							>
+								重新載入圖片
+							</Button>
+						</div>
+					)}
 					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
 				</div>
 			</section>
