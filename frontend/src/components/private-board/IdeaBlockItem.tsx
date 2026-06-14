@@ -265,7 +265,7 @@ export function IdeaBlockItem({
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
@@ -326,10 +326,10 @@ export function IdeaBlockItem({
 					autoFocus
 				/>
 			) : (
-				<span className="block w-fit min-w-0 max-w-full justify-self-start whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? generatingLabel : rowLabel}</span>
+				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? generatingLabel : rowLabel}</span>
 			)}
 			{!isGenerating && (
-				<div className="relative flex flex-shrink-0 items-center gap-2">
+				<div className="relative col-start-2 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
 					{isEditingTitle ? (
 						<>
 							<Button
