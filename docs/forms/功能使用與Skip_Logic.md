@@ -8,6 +8,7 @@
 - 若功能在該 task / condition 中沒有提供，後續「有沒有幫助」「為什麼使用」「是否影響決策」等題目一律標記 `N/A_not_available`，不要要求參與者猜測。
 - 若功能有提供但參與者沒有注意到或沒有使用，後續 usefulness rating 一律標記 `N/A_did_not_use`；可以改問「為什麼沒有使用」。
 - Observer 代填表單時，要用中性語句確認，不要暗示某個功能應該出現或應該被使用。
+- 熟悉度 side-effect 題目的受試者可見題幹使用「整理想法、查看可用提示或公開表達」等中性描述；`private_notes`、`idea_blocks`、`cue`、`chat`、`public_speech` 只作為事後整理的 `affected_channel` 分析 tag。
 - 如果系統故障導致功能原本應出現但沒有出現，表單填 `N/A_technical_issue`，並在 incident log 補具體原因。
 
 ## 2. 小表單前置欄位

@@ -20,7 +20,7 @@
 - 是否在 public phase 公開提出 private 階段的想法
 - 本輪 task 前和其他組員的熟悉度，1 = 完全不熟，7 = 非常熟
 - 本輪公開提出不同意見的自在程度，1 = 非常不自在，7 = 非常自在
-- 熟悉度是否影響你使用 private notes / idea blocks / chat / public speech 的方式
+- 熟悉度是否影響你整理想法或公開表達的方式
 - 如果沒有使用 idea blocks 或相關回顧功能，原因是什麼
 - 其他補充
 
@@ -43,7 +43,7 @@
 - 是否查看或使用 idea blocks
 - 本輪 task 前和其他組員的熟悉度，1 = 完全不熟，7 = 非常熟
 - 本輪公開提出不同意見的自在程度，1 = 非常不自在，7 = 非常自在
-- 熟悉度是否影響你使用 cue / private notes / idea blocks / chat / public speech 的方式
+- 熟悉度是否影響你整理想法、查看系統提示或公開表達的方式
 - 如果沒有使用 cue 或 idea blocks，原因是什麼
 - 其他補充
 
@@ -67,6 +67,8 @@
 - 有沒有想法先留在 private phase，最後沒有公開；原因是什麼
 - 有沒有因為 cue、idea blocks 或聊天室而更容易公開提出想法
 - 對 OmniObserve 的整體回饋
+
+熟悉度 side-effect 題目不得把 `private_notes`、`idea_blocks`、`cue`、`chat`、`public_speech` 等分析 tag 放在受試者可見題幹；需要分析時由 Observer/Admin 從開放回答另行標記。
 
 ## 4. 場前同步檢查
 

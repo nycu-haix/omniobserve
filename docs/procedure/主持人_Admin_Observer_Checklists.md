@@ -235,7 +235,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 判斷剛完成 task 是 no cue 還是 with cue。
 - [ ] no cue 使用小表單 A：<https://docs.google.com/forms/d/1hultQhpxqw-Q-i9u8StCVhbxSf2eQTAtsZM1SWQ1TdM/edit>
 - [ ] with cue 使用小表單 B：<https://docs.google.com/forms/d/1qAmfWRzsvMttPvgKtmDGbYhZ-pHvkdQHXVNgwDcvNlc/edit>
-- [ ] 小表單或 notes 有記錄本輪熟悉度、公開反對舒適度，以及熟悉度是否影響 private notes / idea blocks / cue / chat 使用。
+- [ ] 小表單或 notes 有記錄本輪熟悉度、公開反對舒適度，以及熟悉度是否影響整理想法、查看可用提示或公開表達。
 - [ ] 三位 Observer 分別口頭詢問自己的真實參與者。
 - [ ] 每位真實參與者都是一對一口頭詢問；參與者不自行填小表單。
 - [ ] 先確認 idea blocks、reviewer feedback、similarity cue 是否可用 / 有看到 / 有使用，再問後續評價題。
@@ -301,7 +301,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 確認暗樁不參與三位真實參與者個別訪談。
 - [ ] 訪談前與訪談中不揭露暗樁，不暗示有人是研究團隊安排成員。
 - [ ] 訪談追問使用中性說法，例如「某位成員」「有人」「剛才那段討論」。
-- [ ] 詢問熟悉度是否影響公開反對、private notes、idea blocks、cue 或聊天室使用。
+- [ ] 詢問熟悉度是否影響公開反對、整理想法、查看可用提示或公開表達；不要在受試者可見題幹列出分析 tag。
 - [ ] 若參與者表示「因為很熟所以直接公開說」或「因為不熟所以先記在 private」，將原話摘要寫入 notes。
 - [ ] 確認三場訪談彼此分開，不能互相聽見。
 - [ ] 各自開始約 30 分鐘個別訪談。
