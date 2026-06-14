@@ -16,12 +16,13 @@ import { IdeaBlockItem } from "./IdeaBlockItem";
 import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
-import { shouldCountPublicChatMessageUnread } from "./publicChatUnread";
+import { shouldClearPublicChatUnreadCount, shouldCountPublicChatMessageUnread } from "./publicChatUnread";
 import { formatUnreadCount, getIdeaBlockUnreadState, type IdeaBlockUnreadState } from "./unreadIdeaBlocks";
 
 export interface PrivateBoardHandle {
 	openLatestUnreadIdeaBlock: () => void;
 	openPublicChat: () => void;
+	markVisiblePublicChatRead: () => void;
 }
 
 interface PrivateBoardProps {
@@ -1755,7 +1756,13 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		selectBoardTab("public-chat");
 	}, [onRequestOpen, selectBoardTab]);
 
-	useImperativeHandle(ref, () => ({ openLatestUnreadIdeaBlock, openPublicChat }), [openLatestUnreadIdeaBlock, openPublicChat]);
+	const markVisiblePublicChatRead = useCallback(() => {
+		if (shouldClearPublicChatUnreadCount({ activeTab: visibleActiveTab, isCollapsed: false })) {
+			setUnreadPublicChatCount(0);
+		}
+	}, [visibleActiveTab]);
+
+	useImperativeHandle(ref, () => ({ openLatestUnreadIdeaBlock, openPublicChat, markVisiblePublicChatRead }), [openLatestUnreadIdeaBlock, openPublicChat, markVisiblePublicChatRead]);
 
 	useEffect(() => {
 		onIdeaBlockUnreadStateChange?.(ideaBlockUnreadState);

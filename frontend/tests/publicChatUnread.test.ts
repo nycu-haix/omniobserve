@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { shouldCountPublicChatMessageUnread } from "../src/components/private-board/publicChatUnread.ts";
+import { shouldClearPublicChatUnreadCount, shouldCountPublicChatMessageUnread } from "../src/components/private-board/publicChatUnread.ts";
 import { buildIdeaBlockChatMessage, parseIdeaBlockChatMessage } from "../src/lib/chatMessages.ts";
 import type { PublicChatMessage } from "../src/types/index.ts";
 
@@ -35,4 +35,10 @@ test("does not count visible, own, deleted, or already-seen chat messages as unr
 	assert.equal(shouldCountPublicChatMessageUnread({ ...message, isOwn: true }, [], { activeTab: "ideablock", isCollapsed: false }), false);
 	assert.equal(shouldCountPublicChatMessageUnread({ ...message, isDeleted: true }, [], { activeTab: "ideablock", isCollapsed: false }), false);
 	assert.equal(shouldCountPublicChatMessageUnread(message, [message], { activeTab: "ideablock", isCollapsed: false }), false);
+});
+
+test("clears chat unread count when reopening to a visible chat tab", () => {
+	assert.equal(shouldClearPublicChatUnreadCount({ activeTab: "public-chat", isCollapsed: false }), true);
+	assert.equal(shouldClearPublicChatUnreadCount({ activeTab: "public-chat", isCollapsed: true }), false);
+	assert.equal(shouldClearPublicChatUnreadCount({ activeTab: "ideablock", isCollapsed: false }), false);
 });

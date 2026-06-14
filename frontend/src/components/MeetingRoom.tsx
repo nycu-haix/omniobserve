@@ -1337,6 +1337,7 @@ export default function MeetingRoom() {
 
 	const openPrivateBoard = useCallback(() => {
 		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.markVisiblePublicChatRead(), 0);
 	}, []);
 
 	const openUnreadIdeaBlocks = useCallback(() => {
