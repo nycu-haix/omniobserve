@@ -634,6 +634,11 @@ function SortableLostAtSeaItem({
 						event.stopPropagation();
 						onPreview(item);
 					}}
+					onKeyDown={event => {
+						if (event.code === "Space" || event.key === "Enter") {
+							event.stopPropagation();
+						}
+					}}
 					onPointerDown={event => event.stopPropagation()}
 				>
 					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
