@@ -650,7 +650,7 @@ function SortableLostAtSeaItem({
 		<div
 			ref={setNodeRef}
 			className={cn(
-				"grid min-h-10 w-full shrink-0 cursor-grab select-none items-start gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
+				"grid min-h-10 w-full shrink-0 cursor-grab select-none items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors",
 				showImage ? "grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]",
 				isRankConflict && "border-muted-foreground/30",
 				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
@@ -668,7 +668,7 @@ function SortableLostAtSeaItem({
 			{showImage && (
 				<button
 					type="button"
-					className="mt-0.5 h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					className="h-7 w-10 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					aria-label={`放大查看 ${item.label}`}
 					onClick={event => {
 						event.stopPropagation();
@@ -684,14 +684,14 @@ function SortableLostAtSeaItem({
 					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
 				</button>
 			)}
-			<span className={cn("mt-0.5 grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
+			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
 			<span className="min-w-0 whitespace-normal break-words py-0.5 leading-5">{item.label}</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
-						"mt-1 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold",
+						"inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-semibold",
 						isRankConflict && rankDeltaDirection === "up" && "text-emerald-700",
 						isRankConflict && rankDeltaDirection === "down" && "text-rose-700",
 						!isRankConflict && "text-muted-foreground/60"
@@ -711,7 +711,7 @@ function SortableLostAtSeaItem({
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			<GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 		</div>
 	);
 }
