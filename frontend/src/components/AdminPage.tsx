@@ -20,6 +20,7 @@ import {
 	X
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -1474,8 +1475,12 @@ export function AdminPage() {
 		.filter((target): target is Extract<PublicNowTarget, { kind: "task_item" }> => !!target);
 	const activePublicNowLabels = [...activePublicNowComponents.map(component => component.label_zh || component.label_en || component.id), ...activePublicNowTaskItems.map(target => target.label)];
 	const publicNowTargetCount = publicNowComponentIds.length + publicNowTaskItemIds.length;
-	const publicNowLabel =
-		activePublicNowLabels.length > 0 ? activePublicNowLabels.join(" + ") : publicNowTargetCount > 0 ? [...publicNowComponentIds, ...publicNowTaskItemIds.map(String)].join(" + ") : "尚未指定";
+	const publicNowLabel = buildPublicNowLabel({
+		activeLabels: activePublicNowLabels,
+		componentIds: publicNowComponentIds,
+		taskItemIds: publicNowTaskItemIds,
+		targetCount: publicNowTargetCount
+	});
 	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
@@ -1889,14 +1894,16 @@ export function AdminPage() {
 							<h2 className="text-sm font-semibold">Public NOW</h2>
 						</header>
 						<div className="grid gap-3">
-							<div className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+							<div className="flex items-start justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
 								<div className="min-w-0">
-									<div className="truncate font-medium">{publicNowLabel}</div>
-									<div className="text-xs text-muted-foreground">
+									<div className="whitespace-normal break-words font-medium leading-5">{publicNowLabel}</div>
+									<div className="text-xs leading-5 text-muted-foreground">
 										{publicNowSourceLabel} · {publicNowMatchCount} blocks · {publicNowDeliveredCount} boards
 									</div>
 								</div>
-								<Badge variant={publicNowTargetCount > 0 ? "secondary" : "outline"}>{publicNowTargetCount > 0 ? "NOW" : "none"}</Badge>
+								<Badge variant={publicNowTargetCount > 0 ? "secondary" : "outline"} className="shrink-0">
+									{publicNowTargetCount > 0 ? "NOW" : "none"}
+								</Badge>
 							</div>
 							{publicNowTargets.length > 0 ? (
 								<div className="flex flex-wrap gap-2">
@@ -1908,12 +1915,12 @@ export function AdminPage() {
 												type="button"
 												size="sm"
 												variant={isSelected ? "default" : "outline"}
-												className="h-8 max-w-full px-2 text-xs"
+												className="h-auto min-h-8 max-w-full justify-start whitespace-normal break-words px-2 py-1 text-left text-xs leading-5"
 												onClick={() => selectPublicNowTarget(target)}
 												disabled={isSettingPublicNow || !adminConnected}
 												title={target.title}
 											>
-												<span className="truncate">{target.label}</span>
+												<span className="whitespace-normal break-words text-left">{target.label}</span>
 											</Button>
 										);
 									})}
@@ -1996,7 +2003,7 @@ export function AdminPage() {
 																<span>{latestTranscript.scope}</span>
 																<span>{latestTranscript.receivedAt}</span>
 															</div>
-															<p className="line-clamp-3 whitespace-pre-wrap text-foreground">{latestTranscript.text}</p>
+															<p className="line-clamp-3 whitespace-pre-wrap break-words text-foreground">{latestTranscript.text}</p>
 														</div>
 													)}
 												</>
@@ -2470,7 +2477,7 @@ export function AdminPage() {
 													</div>
 													<span className="text-xs text-muted-foreground">{formatApiTime(item.time_stamp)}</span>
 												</div>
-												<p className="line-clamp-5 whitespace-pre-wrap leading-5">{item.transcript}</p>
+												<p className="line-clamp-5 whitespace-pre-wrap break-words leading-5">{item.transcript}</p>
 											</article>
 										))}
 									</div>
