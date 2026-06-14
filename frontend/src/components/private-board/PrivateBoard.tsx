@@ -7,6 +7,7 @@ import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
+import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -1313,61 +1314,21 @@ function sortIdeaBlocks(blocks: IdeaBlock[]): IdeaBlock[] {
 }
 
 function linkTranscriptLinesToBlocks(lines: TranscriptLineType[], blocks: IdeaBlock[]): TranscriptLineType[] {
-	const transcriptBlockIds = new Map<string, string>();
-	const transcriptBlockTexts = new Map<string, string>();
-
-	blocks.forEach(block => {
-		const transcriptIds = [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
-		transcriptIds.forEach(transcriptId => {
-			if (!transcriptBlockIds.has(transcriptId)) {
-				transcriptBlockIds.set(transcriptId, block.id);
-			}
-		});
-		const normalizedTranscript = block.transcript?.trim();
-		if (normalizedTranscript && !transcriptBlockTexts.has(normalizedTranscript)) {
-			transcriptBlockTexts.set(normalizedTranscript, block.id);
-		}
-	});
-
-	let didChange = false;
-	const linkedLines = lines.map(line => {
-		if (line.source !== "private") {
-			if (!line.linkedBlockId) {
-				return line;
-			}
-
-			didChange = true;
-			return {
-				...line,
-				linkedBlockId: undefined
-			};
-		}
-
-		const linkedBlockId = transcriptBlockIds.get(line.id) ?? transcriptBlockTexts.get(line.text.trim());
-		if (!linkedBlockId || line.linkedBlockId === linkedBlockId) {
-			return line;
-		}
-
-		didChange = true;
-		return {
-			...line,
-			linkedBlockId
-		};
-	});
-
-	return didChange ? linkedLines : lines;
+	return linkTranscriptLinesToReadyBlocks(lines, blocks);
 }
 
 function TranscriptLines({
 	lines,
 	emptyText,
 	onJumpToBlock,
+	ideaBlocks,
 	onTranscriptRef,
 	highlightedTranscriptId
 }: {
 	lines: TranscriptLineType[];
 	emptyText: string;
 	onJumpToBlock?: (blockId: string) => void;
+	ideaBlocks: IdeaBlock[];
 	onTranscriptRef: (lineId: string, node: HTMLDivElement | null) => void;
 	highlightedTranscriptId: string | null;
 }) {
@@ -1392,7 +1353,12 @@ function TranscriptLines({
 							<div className="h-px flex-1 bg-border" />
 						</div>
 					)}
-					<TranscriptLine line={line} onJumpToBlock={onJumpToBlock} />
+					<TranscriptLine
+						line={line}
+						onJumpToBlock={onJumpToBlock}
+						ideaBlockStatus={getTranscriptIdeaBlockStatus(line, ideaBlocks)}
+						ideaBlockTargetId={getTranscriptIdeaBlockTargetId(line, ideaBlocks)}
+					/>
 				</div>
 			))}
 		</div>
@@ -3654,7 +3620,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 					<section className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-background">
 						<div className="border-b px-3 py-2 text-sm font-medium">逐字稿</div>
 						<ScrollArea className="min-h-0 flex-1 p-3" viewportRef={transcriptScrollViewportRef} viewportProps={{ onScroll: handleTranscriptScroll }}>
-							<TranscriptLines lines={transcriptLines} emptyText="尚無逐字稿" onJumpToBlock={jumpToBlock} onTranscriptRef={setTranscriptRef} highlightedTranscriptId={highlightedTranscriptId} />
+							<TranscriptLines
+								lines={transcriptLines}
+								emptyText="尚無逐字稿"
+								onJumpToBlock={jumpToBlock}
+								ideaBlocks={ideaBlocks}
+								onTranscriptRef={setTranscriptRef}
+								highlightedTranscriptId={highlightedTranscriptId}
+							/>
 						</ScrollArea>
 					</section>
 				)}
