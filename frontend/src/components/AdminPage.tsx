@@ -35,6 +35,7 @@ import {
 	type SessionPhase,
 	type SessionPhaseOption
 } from "../lib/sessionPhase";
+import { isSimilarityCueDisplayPhase } from "../lib/similarityCueLifecycle";
 import { cn } from "../lib/utils";
 import { apiUrl, fetchTaskConfig, type Phase1BuilderOption, type TaskConfigItem } from "../services/api";
 import { normalizePresenceParticipantsPayload, type ParticipantPresence } from "../services/presence";
@@ -1469,7 +1470,7 @@ export function AdminPage() {
 	};
 
 	const isExperimentalCondition = cueCondition === "experimental";
-	const isSimilarityCueActive = isExperimentalCondition && isGroupPhase(currentPhase);
+	const isSimilarityCueActive = isExperimentalCondition && isSimilarityCueDisplayPhase(currentPhase);
 	const activePublicNowComponents = publicNowComponentIds.map(componentId => phase1ComponentById.get(componentId)).filter((component): component is Phase1BuilderOption => !!component);
 	const activePublicNowTaskItems = publicNowTaskItemIds
 		.map(taskItemId => publicNowTaskItemTargetById.get(taskItemId))

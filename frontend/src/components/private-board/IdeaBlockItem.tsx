@@ -1,6 +1,7 @@
 import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
+import { isSimilarityCueDisplayPhase } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -64,7 +65,7 @@ export function IdeaBlockItem({
 	const canShareCurrentBlock = !!onShareToChat && canShareToChat && isGroupPhase(currentPhase) && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
 	const shareButtonTitle = isGroupPhase(currentPhase) ? "送到聊天室" : "Public Phase 才能送到聊天室";
 	const shareSimilarityReasonTitle = "分享給相似想法對象";
-	const shouldShowCue = showSimilarityCue && block.hasCue && isGroupPhase(currentPhase);
+	const shouldShowCue = showSimilarityCue && block.hasCue && isSimilarityCueDisplayPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
 	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;

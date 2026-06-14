@@ -6,6 +6,7 @@ import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
+import { isSimilarityCueDisplayPhase } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -1669,16 +1670,16 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const syncPhaseTransitionCueBatch = useCallback(
 		(nextPhase: SessionPhase) => {
 			const previousPhase = previousVisiblePhaseRef.current;
-			const isEnteringGroupPhase = !isGroupPhase(previousPhase) && isGroupPhase(nextPhase);
-			const isLeavingGroupPhase = isGroupPhase(previousPhase) && !isGroupPhase(nextPhase);
+			const isEnteringSimilarityCueDisplayPhase = !isSimilarityCueDisplayPhase(previousPhase) && isSimilarityCueDisplayPhase(nextPhase);
+			const isLeavingSimilarityCueDisplayPhase = isSimilarityCueDisplayPhase(previousPhase) && !isSimilarityCueDisplayPhase(nextPhase);
 
-			if (isEnteringGroupPhase && canShowSimilarityCues) {
+			if (isEnteringSimilarityCueDisplayPhase && canShowSimilarityCues) {
 				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
 				clearCuesSoon();
 				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
 			}
 
-			if (isLeavingGroupPhase || !canShowSimilarityCues) {
+			if (isLeavingSimilarityCueDisplayPhase || !canShowSimilarityCues) {
 				clearPhaseTransitionCueBatchTimer();
 				phaseTransitionCueBatchRef.current = null;
 				if (!canShowSimilarityCues) {
@@ -3511,7 +3512,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status === "listening" && !!whisperTransientText;
 	const unreadIdeaBlockCountLabel = formatUnreadCount(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
-	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
+	const visibleSimilarityCues = canShowSimilarityCues && isSimilarityCueDisplayPhase(visiblePhase) ? cues : [];
 	const ideaBlockChatShareCueContent =
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
