@@ -1,6 +1,7 @@
 export interface SimilarityCueLifecycleItem {
 	id?: string;
 	kind?: string;
+	responseStatus?: string;
 }
 
 export function isSimilarityCueDisplayPhase(phase: unknown): boolean {
@@ -13,6 +14,10 @@ export function canShareSimilarityReasonInPhase(phase: unknown): boolean {
 
 export function getSimilarityPairCues<T extends SimilarityCueLifecycleItem>(cues: T[]): T[] {
 	return cues.filter(cue => cue.kind !== "phase-transition-summary");
+}
+
+export function getUnrespondedSimilarityPairCues<T extends SimilarityCueLifecycleItem>(cues: T[]): T[] {
+	return getSimilarityPairCues(cues).filter(cue => !cue.responseStatus || cue.responseStatus === "shown");
 }
 
 export function removeSimilarityPairCues<T extends SimilarityCueLifecycleItem>(cues: T[]): T[] {

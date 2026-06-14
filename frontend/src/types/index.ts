@@ -59,6 +59,7 @@ export interface SimilarityPairCueData {
 	isSameReason?: boolean;
 	hasSameReason?: boolean;
 	hasDifferentReason?: boolean;
+	responseStatus?: "accepted" | "ignored" | "dismissed" | "shared";
 }
 
 export interface SimilaritySummaryCueData {

@@ -6,7 +6,7 @@ import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
-import { canShareSimilarityReasonInPhase, getSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
+import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -155,6 +155,7 @@ interface SimilarityReasonShareErrorMessage {
 }
 
 type SimilarityCueResponseStatus = "shown" | "accepted" | "ignored" | "dismissed" | "shared";
+type SimilarityCueTerminalResponseStatus = Exclude<SimilarityCueResponseStatus, "shown">;
 
 interface IdeaBlockNotice {
 	id: string;
@@ -1558,6 +1559,20 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		},
 		[onSendBoardMessage]
 	);
+	const markSimilarityCueResponse = useCallback((target: { id?: string; cueId?: string; blockId?: string | number | null }, responseStatus: SimilarityCueTerminalResponseStatus) => {
+		const targetCueId = target.cueId || target.id;
+		const targetBlockId = target.blockId == null ? null : String(target.blockId);
+		const nextCues = cuesRef.current.map(cue => {
+			if (!isSimilarityPairCue(cue)) {
+				return cue;
+			}
+			const cueIdMatches = !!targetCueId && (cue.id === targetCueId || cue.cueId === targetCueId);
+			const blockIdMatches = !!targetBlockId && cue.blockId === targetBlockId;
+			return cueIdMatches || blockIdMatches ? { ...cue, responseStatus } : cue;
+		});
+		cuesRef.current = nextCues;
+		setCues(nextCues);
+	}, []);
 	const queueSimilarityCueFromBlock = useCallback(
 		(block: IdeaBlock) => {
 			if (!canShowSimilarityCues) {
@@ -1670,7 +1685,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const clearSimilarityPairCuesSoon = useCallback(() => {
 		window.setTimeout(() => {
 			const previousCues = cuesRef.current;
-			getSimilarityPairCues(previousCues).forEach(cue => sendSimilarityCueResponse(cue, "ignored"));
+			getUnrespondedSimilarityPairCues(previousCues).forEach(cue => sendSimilarityCueResponse(cue, "ignored"));
 			const nextCues = removeSimilarityPairCues(previousCues);
 			cuesRef.current = nextCues;
 			setCues(nextCues);
@@ -3490,6 +3505,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			return;
 		}
 		sendSimilarityCueResponse(cue, "accepted");
+		markSimilarityCueResponse(cue, "accepted");
 	};
 
 	const shareSimilarityReasonFromBlock = useCallback(
@@ -3501,8 +3517,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				type: "share_similarity_reason",
 				blockId: block.id
 			});
+			markSimilarityCueResponse({ blockId: block.id }, "shared");
 		},
-		[canShowSimilarityCues, onSendBoardMessage, visiblePhase]
+		[canShowSimilarityCues, markSimilarityCueResponse, onSendBoardMessage, visiblePhase]
 	);
 
 	const dismissSimilarityCue = (cue: SimilarityCueData, status: "dismissed" | "ignored") => {
