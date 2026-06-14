@@ -16,10 +16,12 @@ import { IdeaBlockItem } from "./IdeaBlockItem";
 import { PublicChatComposer, PublicChatMessages } from "./PublicChatPanel";
 import { SimilarityCue } from "./SimilarityCue";
 import { TranscriptLine } from "./TranscriptLine";
+import { shouldCountPublicChatMessageUnread } from "./publicChatUnread";
 import { formatUnreadCount, getIdeaBlockUnreadState, type IdeaBlockUnreadState } from "./unreadIdeaBlocks";
 
 export interface PrivateBoardHandle {
 	openLatestUnreadIdeaBlock: () => void;
+	openPublicChat: () => void;
 }
 
 interface PrivateBoardProps {
@@ -38,6 +40,7 @@ interface PrivateBoardProps {
 	isCollapsed?: boolean;
 	onRequestOpen?: () => void;
 	onIdeaBlockUnreadStateChange?: (state: IdeaBlockUnreadState) => void;
+	onPublicChatUnreadCountChange?: (count: number) => void;
 }
 
 type BoardMessage =
@@ -1475,7 +1478,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		onCollapse,
 		isCollapsed = false,
 		onRequestOpen,
-		onIdeaBlockUnreadStateChange
+		onIdeaBlockUnreadStateChange,
+		onPublicChatUnreadCountChange
 	},
 	ref
 ) {
@@ -1746,11 +1750,20 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		markIdeaBlocksRead(new Set([targetBlockId]));
 	}, [latestUnreadIdeaBlockId, markIdeaBlocksRead, onRequestOpen, selectBoardTab]);
 
-	useImperativeHandle(ref, () => ({ openLatestUnreadIdeaBlock }), [openLatestUnreadIdeaBlock]);
+	const openPublicChat = useCallback(() => {
+		onRequestOpen?.();
+		selectBoardTab("public-chat");
+	}, [onRequestOpen, selectBoardTab]);
+
+	useImperativeHandle(ref, () => ({ openLatestUnreadIdeaBlock, openPublicChat }), [openLatestUnreadIdeaBlock, openPublicChat]);
 
 	useEffect(() => {
 		onIdeaBlockUnreadStateChange?.(ideaBlockUnreadState);
 	}, [ideaBlockUnreadState, onIdeaBlockUnreadStateChange]);
+
+	useEffect(() => {
+		onPublicChatUnreadCountChange?.(unreadPublicChatCount);
+	}, [onPublicChatUnreadCountChange, unreadPublicChatCount]);
 
 	const dismissIdeaBlockChatShareNotice = useCallback((noticeId: string) => {
 		setIdeaBlockChatShareNotices(prev => prev.filter(notice => notice.id !== noticeId));
@@ -2459,7 +2472,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 			if (lastMessage.type === "public_chat_message") {
 				const nextMessage = publicChatPayloadToMessage(lastMessage.payload, participantId);
-				const isNewUnreadMessage = !nextMessage.isOwn && !nextMessage.isDeleted && !publicChatMessagesRef.current.some(message => message.id === nextMessage.id);
+				const isNewUnreadMessage = shouldCountPublicChatMessageUnread(nextMessage, publicChatMessagesRef.current, { activeTab: visibleActiveTab, isCollapsed });
 				setPublicChatMessages(prev => {
 					const nextMessages = appendPublicChatMessage(prev, nextMessage);
 					setIsSendingPublicChat(nextMessages.some(message => message.isOwn && message.isPending));
@@ -2484,7 +2497,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 						);
 					}
 				}
-				if (isNewUnreadMessage && visibleActiveTab !== "public-chat") {
+				if (isNewUnreadMessage) {
 					setUnreadPublicChatCount(current => current + 1);
 				}
 			}
@@ -2494,6 +2507,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	}, [
 		canShowSimilarityCues,
 		captureIdeaBlockPositions,
+		isCollapsed,
 		isCurrentWhisperSegmentComplete,
 		lastMessage,
 		participantId,

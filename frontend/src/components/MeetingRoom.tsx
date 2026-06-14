@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -955,6 +955,7 @@ export default function MeetingRoom() {
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
 	const [privateBoardIdeaBlockUnreadState, setPrivateBoardIdeaBlockUnreadState] = useState<IdeaBlockUnreadState>({ count: 0, latestBlockId: null });
+	const [privateBoardPublicChatUnreadCount, setPrivateBoardPublicChatUnreadCount] = useState(0);
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
@@ -1343,6 +1344,11 @@ export default function MeetingRoom() {
 		window.setTimeout(() => privateBoardRef.current?.openLatestUnreadIdeaBlock(), 0);
 	}, []);
 
+	const openUnreadPublicChat = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openPublicChat(), 0);
+	}, []);
+
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
 		setIsJitsiFocused(false);
@@ -1490,6 +1496,7 @@ export default function MeetingRoom() {
 
 	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
 	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
+	const privateBoardPublicChatUnreadCountLabel = formatUnreadCount(privateBoardPublicChatUnreadCount);
 
 	if (!isParticipantIdValid) {
 		return (
@@ -1878,6 +1885,20 @@ export default function MeetingRoom() {
 								{privateBoardUnreadCountLabel}
 							</Button>
 						)}
+						{privateBoardPublicChatUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardPublicChatUnreadCount} 則未讀聊天室訊息，開啟聊天室`}
+								title="開啟聊天室"
+								onClick={openUnreadPublicChat}
+							>
+								<MessageSquare className="h-3.5 w-3.5" />
+								{privateBoardPublicChatUnreadCountLabel}
+							</Button>
+						)}
 					</div>
 				)}
 				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
@@ -1898,6 +1919,7 @@ export default function MeetingRoom() {
 						isCollapsed={isPrivateBoardCollapsed}
 						onRequestOpen={openPrivateBoard}
 						onIdeaBlockUnreadStateChange={setPrivateBoardIdeaBlockUnreadState}
+						onPublicChatUnreadCountChange={setPrivateBoardPublicChatUnreadCount}
 					/>
 				</div>
 			</aside>
