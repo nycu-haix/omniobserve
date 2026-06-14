@@ -7,6 +7,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperimentSpaceShortcut } from "../lib/keyboardShortcuts";
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
@@ -280,23 +281,6 @@ function clampJitsiHeight(height: number) {
 
 function getPreferredJitsiHeight() {
 	return clampJitsiHeight(Math.round(getViewportHeight() * PREFERRED_JITSI_VIEWPORT_RATIO));
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-
-	const editableElement = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']");
-	if (!editableElement) {
-		return false;
-	}
-
-	if (editableElement instanceof HTMLInputElement) {
-		return editableElement.type !== "button" && editableElement.type !== "checkbox" && editableElement.type !== "radio" && editableElement.type !== "submit";
-	}
-
-	return true;
 }
 
 function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): string[] {
@@ -636,6 +620,7 @@ function SortableLostAtSeaItem({
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
+			data-local-space-shortcut="true"
 			title={itemTitle}
 			{...attributes}
 			{...listeners}
@@ -648,6 +633,11 @@ function SortableLostAtSeaItem({
 					onClick={event => {
 						event.stopPropagation();
 						onPreview(item);
+					}}
+					onKeyDown={event => {
+						if (event.code === "Space" || event.key === "Enter") {
+							event.stopPropagation();
+						}
 					}}
 					onPointerDown={event => event.stopPropagation()}
 				>
@@ -1104,7 +1094,25 @@ export default function MeetingRoom() {
 
 	useEffect(() => {
 		const handleMicShortcutKeyDown = (event: KeyboardEvent) => {
-			if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) {
+			const shortcutTarget = getKeyboardShortcutTarget(event.target);
+			if (
+				shouldHandleExperimentSpaceShortcut({
+					code: event.code,
+					key: event.key,
+					repeat: event.repeat,
+					metaKey: event.metaKey,
+					ctrlKey: event.ctrlKey,
+					altKey: event.altKey,
+					target: shortcutTarget
+				})
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				void handleMic(getNextMicModeAfterPublicActivation(micMode));
+				return;
+			}
+
+			if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(shortcutTarget)) {
 				return;
 			}
 
@@ -1112,17 +1120,11 @@ export default function MeetingRoom() {
 				event.preventDefault();
 				setIsJitsiFocused(false);
 				setJitsiHeight(getPreferredJitsiHeight());
-				return;
-			}
-
-			if (event.code === "Space") {
-				event.preventDefault();
-				void handleMic(getNextMicModeAfterPublicActivation(micMode));
 			}
 		};
 
-		window.addEventListener("keydown", handleMicShortcutKeyDown);
-		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
+		window.addEventListener("keydown", handleMicShortcutKeyDown, true);
+		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown, true);
 	}, [handleMic, isJitsiFocused, micMode]);
 
 	useEffect(() => {
