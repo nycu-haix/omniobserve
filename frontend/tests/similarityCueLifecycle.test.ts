@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isSimilarityCueDisplayPhase, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
+import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase, shouldAutoDismissSimilarityCue } from "../src/lib/similarityCueLifecycle.ts";
 
 test("similarity cues stay visible through public and reflect phases", () => {
 	assert.equal(isSimilarityCueDisplayPhase("group"), true);
@@ -8,6 +8,12 @@ test("similarity cues stay visible through public and reflect phases", () => {
 	assert.equal(isSimilarityCueDisplayPhase("private"), false);
 	assert.equal(isSimilarityCueDisplayPhase("private_phase_1"), false);
 	assert.equal(isSimilarityCueDisplayPhase("private_phase_2"), false);
+});
+
+test("similarity reason sharing remains available while cues are visible", () => {
+	assert.equal(canShareSimilarityReasonInPhase("group"), true);
+	assert.equal(canShareSimilarityReasonInPhase("reflect"), true);
+	assert.equal(canShareSimilarityReasonInPhase("private"), false);
 });
 
 test("only transition summaries auto-dismiss similarity cues", () => {

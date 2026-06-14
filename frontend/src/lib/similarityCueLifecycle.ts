@@ -7,6 +7,10 @@ export function isSimilarityCueDisplayPhase(phase: unknown): boolean {
 	return phase === "group" || phase === "reflect";
 }
 
+export function canShareSimilarityReasonInPhase(phase: unknown): boolean {
+	return isSimilarityCueDisplayPhase(phase);
+}
+
 export function shouldAutoDismissSimilarityCue(cue: SimilarityCueLifecycleItem): boolean {
 	return cue.kind === "phase-transition-summary";
 }
