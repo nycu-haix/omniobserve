@@ -24,7 +24,7 @@ import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
-import { isAdminParticipantId, isParticipantAnalysisRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
+import { isAdminParticipantId, isAdminRankingRole, isParticipantAnalysisRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
 	DEFAULT_SESSION_PHASE,
 	DEFAULT_SESSION_PHASE_OPTIONS,
@@ -935,9 +935,10 @@ export function AdminPage() {
 		return nextParticipantRoleById;
 	}, [participants]);
 	const analysisParticipantCount = useMemo(() => participants.filter(participant => isParticipantAnalysisRole(participant.participant_role)).length, [participants]);
-	const nonAnalysisParticipantCount = participants.length - analysisParticipantCount;
-	const isAnalysisParticipantId = useCallback(
-		(participantId: string | number | null | undefined) => isParticipantAnalysisRole(participantRoleById.get(String(participantId ?? ""))),
+	const adminRankingParticipantCount = useMemo(() => participants.filter(participant => isAdminRankingRole(participant.participant_role)).length, [participants]);
+	const nonRankingParticipantCount = participants.length - adminRankingParticipantCount;
+	const isAdminRankingParticipantId = useCallback(
+		(participantId: string | number | null | undefined) => isAdminRankingRole(participantRoleById.get(String(participantId ?? ""))),
 		[participantRoleById]
 	);
 	const getParticipantLabel = useCallback(
@@ -1353,7 +1354,7 @@ export function AdminPage() {
 	const publicRankingItems = publicRankingSnapshot ? normalizeRankingItemIds(publicRankingSnapshot.items, defaultRankingItemIds) : [];
 	const privateRankingMap: Record<string, RankingSnapshot> = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
 	const privateRankingEntries = Object.entries(privateRankingMap)
-		.filter(([participantId]) => !isAdminParticipantId(participantId) && isAnalysisParticipantId(participantId))
+		.filter(([participantId]) => !isAdminParticipantId(participantId) && isAdminRankingParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
 	const privateRankingColumns = privateRankingEntries.map(([participantId, ranking]) => {
 		const items = normalizeRankingItemIds(ranking.items, defaultRankingItemIds);
@@ -1791,8 +1792,12 @@ export function AdminPage() {
 								<span className="font-medium">{analysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
-								<span className="text-muted-foreground">Other roles</span>
-								<span className="font-medium">{nonAnalysisParticipantCount}</span>
+								<span className="text-muted-foreground">Ranking roles</span>
+								<span className="font-medium">{adminRankingParticipantCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Non-ranking roles</span>
+								<span className="font-medium">{nonRankingParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Admin participant</span>
@@ -1951,6 +1956,7 @@ export function AdminPage() {
 										{(() => {
 											const latestTranscript = latestTranscripts[participant.id];
 											const participantRole = normalizeParticipantRole(participant.participant_role);
+											const isNonExperimentRole = participantRole === "facilitator" || participantRole === "test";
 											return (
 												<>
 													<div className="flex items-start justify-between gap-3">
@@ -1958,9 +1964,16 @@ export function AdminPage() {
 															<div className="truncate font-medium">{getParticipantLabel(participant.id)}</div>
 															<div className="mt-0.5 text-xs text-muted-foreground">ID {participant.id}</div>
 														</div>
-														<div className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
-															<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
-															<span>{participant.audio_connected ? participant.mic_mode : "mic off"}</span>
+														<div className="flex shrink-0 flex-col items-end gap-1">
+															{isNonExperimentRole && (
+																<Badge variant="outline" className="bg-amber-50 px-1.5 py-0 text-[10px] text-amber-900">
+																	Non-experiment
+																</Badge>
+															)}
+															<div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+																<span className={cn("h-2 w-2 rounded-full", participant.audio_connected ? "bg-emerald-500" : "bg-muted-foreground")} />
+																<span>{participant.audio_connected ? participant.mic_mode : "mic off"}</span>
+															</div>
 														</div>
 													</div>
 													<div className="mt-2 grid min-w-[264px] grid-cols-2 gap-1 rounded-md border bg-muted p-1" role="radiogroup" aria-label={`Role for ${getParticipantLabel(participant.id)}`}>
@@ -2028,8 +2041,12 @@ export function AdminPage() {
 								<span className="font-medium">{analysisParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
-								<span className="text-muted-foreground">Other roles</span>
-								<span className="font-medium">{nonAnalysisParticipantCount}</span>
+								<span className="text-muted-foreground">Ranking roles</span>
+								<span className="font-medium">{adminRankingParticipantCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">Non-ranking roles</span>
+								<span className="font-medium">{nonRankingParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Transcripts</span>

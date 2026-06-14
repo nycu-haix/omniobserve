@@ -9,6 +9,8 @@ const PARTICIPANT_ROLE_ALIASES = new Map<string, ParticipantRole>([
 	["experimenter", "facilitator"],
 	["confederate-script", "confederate"],
 	["manipulation", "confederate"],
+	["mock", "test"],
+	["mock-participant", "test"],
 	["test-client", "test"]
 ]);
 
@@ -28,6 +30,11 @@ export function isObserverRole(value: unknown): boolean {
 
 export function isParticipantAnalysisRole(value: unknown): boolean {
 	return normalizeParticipantRole(value) === "participant";
+}
+
+export function isAdminRankingRole(value: unknown): boolean {
+	const role = normalizeParticipantRole(value);
+	return role === "participant" || role === "confederate";
 }
 
 export function isAdminParticipantId(participantId: string | number | null | undefined): boolean {

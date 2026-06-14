@@ -17,7 +17,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	if (typeof item === "string") {
 		return {
 			id: item,
-			participant_role: "participant",
+			participant_role: normalizeParticipantRole(item),
 			mic_mode: "off",
 			audio_connected: false
 		};
@@ -30,7 +30,7 @@ function normalizePresenceParticipant(item: unknown): ParticipantPresence | null
 	const participant = item as Record<string, unknown>;
 	return {
 		id: item.id,
-		participant_role: normalizeParticipantRole(participant.participant_role),
+		participant_role: normalizeParticipantRole(participant.participant_role ?? participant.id),
 		mic_mode: typeof participant.mic_mode === "string" ? participant.mic_mode : "off",
 		audio_connected: typeof participant.audio_connected === "boolean" ? participant.audio_connected : false,
 		is_speaking: typeof participant.is_speaking === "boolean" ? participant.is_speaking : false,
