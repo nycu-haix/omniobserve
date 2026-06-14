@@ -1858,7 +1858,7 @@ export default function MeetingRoom() {
 					</button>
 				)}
 				{isPrivateBoardCollapsed && (
-					<div className="absolute -right-2 top-3 z-20 grid justify-items-end gap-2">
+					<div className="fixed right-3 top-20 z-50 grid justify-items-end gap-2 xl:absolute xl:-right-2 xl:top-3 xl:z-20">
 						<Button
 							type="button"
 							variant="outline"
