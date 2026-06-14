@@ -3527,14 +3527,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
-				<header className="flex items-center justify-between gap-3 border-b p-3">
-					<div className="flex items-center gap-2">
+				<header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b p-3">
+					<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
 						{onCollapse && (
 							<Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" aria-label="收合 Private Board" title="收合 Private Board" onClick={onCollapse}>
 								<ChevronRight className="h-4 w-4" />
 							</Button>
 						)}
-						<div className="flex rounded-lg bg-muted p-1">
+						<div className="flex min-w-0 max-w-full flex-wrap rounded-lg bg-muted p-1">
 							<Button
 								aria-pressed={visibleActiveTab === "transcript"}
 								className={cn(
@@ -3592,7 +3592,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 							</Button>
 						</div>
 					</div>
-					<div className="flex items-center gap-3">
+					<div className="ml-auto flex shrink-0 items-center gap-2">
 						<PhaseBadge phase={visiblePhase} />
 						{visibleTimerEndTime > 0 && <PhaseTimer endTimeMs={visibleTimerEndTime} />}
 						<span className={`hidden h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
@@ -3752,7 +3752,7 @@ function PhaseBadge({ phase }: { phase: SessionPhase }) {
 	return (
 		<div
 			className={cn(
-				"rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
+				"shrink-0 whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide",
 				isGroupPhase(phase) ? "border-primary/25 bg-primary/10 text-primary" : "border-muted-foreground/20 bg-muted text-muted-foreground"
 			)}
 		>
@@ -3776,7 +3776,7 @@ function PhaseTimer({ endTimeMs }: { endTimeMs: number }) {
 	const m = Math.floor(timeLeft / 60);
 	const s = timeLeft % 60;
 	return (
-		<div className="rounded-md bg-secondary px-2.5 py-1 text-sm font-medium text-secondary-foreground shadow-sm">
+		<div className="shrink-0 whitespace-nowrap rounded-md bg-secondary px-2.5 py-1 font-mono text-sm font-medium tabular-nums text-secondary-foreground shadow-sm">
 			{m}:{s.toString().padStart(2, "0")}
 		</div>
 	);
