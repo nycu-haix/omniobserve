@@ -6,6 +6,7 @@ import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
+import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -154,6 +155,7 @@ interface SimilarityReasonShareErrorMessage {
 }
 
 type SimilarityCueResponseStatus = "shown" | "accepted" | "ignored" | "dismissed" | "shared";
+type SimilarityCueTerminalResponseStatus = Exclude<SimilarityCueResponseStatus, "shown">;
 
 interface IdeaBlockNotice {
 	id: string;
@@ -1557,6 +1559,20 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		},
 		[onSendBoardMessage]
 	);
+	const markSimilarityCueResponse = useCallback((target: { id?: string; cueId?: string; blockId?: string | number | null }, responseStatus: SimilarityCueTerminalResponseStatus) => {
+		const targetCueId = target.cueId || target.id;
+		const targetBlockId = target.blockId == null ? null : String(target.blockId);
+		const nextCues = cuesRef.current.map(cue => {
+			if (!isSimilarityPairCue(cue)) {
+				return cue;
+			}
+			const cueIdMatches = !!targetCueId && (cue.id === targetCueId || cue.cueId === targetCueId);
+			const blockIdMatches = !!targetBlockId && cue.blockId === targetBlockId;
+			return cueIdMatches || blockIdMatches ? { ...cue, responseStatus } : cue;
+		});
+		cuesRef.current = nextCues;
+		setCues(nextCues);
+	}, []);
 	const queueSimilarityCueFromBlock = useCallback(
 		(block: IdeaBlock) => {
 			if (!canShowSimilarityCues) {
@@ -1666,29 +1682,41 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		}, 0);
 	}, []);
 
+	const clearSimilarityPairCuesSoon = useCallback(() => {
+		window.setTimeout(() => {
+			const previousCues = cuesRef.current;
+			getUnrespondedSimilarityPairCues(previousCues).forEach(cue => sendSimilarityCueResponse(cue, "ignored"));
+			const nextCues = removeSimilarityPairCues(previousCues);
+			cuesRef.current = nextCues;
+			setCues(nextCues);
+		}, 0);
+	}, [sendSimilarityCueResponse]);
+
 	const syncPhaseTransitionCueBatch = useCallback(
 		(nextPhase: SessionPhase) => {
 			const previousPhase = previousVisiblePhaseRef.current;
-			const isEnteringGroupPhase = !isGroupPhase(previousPhase) && isGroupPhase(nextPhase);
-			const isLeavingGroupPhase = isGroupPhase(previousPhase) && !isGroupPhase(nextPhase);
+			const isEnteringSimilarityCueDisplayPhase = !isSimilarityCueDisplayPhase(previousPhase) && isSimilarityCueDisplayPhase(nextPhase);
+			const isLeavingSimilarityCueDisplayPhase = isSimilarityCueDisplayPhase(previousPhase) && !isSimilarityCueDisplayPhase(nextPhase);
 
-			if (isEnteringGroupPhase && canShowSimilarityCues) {
+			if (isEnteringSimilarityCueDisplayPhase && canShowSimilarityCues) {
 				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
 				clearCuesSoon();
 				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
 			}
 
-			if (isLeavingGroupPhase || !canShowSimilarityCues) {
+			if (isLeavingSimilarityCueDisplayPhase || !canShowSimilarityCues) {
 				clearPhaseTransitionCueBatchTimer();
 				phaseTransitionCueBatchRef.current = null;
 				if (!canShowSimilarityCues) {
 					clearCuesSoon();
+				} else if (isLeavingSimilarityCueDisplayPhase) {
+					clearSimilarityPairCuesSoon();
 				}
 			}
 
 			previousVisiblePhaseRef.current = nextPhase;
 		},
-		[canShowSimilarityCues, clearCuesSoon, clearPhaseTransitionCueBatchTimer, startPhaseTransitionCueBatch]
+		[canShowSimilarityCues, clearCuesSoon, clearPhaseTransitionCueBatchTimer, clearSimilarityPairCuesSoon, startPhaseTransitionCueBatch]
 	);
 
 	const markIdeaBlocksRead = useCallback((blockIds: Set<string>) => {
@@ -3477,19 +3505,21 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			return;
 		}
 		sendSimilarityCueResponse(cue, "accepted");
+		markSimilarityCueResponse(cue, "accepted");
 	};
 
 	const shareSimilarityReasonFromBlock = useCallback(
 		(block: IdeaBlock) => {
-			if (!canShowSimilarityCues || !isGroupPhase(visiblePhase) || !block.hasCue || block.status === "generating" || block.isDeleted) {
+			if (!canShowSimilarityCues || !canShareSimilarityReasonInPhase(visiblePhase) || !block.hasCue || block.status === "generating" || block.isDeleted) {
 				return;
 			}
 			onSendBoardMessage({
 				type: "share_similarity_reason",
 				blockId: block.id
 			});
+			markSimilarityCueResponse({ blockId: block.id }, "shared");
 		},
-		[canShowSimilarityCues, onSendBoardMessage, visiblePhase]
+		[canShowSimilarityCues, markSimilarityCueResponse, onSendBoardMessage, visiblePhase]
 	);
 
 	const dismissSimilarityCue = (cue: SimilarityCueData, status: "dismissed" | "ignored") => {
@@ -3511,7 +3541,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status === "listening" && !!whisperTransientText;
 	const unreadIdeaBlockCountLabel = formatUnreadCount(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
-	const visibleSimilarityCues = canShowSimilarityCues && isGroupPhase(visiblePhase) ? cues : [];
+	const visibleSimilarityCues = canShowSimilarityCues && isSimilarityCueDisplayPhase(visiblePhase) ? cues : [];
 	const ideaBlockChatShareCueContent =
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />

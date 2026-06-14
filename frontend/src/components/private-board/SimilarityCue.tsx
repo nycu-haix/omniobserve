@@ -1,6 +1,7 @@
 import { Eye, Lightbulb, UserRound, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
+import { shouldAutoDismissSimilarityCue } from "../../lib/similarityCueLifecycle";
 import type { SimilarityCueData, SimilarityPairCueData } from "../../types";
 import { Button } from "../ui/Button";
 
@@ -25,7 +26,12 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpT
 			return;
 		}
 
-		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), NOTIFICATION_AUTO_DISMISS_MS));
+		const autoDismissCues = cues.filter(shouldAutoDismissSimilarityCue);
+		if (autoDismissCues.length === 0) {
+			return;
+		}
+
+		const timers = autoDismissCues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), NOTIFICATION_AUTO_DISMISS_MS));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
