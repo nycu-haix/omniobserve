@@ -1,13 +1,16 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
+from app.routes.http import _session_active_participant_ids, _session_presence_diagnostic_participant_ids, router
 from app.schemas import ApiError
 from app.services.phase_task_item_snapshot_service import _observer_participant_ids, _participant_user_id_filter
-from app.services.participant_status import sync_participant_roles
-from app.services.participant_roles import is_participant_analysis_role, normalize_participant_role
+from app.services.participant_status import get_participant_presence, is_cached_audio_transcription_participant, sync_participant_roles
+from app.services.participant_roles import is_audio_transcription_role, is_participant_analysis_role, normalize_participant_role
 from app.services.ranking_phase_snapshot_service import _is_participant_subject
 from app.services.realtime import (
     _is_admin_monitor_ranking_subject,
+    _is_audio_transcription_subject,
     _is_participant_ranking_subject,
     _phase_snapshot_participant_ids,
 )
@@ -31,6 +34,89 @@ class ParticipantRoleTests(unittest.TestCase):
         self.assertFalse(is_participant_analysis_role("confederate"))
         self.assertFalse(is_participant_analysis_role("facilitator"))
         self.assertFalse(is_participant_analysis_role("test"))
+
+    def test_audio_transcription_roles_are_limited_to_experiment_speakers(self) -> None:
+        self.assertTrue(is_audio_transcription_role("participant"))
+        self.assertTrue(is_audio_transcription_role("confederate"))
+        self.assertFalse(is_audio_transcription_role("observer"))
+        self.assertFalse(is_audio_transcription_role("facilitator"))
+        self.assertFalse(is_audio_transcription_role("staff"))
+        self.assertFalse(is_audio_transcription_role("test"))
+
+    def test_presence_exposes_role_transcription_diagnostic(self) -> None:
+        session_name = "test-presence-transcription-diagnostic"
+        sync_participant_roles(
+            session_name,
+            {
+                "1": "participant",
+                "2": "confederate",
+                "3": "observer",
+                "4": "facilitator",
+                "5": "test",
+            },
+        )
+
+        participants = {
+            participant["id"]: participant
+            for participant in get_participant_presence(session_name, ["1", "2", "3", "4", "5"])
+        }
+
+        self.assertTrue(participants["1"]["transcription_enabled"])
+        self.assertTrue(participants["2"]["transcription_enabled"])
+        self.assertFalse(participants["3"]["transcription_enabled"])
+        self.assertFalse(participants["4"]["transcription_enabled"])
+        self.assertFalse(participants["5"]["transcription_enabled"])
+        self.assertFalse(is_cached_audio_transcription_participant(session_name, "4"))
+
+    def test_presence_keeps_active_ids_separate_from_role_diagnostics(self) -> None:
+        session_name = "test-presence-active-ids"
+
+        with (
+            patch("app.routes.http.presence_manager.get_participants", return_value=["1"]),
+            patch("app.routes.http.board_manager.get_participants", return_value=["2"]),
+        ):
+            self.assertEqual(_session_active_participant_ids(session_name), ["1", "2"])
+            self.assertEqual(
+                _session_presence_diagnostic_participant_ids(
+                    session_name,
+                    {
+                        "2": "participant",
+                        "9": "observer",
+                    },
+                ),
+                ["1", "2", "9"],
+            )
+
+    def test_presence_route_is_bound_to_presence_handler(self) -> None:
+        presence_route = next(
+            route
+            for route in router.routes
+            if getattr(route, "path", None) == "/api/sessions/{session_name}/presence"
+        )
+
+        self.assertEqual(getattr(presence_route, "endpoint").__name__, "get_session_presence")
+
+    def test_audio_transcription_subject_excludes_non_speaker_roles(self) -> None:
+        session_name = "test-audio-transcription-subject"
+        sync_participant_roles(
+            session_name,
+            {
+                "1": "participant",
+                "2": "confederate",
+                "3": "observer",
+                "4": "facilitator",
+                "5": "test",
+            },
+        )
+
+        self.assertTrue(_is_audio_transcription_subject(session_name, "1"))
+        self.assertTrue(_is_audio_transcription_subject(session_name, "2"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, "3"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, "4"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, "5"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, "admin-reviewer"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, "observer"))
+        self.assertFalse(_is_audio_transcription_subject(session_name, None))
 
     def test_rejects_unknown_roles(self) -> None:
         with self.assertRaises(ApiError):

@@ -1,6 +1,6 @@
 from typing import Any
 
-from .participant_roles import PARTICIPANT_ROLE, is_non_analysis_participant_role, normalize_participant_role
+from .participant_roles import PARTICIPANT_ROLE, is_audio_transcription_role, is_non_analysis_participant_role, normalize_participant_role
 from ..utils import to_iso_z, utc_now
 
 
@@ -76,6 +76,10 @@ def is_cached_non_analysis_participant(session_name: str, participant_id: str) -
     return is_non_analysis_participant_role(get_cached_participant_role(session_name, participant_id))
 
 
+def is_cached_audio_transcription_participant(session_name: str, participant_id: str) -> bool:
+    return is_audio_transcription_role(get_cached_participant_role(session_name, participant_id))
+
+
 def mark_audio_disconnected(session_name: str, participant_id: str) -> None:
     update_audio_status(
         session_name,
@@ -102,6 +106,7 @@ def get_participant_presence(
             {
                 "id": participant_id,
                 "participant_role": participant_role,
+                "transcription_enabled": is_audio_transcription_role(participant_role),
                 "mic_mode": status.get("mic_mode", "off"),
                 "audio_connected": bool(status.get("audio_connected", False)),
                 "is_speaking": bool(status.get("is_speaking", False)),

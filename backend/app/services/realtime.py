@@ -36,7 +36,7 @@ from .participant_status import (
     update_participant_metadata,
     update_audio_status,
 )
-from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, list_session_participant_roles
+from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, is_audio_transcription_role, list_session_participant_roles
 from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
@@ -102,6 +102,23 @@ def _is_admin_monitor_ranking_subject(session_id: str, participant_id: str | Non
     return get_cached_participant_role(session_id, str(participant_id or "")) in {
         PARTICIPANT_ROLE,
         CONFEDERATE_ROLE,
+    }
+
+
+def _is_audio_transcription_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
+        return False
+    return is_audio_transcription_role(get_cached_participant_role(session_id, str(participant_id or "")))
+
+
+def _transcription_disabled_message(session_id: str, participant_id: str, participant_role: str, scope: str | None = None) -> dict[str, Any]:
+    return {
+        "type": "transcription_disabled",
+        "reason": "role_excluded_from_asr",
+        "session_name": session_id,
+        "participant_id": participant_id,
+        "participant_role": participant_role,
+        "scope": scope,
     }
 
 
@@ -229,6 +246,7 @@ class AudioConnectionState:
     mic_mode: str = "private"
     display_name: str | None = None
     is_speaking: bool = False
+    transcription_disabled_notified: bool = False
     audio_buffer: bytearray = field(default_factory=bytearray)
 
 
@@ -2071,6 +2089,7 @@ async def handle_presence_websocket(
             participant_id,
         )
         return
+    await _sync_cached_participant_roles(session_id)
     await presence_manager.send_to(
         session_id,
         participant_id,
@@ -2115,6 +2134,7 @@ async def handle_presence_websocket(
                     display_name=display_name,
                     client_id=client_id,
                 )
+                await _sync_cached_participant_roles(session_id)
                 await presence_manager.send_to(
                     session_id,
                     participant_id,
@@ -2161,12 +2181,43 @@ async def handle_audio_websocket(
     )
 
     async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
+
+        async def notify_transcription_disabled(participant_role: str) -> None:
+            if state.transcription_disabled_notified:
+                return
+            state.transcription_disabled_notified = True
+            await audio_manager.send_to(
+                session_id,
+                participant_id,
+                _transcription_disabled_message(
+                    session_id,
+                    participant_id,
+                    participant_role,
+                    state.mic_mode,
+                ),
+            )
 
         async def flush_buffer() -> None:
             if not state.audio_buffer:
                 return
             raw_bytes = bytes(state.audio_buffer)
             state.audio_buffer.clear()
+            participant_role = get_cached_participant_role(session_id, participant_id)
+            if not is_audio_transcription_role(participant_role):
+                logger.info(
+                    "audio ws transcript skipped for excluded role session_id=%s participant_id=%s participant_role=%s bytes=%s mic_mode=%s",
+                    session_id,
+                    participant_id,
+                    participant_role,
+                    len(raw_bytes),
+                    state.mic_mode,
+                )
+                await notify_transcription_disabled(participant_role)
+                return
             logger.info(
                 "audio ws flush session_id=%s participant_id=%s bytes=%s mic_mode=%s sample_rate=%s",
                 session_id,
@@ -2401,7 +2452,7 @@ async def handle_audio_websocket(
                 {"type": "transcript_error", "segment_id": None, "reason": "stt_error"},
             )
         finally:
-            if transcript_segments and state.mic_mode == "private":
+            if transcript_segments and state.mic_mode == "private" and _is_audio_transcription_subject(session_id, participant_id):
                 idea_blocks = await generate_idea_blocks_from_stream_transcripts(
                     db,
                     session_name=session_id,

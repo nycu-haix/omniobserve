@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AUDIO_TRANSCRIPT_STALL_MESSAGE, observeAudioTranscriptChunk, shouldAcceptTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
+import { normalizeAudioWsBaseUrl } from "../lib/audioWsBaseUrl";
 
 export type AudioStreamMode = "public" | "private";
 
@@ -23,6 +24,8 @@ const FINAL_AUDIO_DRAIN_MS = 150;
 const FINAL_AUDIO_PADDING_SAMPLES = OUTPUT_CHUNK_SIZE;
 const LOCAL_SPEAKING_RMS_THRESHOLD = 0.012;
 const LOCAL_SPEAKING_RELEASE_MS = 650;
+const AUDIO_TRANSCRIPTION_DISABLED_MESSAGE = "Audio transcription is disabled for this role.";
+const AUDIO_TRANSCRIPTION_PENDING_MESSAGE = "Waiting for participant role before starting audio.";
 
 function makeClientId(): string {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -40,7 +43,7 @@ function getAudioWsBaseUrl(): string {
 
 	const baseUrl = audioBaseUrl || generalWsBaseUrl || `${protocol}://${window.location.host}`;
 
-	return baseUrl.replace(/\/+$/, "");
+	return normalizeAudioWsBaseUrl(baseUrl, { frontendHostname: window.location.hostname });
 }
 
 function getPipelineWsBaseUrl(): string | null {
@@ -109,7 +112,8 @@ function calculateRms(audio: Float32Array): number {
 export function useAudioStream(
 	sessionId: string,
 	participantId?: string,
-	displayName?: string
+	displayName?: string,
+	transcriptionEnabled?: boolean
 ): {
 	startAudioStream: (mode: AudioStreamMode) => Promise<void>;
 	stopAudioStream: (keepAudioResources?: boolean) => Promise<void>;
@@ -451,6 +455,13 @@ export function useAudioStream(
 
 	const startAudioStream = useCallback(
 		async (mode: AudioStreamMode) => {
+			if (transcriptionEnabled !== true) {
+				setAudioError(transcriptionEnabled === false ? AUDIO_TRANSCRIPTION_DISABLED_MESSAGE : AUDIO_TRANSCRIPTION_PENDING_MESSAGE);
+				setIsAudioConnected(false);
+				setIsAudioStreaming(false);
+				return;
+			}
+
 			if (!sessionId) {
 				setAudioError("Cannot start audio stream: sessionId is empty.");
 				return;
@@ -674,9 +685,21 @@ export function useAudioStream(
 			resetTranscriptWatchdog,
 			sendAudioSamples,
 			sessionId,
-			setLocalSpeakingState
+			setLocalSpeakingState,
+			transcriptionEnabled
 		]
 	);
+
+	useEffect(() => {
+		if (transcriptionEnabled !== false) {
+			return;
+		}
+		const timer = window.setTimeout(() => {
+			void stopAudioStream();
+			setAudioError(AUDIO_TRANSCRIPTION_DISABLED_MESSAGE);
+		}, 0);
+		return () => window.clearTimeout(timer);
+	}, [stopAudioStream, transcriptionEnabled]);
 
 	useEffect(() => {
 		return () => {

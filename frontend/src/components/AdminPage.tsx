@@ -24,7 +24,7 @@ import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
-import { isAdminParticipantId, isAdminRankingRole, isParticipantAnalysisRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
+import { isAdminParticipantId, isAdminRankingRole, isAudioTranscriptionRole, isParticipantAnalysisRole, normalizeParticipantRole, type ParticipantRole } from "../lib/participantRoles";
 import {
 	DEFAULT_SESSION_PHASE,
 	DEFAULT_SESSION_PHASE_OPTIONS,
@@ -937,6 +937,7 @@ export function AdminPage() {
 	}, [participants]);
 	const analysisParticipantCount = useMemo(() => participants.filter(participant => isParticipantAnalysisRole(participant.participant_role)).length, [participants]);
 	const adminRankingParticipantCount = useMemo(() => participants.filter(participant => isAdminRankingRole(participant.participant_role)).length, [participants]);
+	const transcriptionEnabledCount = useMemo(() => participants.filter(participant => participant.transcription_enabled).length, [participants]);
 	const nonRankingParticipantCount = participants.length - adminRankingParticipantCount;
 	const isAdminRankingParticipantId = useCallback(
 		(participantId: string | number | null | undefined) => isAdminRankingRole(participantRoleById.get(String(participantId ?? ""))),
@@ -1461,7 +1462,9 @@ export function AdminPage() {
 			}
 			const payload = (await response.json()) as { participant_role?: unknown };
 			const confirmedRole = normalizeParticipantRole(payload.participant_role ?? nextRole);
-			setParticipants(current => current.map(item => (item.id === participant.id ? { ...item, participant_role: confirmedRole } : item)));
+			setParticipants(current =>
+				current.map(item => (item.id === participant.id ? { ...item, participant_role: confirmedRole, transcription_enabled: isAudioTranscriptionRole(confirmedRole) } : item))
+			);
 		} catch (error) {
 			setParticipantRoleError(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -1797,6 +1800,10 @@ export function AdminPage() {
 								<span className="font-medium">{adminRankingParticipantCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">ASR-enabled roles</span>
+								<span className="font-medium">{transcriptionEnabledCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Non-ranking roles</span>
 								<span className="font-medium">{nonRankingParticipantCount}</span>
 							</div>
@@ -1958,6 +1965,7 @@ export function AdminPage() {
 											const latestTranscript = latestTranscripts[participant.id];
 											const participantRole = normalizeParticipantRole(participant.participant_role);
 											const isNonExperimentRole = participantRole === "facilitator" || participantRole === "test";
+											const isTranscriptionEnabled = participant.transcription_enabled;
 											return (
 												<>
 													<div className="flex items-start justify-between gap-3">
@@ -1966,6 +1974,12 @@ export function AdminPage() {
 															<div className="mt-0.5 text-xs text-muted-foreground">ID {participant.id}</div>
 														</div>
 														<div className="flex shrink-0 flex-col items-end gap-1">
+															<Badge
+																variant="outline"
+																className={cn("px-1.5 py-0 text-[10px]", isTranscriptionEnabled ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700")}
+															>
+																{isTranscriptionEnabled ? "ASR on" : "ASR off"}
+															</Badge>
 															{isNonExperimentRole && (
 																<Badge variant="outline" className="bg-amber-50 px-1.5 py-0 text-[10px] text-amber-900">
 																	Non-experiment
@@ -2044,6 +2058,10 @@ export function AdminPage() {
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Ranking roles</span>
 								<span className="font-medium">{adminRankingParticipantCount}</span>
+							</div>
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-muted-foreground">ASR-enabled roles</span>
+								<span className="font-medium">{transcriptionEnabledCount}</span>
 							</div>
 							<div className="flex items-center justify-between gap-3">
 								<span className="text-muted-foreground">Non-ranking roles</span>
