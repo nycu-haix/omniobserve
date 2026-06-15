@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import logger
 from ..models import IdeaBlock, PipelineLatencyEvent, Transcript, TranscriptGenerationDecision
+from ..task_config import resolve_task_id
 from ..utils import utc_now
 
 
@@ -236,6 +237,101 @@ async def record_similarity_stage_event(
         )
 
 
+async def record_public_now_latency_events(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    participant_id: str | int,
+    phase: str,
+    transcript_id: int | None,
+    transcript_chars: int,
+    context_chars: int,
+    source: str,
+    event_to_state_ms: int | None,
+    matching_duration_ms: int | None,
+    queue_delay_ms: int | None,
+    debounce_ms: int | None,
+    match_count: int,
+    delivered_count: int,
+    target_participant_count: int,
+    board_connection_count: int,
+    admin_connection_count: int,
+    component_ids: list[str],
+    task_item_ids: list[int],
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    raw_stage_durations = [
+        ("public_now_debounce_queue", queue_delay_ms),
+        ("public_now_context_match", matching_duration_ms),
+        ("public_now_event_to_state", event_to_state_ms),
+    ]
+    stage_durations: list[tuple[str, int]] = []
+    for stage, duration in raw_stage_durations:
+        normalized_duration = _normalize_duration_ms(duration)
+        if normalized_duration is not None:
+            stage_durations.append((stage, normalized_duration))
+    if not stage_durations:
+        return
+
+    pipeline_run_id = uuid4().hex
+    event_metadata: dict[str, Any] = {
+        "source": source,
+        "debounce_ms": debounce_ms,
+        "event_to_state_ms": event_to_state_ms,
+        "matching_duration_ms": matching_duration_ms,
+        "queue_delay_ms": queue_delay_ms,
+        "match_count": match_count,
+        "delivered_count": delivered_count,
+        "target_participant_count": target_participant_count,
+        "board_connection_count": board_connection_count,
+        "admin_connection_count": admin_connection_count,
+        "context_chars": context_chars,
+        "component_ids": component_ids,
+        "task_item_ids": task_item_ids,
+    }
+    event_metadata.update(metadata or {})
+    try:
+        for stage, duration_ms in stage_durations:
+            stage_metadata = dict(event_metadata)
+            stage_metadata["stage_kind"] = stage
+            db.add(
+                PipelineLatencyEvent(
+                    pipeline_run_id=pipeline_run_id,
+                    session_name=session_name,
+                    task_name=resolve_task_id(session_name=session_name, task_id=None),
+                    condition=_infer_condition_token(session_name),
+                    phase=phase or "unknown",
+                    participant_id=str(participant_id),
+                    scope="public",
+                    transcript_id=transcript_id,
+                    stage=stage,
+                    duration_ms=duration_ms,
+                    meeting_elapsed_ms=None,
+                    phase_elapsed_ms=None,
+                    transcript_chars=max(0, transcript_chars),
+                    session_transcript_count_before=None,
+                    session_idea_block_count_before=None,
+                    participant_idea_block_count_before=None,
+                    candidate_count=match_count,
+                    llm_model=None,
+                    llm_input_tokens=None,
+                    llm_output_tokens=None,
+                    retry_count=0,
+                    event_metadata=stage_metadata,
+                )
+            )
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.exception(
+            "public_now_latency_persist_failed pipeline_run_id=%s session_name=%s error_type=%s error=%s",
+            pipeline_run_id,
+            session_name,
+            exc.__class__.__name__,
+            exc,
+        )
+
+
 def pipeline_decision(generated_count: int, duplicate_count: int, *, raw_generated_count: int = 0) -> str:
     if generated_count > 0:
         return "generated"
@@ -334,6 +430,12 @@ async def _load_pipeline_size_context(
 
 def _duration_ms(started_perf: float) -> int:
     return max(0, round((time.perf_counter() - started_perf) * 1000))
+
+
+def _normalize_duration_ms(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return max(0, int(value))
 
 
 def _datetime_delta_ms(started_at: datetime | None, ended_at: datetime | None) -> int | None:
