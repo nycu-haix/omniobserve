@@ -2927,8 +2927,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			if (pendingVoiceBlockIds.size > 0 && shouldResolvePendingAsNoIdea) {
 				markTranscriptIdeaBlockStatusByBlockIds(pendingVoiceBlockIds, "no_idea");
 			}
-			if (completionSegmentKeys.length > 0 && shouldResolvePendingAsNoIdea) {
-				markTranscriptIdeaBlockStatusByLineIds(getTranscriptLineIdsForDraftKeys(completionSegmentKeys), "no_idea");
+			if (completionSegmentKeys.length > 0) {
+				markTranscriptIdeaBlockStatusByLineIds(getTranscriptLineIdsForDraftKeys(completionSegmentKeys), shouldResolvePendingAsNoIdea ? "no_idea" : undefined);
 			}
 			let shouldRefreshIdeaBlocks = false;
 
