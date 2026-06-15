@@ -823,6 +823,17 @@ async def handle_audio_stream_websocket(
                                 text=last_text,
                                 transcript_segment_id=last_segment_id,
                             )
+                    if pipeline_failure_payload is not None:
+                        await send_ws_json_safe(websocket, pipeline_failure_payload)
+                        await broadcast_admin_terminal_error(
+                            session_name,
+                            error_type="pipeline_error",
+                            participant_id=participant_id,
+                            reason="idea_block_or_task_item_generation_failed",
+                            scope=stream_context.scope.value,
+                            transcript_segment_id=last_segment_id,
+                            transcript_segment_ids=completed_transcript_segment_ids,
+                        )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -860,17 +871,6 @@ async def handle_audio_stream_websocket(
                             transcript_segment_ids=completed_transcript_segment_ids,
                             client_segment_id=None,
                             client_segment_ids=[],
-                        )
-                    if pipeline_failure_payload is not None:
-                        await send_ws_json_safe(websocket, pipeline_failure_payload)
-                        await broadcast_admin_terminal_error(
-                            session_name,
-                            error_type="pipeline_error",
-                            participant_id=participant_id,
-                            reason="idea_block_or_task_item_generation_failed",
-                            scope=stream_context.scope.value,
-                            transcript_segment_id=last_segment_id,
-                            transcript_segment_ids=completed_transcript_segment_ids,
                         )
                     await send_ws_json_safe(
                         websocket,

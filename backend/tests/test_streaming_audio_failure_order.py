@@ -119,7 +119,7 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
 
         return websocket, admin_events
 
-    async def test_pipeline_failure_is_sent_after_final_transcript_updates(self) -> None:
+    async def test_pipeline_failure_is_sent_after_final_transcript_and_before_stop_ack(self) -> None:
         pipeline_calls: list[dict] = []
 
         async def failing_handle_transcript_segment(*args, **kwargs):
@@ -134,18 +134,18 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
         participant_types = [message["type"] for message in websocket.sent]
         self.assertEqual(
             participant_types[-4:],
-            ["transcript_update", "idea_blocks_update", "pipeline_error", "task_items_update"],
+            ["transcript_update", "pipeline_error", "idea_blocks_update", "task_items_update"],
         )
         terminal_messages = websocket.sent[-4:]
         self.assertEqual(terminal_messages[0]["transcript_segment_id"], "42")
-        self.assertEqual(terminal_messages[1]["generation_complete"], False)
-        self.assertEqual(terminal_messages[2]["transcript_segment_ids"], ["42"])
+        self.assertEqual(terminal_messages[1]["transcript_segment_ids"], ["42"])
+        self.assertEqual(terminal_messages[2]["generation_complete"], False)
 
         admin_types = [message["type"] for message in admin_events]
-        self.assertEqual(admin_types[-3:], ["transcript", "idea_blocks_update", "pipeline_error"])
+        self.assertEqual(admin_types[-3:], ["transcript", "pipeline_error", "idea_blocks_update"])
         terminal_admin_messages = admin_events[-3:]
-        self.assertEqual(terminal_admin_messages[1]["generation_complete"], False)
-        self.assertEqual(terminal_admin_messages[2]["transcript_segment_ids"], ["42"])
+        self.assertEqual(terminal_admin_messages[1]["transcript_segment_ids"], ["42"])
+        self.assertEqual(terminal_admin_messages[2]["generation_complete"], False)
 
     async def test_no_result_private_audio_stop_resolves_as_no_idea_completion(self) -> None:
         pipeline_calls: list[dict] = []
