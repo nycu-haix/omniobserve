@@ -1,6 +1,7 @@
 import type IJitsiMeetExternalApi from "@jitsi/react-sdk/lib/types/IJitsiMeetExternalApi";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getJitsiNoiseSuppressionCommandConfig } from "../lib/jitsiAudio";
 import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
@@ -379,41 +380,59 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		emitAudioSnapshot();
 	}, [emitAudioSnapshot, onAudioParticipantsChange]);
 
-	const syncJitsiAudioMuted = useCallback((reason: string) => {
-		audioSyncQueueRef.current = audioSyncQueueRef.current
-			.catch(() => undefined)
-			.then(async () => {
-				const api = apiRef.current;
-				if (!api) {
-					return;
-				}
+	const syncJitsiNoiseSuppression = useCallback((reason: string) => {
+		const api = apiRef.current;
+		if (!api) {
+			return;
+		}
 
-				try {
-					const targetMuted = desiredAudioMutedRef.current;
-					const currentlyMuted = await api.isAudioMuted();
+		try {
+			api.executeCommand("setNoiseSuppressionEnabled", getJitsiNoiseSuppressionCommandConfig());
+		} catch (error) {
+			console.warn("[jitsi] failed to sync noise suppression", { reason, error });
+		}
+	}, []);
 
-					if (apiRef.current !== api) {
+	const syncJitsiAudioMuted = useCallback(
+		(reason: string) => {
+			audioSyncQueueRef.current = audioSyncQueueRef.current
+				.catch(() => undefined)
+				.then(async () => {
+					const api = apiRef.current;
+					if (!api) {
 						return;
 					}
 
-					if (currentlyMuted !== targetMuted) {
-						console.info("[jitsi] correcting audio mute state", { reason, targetMuted, currentlyMuted });
-						api.executeCommand("toggleAudio");
-						await wait(JITSI_AUDIO_SYNC_RECHECK_DELAY_MS);
-					}
+					try {
+						const targetMuted = desiredAudioMutedRef.current;
+						const currentlyMuted = await api.isAudioMuted();
 
-					const verifiedMuted = await api.isAudioMuted();
-					const latestTargetMuted = desiredAudioMutedRef.current;
+						if (apiRef.current !== api) {
+							return;
+						}
 
-					if (apiRef.current === api && verifiedMuted !== latestTargetMuted) {
-						console.info("[jitsi] retrying audio mute correction", { reason, latestTargetMuted, verifiedMuted });
-						api.executeCommand("toggleAudio");
+						if (currentlyMuted !== targetMuted) {
+							console.info("[jitsi] correcting audio mute state", { reason, targetMuted, currentlyMuted });
+							api.executeCommand("toggleAudio");
+							await wait(JITSI_AUDIO_SYNC_RECHECK_DELAY_MS);
+						}
+
+						const verifiedMuted = await api.isAudioMuted();
+						const latestTargetMuted = desiredAudioMutedRef.current;
+
+						if (apiRef.current === api && verifiedMuted !== latestTargetMuted) {
+							console.info("[jitsi] retrying audio mute correction", { reason, latestTargetMuted, verifiedMuted });
+							api.executeCommand("toggleAudio");
+						}
+
+						syncJitsiNoiseSuppression(reason);
+					} catch (error) {
+						console.warn("[jitsi] failed to sync audio mute state", { reason, error });
 					}
-				} catch (error) {
-					console.warn("[jitsi] failed to sync audio mute state", { reason, error });
-				}
-			});
-	}, []);
+				});
+		},
+		[syncJitsiNoiseSuppression]
+	);
 
 	const detachJitsiListeners = useCallback(() => {
 		const listenerRegistration = jitsiListenersRef.current;
@@ -514,6 +533,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 						}
 					});
 					void refreshAudioParticipantsFromRooms(api as IJitsiMeetExternalApi);
+					syncJitsiNoiseSuppression("videoConferenceJoined");
 					syncJitsiAudioMuted("videoConferenceJoined");
 					window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
 				};
@@ -624,6 +644,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 				setReadyMeetingKey(meetingKey);
 				onStatusChange?.("connected");
+				syncJitsiNoiseSuppression("apiReady");
 				syncJitsiAudioMuted("apiReady");
 				onApiReady?.(api);
 			})
@@ -659,6 +680,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		resetAudioSnapshot,
 		resolveAudioParticipantId,
 		syncJitsiAudioMuted,
+		syncJitsiNoiseSuppression,
 		upsertAudioParticipant
 	]);
 
