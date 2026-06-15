@@ -12,6 +12,7 @@ import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperi
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
+import { getRankingInteractionState, type RankingScope } from "../lib/rankingPhasePermissions";
 import {
 	DEFAULT_SESSION_PHASE,
 	getSessionPhaseLabel,
@@ -44,7 +45,6 @@ interface LostAtSeaItem {
 	imageMark: string;
 }
 
-type RankingScope = "public" | "private";
 type TaskPaneContent = "task-instructions" | "phase-task-items" | "private-ranking" | "public-ranking";
 type TaskSplitDirection = "horizontal" | "vertical";
 
@@ -516,6 +516,17 @@ function createDefaultTaskPaneLayout(phase: SessionPhase, phase1BuilderEnabled =
 		return createTaskPaneLeaf("private-ranking");
 	}
 
+	if (phase === "reflect") {
+		return {
+			type: "split",
+			id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			direction: "horizontal",
+			ratio: 58,
+			first: createTaskPaneLeaf("private-ranking"),
+			second: createTaskPaneLeaf("public-ranking")
+		};
+	}
+
 	return createTaskPaneLeaf("private-ranking");
 }
 
@@ -528,10 +539,10 @@ function getTaskPaneContentAvailability(content: TaskPaneContent, phase: Session
 		return isPrivatePhase1(phase) && phase1BuilderEnabled;
 	}
 	if (content === "private-ranking") {
-		return !isPrivatePhase1(phase) || !phase1BuilderEnabled;
+		return getRankingInteractionState("private", phase, phase1BuilderEnabled) !== "hidden";
 	}
 	if (content === "public-ranking") {
-		return isGroupPhase(phase);
+		return getRankingInteractionState("public", phase, phase1BuilderEnabled) !== "hidden";
 	}
 	return true;
 }
@@ -623,7 +634,8 @@ function SortableLostAtSeaItem({
 	showImage,
 	rankingLimit,
 	changeCount,
-	onPreview
+	onPreview,
+	readOnly = false
 }: {
 	item: LostAtSeaItem;
 	rankDelta?: number;
@@ -631,9 +643,11 @@ function SortableLostAtSeaItem({
 	rankingLimit?: number;
 	changeCount?: number;
 	onPreview: (item: LostAtSeaItem) => void;
+	readOnly?: boolean;
 }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-		id: item.id
+		id: item.id,
+		disabled: readOnly
 	});
 	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
 	const rankDeltaAmount = typeof rankDelta === "number" ? Math.abs(rankDelta) : 0;
@@ -641,8 +655,9 @@ function SortableLostAtSeaItem({
 	const isRankConflict = rankDeltaAmount > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
 	const rankDeltaDirection = typeof rankDelta === "number" && rankDelta < 0 ? "up" : "down";
 	const isBeyondRankingLimit = changeCount !== undefined && item.rank > changeCount;
-	const itemTitle =
-		isBeyondRankingLimit && rankingLimit !== undefined
+	const itemTitle = readOnly
+		? "Public 排序僅供參考，Reflect Phase 只能調整 Private 排序"
+		: isBeyondRankingLimit && rankingLimit !== undefined
 			? `這個項目目前不會改動；拖到分隔線上方可納入排序，最多 ${rankingLimit} 個`
 			: hasRankDelta
 				? `與 Public 排序差 ${rankDeltaAmount} 位`
@@ -654,18 +669,20 @@ function SortableLostAtSeaItem({
 			className={cn(
 				"grid min-h-10 w-full shrink-0 cursor-grab select-none items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors",
 				showImage ? "grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]",
+				readOnly && "cursor-default bg-muted/20",
 				isRankConflict && "border-muted-foreground/30",
 				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
-				isDragging && "opacity-50"
+				isDragging && !readOnly && "opacity-50"
 			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
 			data-local-space-shortcut="true"
+			aria-readonly={readOnly}
 			title={itemTitle}
-			{...attributes}
-			{...listeners}
+			{...(readOnly ? {} : attributes)}
+			{...(readOnly ? {} : listeners)}
 		>
 			{showImage && (
 				<button
@@ -713,7 +730,7 @@ function SortableLostAtSeaItem({
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+			{readOnly ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
 		</div>
 	);
 }
@@ -732,7 +749,8 @@ function LostAtSeaRankingPanel({
 	getRankDelta,
 	rankingLimit,
 	changeCount,
-	scrollContainerRef
+	scrollContainerRef,
+	readOnly = false
 }: {
 	scope: RankingScope;
 	title: string;
@@ -748,21 +766,40 @@ function LostAtSeaRankingPanel({
 	rankingLimit?: number;
 	changeCount?: number;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
+	readOnly?: boolean;
 }) {
+	const itemList = (
+		<div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+			{readOnly && (
+				<div className="flex items-center gap-2 rounded-md border bg-muted/35 px-3 py-2 text-xs font-medium text-muted-foreground">
+					<Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+					<span>Public 排序僅供參考，Reflect Phase 只能調整 Private 排序。</span>
+				</div>
+			)}
+			{items.map((item, index) => (
+				<Fragment key={item.id}>
+					{!readOnly && rankingLimit !== undefined && changeCount !== undefined && index === changeCount && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
+					<SortableLostAtSeaItem
+						item={item}
+						rankDelta={getRankDelta?.(item)}
+						showImage={showImages}
+						rankingLimit={rankingLimit}
+						changeCount={changeCount}
+						onPreview={onPreviewItem}
+						readOnly={readOnly}
+					/>
+				</Fragment>
+			))}
+			{!readOnly && rankingLimit !== undefined && changeCount !== undefined && changeCount >= items.length && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
+		</div>
+	);
+
 	return (
-		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={title}>
+		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={title} aria-readonly={readOnly}>
 			<div className="sr-only">{status}</div>
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-					<div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
-						{items.map((item, index) => (
-							<Fragment key={item.id}>
-								{rankingLimit !== undefined && changeCount !== undefined && index === changeCount && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
-								<SortableLostAtSeaItem item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} rankingLimit={rankingLimit} changeCount={changeCount} onPreview={onPreviewItem} />
-							</Fragment>
-						))}
-						{rankingLimit !== undefined && changeCount !== undefined && changeCount >= items.length && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
-					</div>
+					{itemList}
 				</SortableContext>
 			</DndContext>
 		</section>
@@ -996,7 +1033,8 @@ export default function MeetingRoom() {
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
-	const shouldHighlightRankConflict = isGroupPhase(currentPhase);
+	const publicRankingInteractionState = getRankingInteractionState("public", currentPhase);
+	const shouldHighlightRankConflict = publicRankingInteractionState !== "hidden";
 	const publicRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, publicItems.length);
 	const privateRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, privateItems.length);
 	const publicChangeCount = normalizeRankingChangeCount(publicRankingChangeCount, publicRankingLimit, publicItems.length);
@@ -1591,6 +1629,7 @@ export default function MeetingRoom() {
 							rankingLimit={publicRankingLimit}
 							changeCount={publicChangeCount}
 							scrollContainerRef={publicRankingScrollRef}
+							readOnly={publicRankingInteractionState === "readonly"}
 						/>
 					)}
 					renderPrivateRanking={() => (
