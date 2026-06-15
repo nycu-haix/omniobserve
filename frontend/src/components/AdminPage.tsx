@@ -1176,7 +1176,7 @@ export function AdminPage() {
 						...current,
 						[participantId]: {
 							...latestTranscript,
-							ideaBlockStatus: ideaBlockItems.length > 0 || duplicateIdeaBlockItems.length > 0 ? "generated" : "no_idea"
+							ideaBlockStatus: ideaBlockItems.length > 0 ? "generated" : "no_idea"
 						}
 					};
 				});

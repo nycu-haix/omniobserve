@@ -232,6 +232,9 @@ async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_na
         session_name,
         participant_id=participant_id,
         idea_blocks=serialized_idea_blocks,
+        duplicate_idea_blocks=[],
+        scope="similarity",
+        generation_complete=False,
     )
 
 
@@ -819,6 +822,14 @@ async def handle_audio_stream_websocket(
                         session_name,
                         participant_id=participant_id,
                         idea_blocks=idea_blocks_payload,
+                        duplicate_idea_blocks=serialized_result["duplicate_idea_blocks"],
+                        scope=stream_context.scope.value,
+                        transcript_segment_id=last_segment_id,
+                        transcript_segment_ids=completed_transcript_segment_ids,
+                        client_segment_id=None,
+                        client_segment_ids=[],
+                        generation_complete=stream_context.scope == Visibility.PRIVATE
+                        and bool(transcript_segments),
                     )
                     if pipeline_result is not None:
                         await send_board_idea_blocks_update(
@@ -1423,6 +1434,13 @@ async def handle_transcript_segments_websocket(
                     session_name,
                     participant_id=participant_id,
                     idea_blocks=serialized_result["idea_blocks"],
+                    duplicate_idea_blocks=serialized_result["duplicate_idea_blocks"],
+                    scope=visibility.value,
+                    transcript_segment_id=saved_segment.segment_id,
+                    transcript_segment_ids=[str(saved_segment.segment_id)],
+                    client_segment_id=client_segment_id or None,
+                    client_segment_ids=batch_client_segment_ids,
+                    generation_complete=True,
                 )
                 if pipeline_result is not None:
                     await send_board_idea_blocks_update(

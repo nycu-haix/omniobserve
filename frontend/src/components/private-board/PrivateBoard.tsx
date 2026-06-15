@@ -2931,12 +2931,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
 			const ideaBlockResponses = Array.isArray(lastAudioMessage.idea_blocks) ? lastAudioMessage.idea_blocks : [];
 			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
-			const hasConfirmedIdeaBlockResult = ideaBlockResponses.length > 0 || duplicateIdeaBlockResponses.length > 0;
-			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasConfirmedIdeaBlockResult;
+			const hasNewIdeaBlockResult = ideaBlockResponses.length > 0;
+			const hasAnyIdeaBlockResult = hasNewIdeaBlockResult || duplicateIdeaBlockResponses.length > 0;
+			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasAnyIdeaBlockResult;
+			const shouldResolvePendingAsNoIdea = hasCompletedIdeaBlockGeneration && !hasNewIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
 			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? resolveActiveCompletionSegmentKeys(lastAudioMessage) : [];
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length === 0) {
-				if (!hasConfirmedIdeaBlockResult) {
+				if (shouldResolvePendingAsNoIdea) {
 					const allPendingVoiceBlockIds = new Set<string>();
 					for (const segmentBlockIds of voiceGeneratingBlocksRef.current.values()) {
 						segmentBlockIds.forEach(blockId => allPendingVoiceBlockIds.add(blockId));
@@ -2950,10 +2952,10 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length > 0) {
 				setWhisperTransient(current => (isCurrentWhisperSegmentComplete(current, completionSegmentKeys) ? { status: "idle", text: "" } : current));
 			}
-			if (pendingVoiceBlockIds.size > 0 && !hasConfirmedIdeaBlockResult) {
+			if (pendingVoiceBlockIds.size > 0 && shouldResolvePendingAsNoIdea) {
 				markTranscriptIdeaBlockStatusByBlockIds(pendingVoiceBlockIds, "no_idea");
 			}
-			if (completionSegmentKeys.length > 0 && !hasConfirmedIdeaBlockResult) {
+			if (completionSegmentKeys.length > 0 && shouldResolvePendingAsNoIdea) {
 				markTranscriptIdeaBlockStatusByLineIds(getTranscriptLineIdsForDraftKeys(completionSegmentKeys), "no_idea");
 			}
 			let shouldRefreshIdeaBlocks = false;

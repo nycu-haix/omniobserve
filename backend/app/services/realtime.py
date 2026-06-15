@@ -447,16 +447,32 @@ async def broadcast_admin_idea_blocks_update(
     *,
     participant_id: str,
     idea_blocks: list[dict[str, Any]],
+    duplicate_idea_blocks: list[dict[str, Any]] | None = None,
+    scope: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str | int | None] | None = None,
+    client_segment_id: str | int | None = None,
+    client_segment_ids: list[str | int | None] | None = None,
+    generation_complete: bool | None = None,
 ) -> None:
+    payload: dict[str, Any] = {
+        "type": "idea_blocks_update",
+        "session_name": session_id,
+        "participant_id": participant_id,
+        "idea_blocks": idea_blocks,
+        "duplicate_idea_blocks": duplicate_idea_blocks or [],
+        "scope": scope,
+        "transcript_segment_id": transcript_segment_id,
+        "transcript_segment_ids": transcript_segment_ids or [],
+        "client_segment_id": client_segment_id,
+        "client_segment_ids": client_segment_ids or [],
+        "timestamp_ms": _now_ms(),
+    }
+    if generation_complete is not None:
+        payload["generation_complete"] = generation_complete
     await admin_manager.broadcast(
         session_id,
-        {
-            "type": "idea_blocks_update",
-            "session_name": session_id,
-            "participant_id": participant_id,
-            "idea_blocks": idea_blocks,
-            "timestamp_ms": _now_ms(),
-        },
+        payload,
     )
 
 
@@ -2466,6 +2482,15 @@ async def handle_audio_websocket(
                     session_id,
                     participant_id=participant_id,
                     idea_blocks=_serialize_admin_idea_blocks(idea_blocks),
+                    duplicate_idea_blocks=[],
+                    scope=state.mic_mode,
+                    transcript_segment_id=transcript_segments[-1].segment_id,
+                    transcript_segment_ids=[
+                        str(segment.segment_id) for segment in transcript_segments
+                    ],
+                    client_segment_id=None,
+                    client_segment_ids=[],
+                    generation_complete=True,
                 )
             if audio_connections.get(session_id, {}).get(participant_id) is state:
                 audio_connections.get(session_id, {}).pop(participant_id, None)
