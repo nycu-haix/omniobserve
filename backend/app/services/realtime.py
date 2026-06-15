@@ -406,6 +406,35 @@ async def broadcast_admin_transcript(
     )
 
 
+async def broadcast_admin_terminal_error(
+    session_id: str,
+    *,
+    error_type: str,
+    participant_id: str,
+    reason: str,
+    scope: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str | int | None] | None = None,
+    client_segment_id: str | int | None = None,
+    client_segment_ids: list[str | int | None] | None = None,
+) -> None:
+    await admin_manager.broadcast(
+        session_id,
+        {
+            "type": error_type,
+            "session_name": session_id,
+            "participant_id": participant_id,
+            "reason": reason,
+            "scope": scope,
+            "transcript_segment_id": transcript_segment_id,
+            "transcript_segment_ids": transcript_segment_ids or [],
+            "client_segment_id": client_segment_id,
+            "client_segment_ids": client_segment_ids or [],
+            "timestamp_ms": _now_ms(),
+        },
+    )
+
+
 def _presence_state_message(session_id: str) -> dict[str, Any]:
     participant_ids = sorted(
         {

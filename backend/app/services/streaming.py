@@ -19,7 +19,14 @@ from .asr import transcribe_ws_chunk
 from .board_payloads import serialize_frontend_board_idea_block, serialize_frontend_board_idea_block_update
 from .participant_roles import is_audio_transcription_role, list_session_participant_roles
 from .participant_status import get_cached_participant_role, mark_audio_disconnected, sync_participant_roles, update_audio_status
-from .realtime import board_manager, broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
+from .realtime import (
+    board_manager,
+    broadcast_admin_idea_blocks_update,
+    broadcast_admin_terminal_error,
+    broadcast_admin_transcript,
+    broadcast_presence_state,
+    broadcast_public_transcript_line,
+)
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
 
@@ -772,6 +779,15 @@ async def handle_audio_stream_websocket(
                                     "transcript_segment_ids": completed_transcript_segment_ids,
                                 },
                             )
+                            await broadcast_admin_terminal_error(
+                                session_name,
+                                error_type="pipeline_error",
+                                participant_id=participant_id,
+                                reason="idea_block_or_task_item_generation_failed",
+                                scope=stream_context.scope.value,
+                                transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
+                                transcript_segment_ids=completed_transcript_segment_ids,
+                            )
                             pipeline_result = None
 
                         if pipeline_result is not None:
@@ -1406,6 +1422,17 @@ async def handle_transcript_segments_websocket(
                             "client_segment_id": client_segment_id or None,
                             "client_segment_ids": batch_client_segment_ids,
                         },
+                    )
+                    await broadcast_admin_terminal_error(
+                        session_name,
+                        error_type="pipeline_error",
+                        participant_id=participant_id,
+                        reason="idea_block_or_task_item_generation_failed",
+                        scope=visibility.value,
+                        transcript_segment_id=saved_segment.segment_id,
+                        transcript_segment_ids=[str(saved_segment.segment_id)],
+                        client_segment_id=client_segment_id or None,
+                        client_segment_ids=batch_client_segment_ids,
                     )
                     continue
 
