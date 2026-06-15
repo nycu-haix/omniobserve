@@ -319,6 +319,87 @@ PHASE1_POSTER_COMPONENTS = [
     },
 ]
 
+PHASE1_COMPONENT_DETECTION_METADATA = {
+    "main_title": {
+        "description_zh": "海報中最醒目的主標題或主標語，通常是上方的大字，用來傳達活動主題。",
+        "aliases": ["最大標題", "主標語", "活動名稱", "標題文字", "上方大字", "一起來淨灘吧"],
+    },
+    "subtitle": {
+        "description_zh": "主標題旁或下方的副標題，補充活動定位或活動名稱。",
+        "aliases": ["副標語", "活動副標題", "次標題", "南寮海岸淨灘行動"],
+    },
+    "description1": {
+        "description_zh": "第一段活動說明或第一個場次資訊，常用來放日期、時間、地點或接駁資訊。",
+        "aliases": ["第一段說明", "上午場", "第一個場次", "黃色資訊卡", "上面那段說明", "左邊說明文字"],
+    },
+    "description2": {
+        "description_zh": "第二段活動說明或第二個場次資訊，常用來放另一個場次的日期、時間、地點或接駁資訊。",
+        "aliases": ["第二段說明", "下午場", "第二個場次", "橘色資訊卡", "下面那段說明", "另一個場次文字"],
+    },
+    "people_icon1": {
+        "description_zh": "第一個人物圖示或人物插圖，用來呈現參與者、學生或人群感。",
+        "aliases": ["第一個人物圖", "人物插圖1", "人形圖示1", "人群圖示", "左邊人物圖"],
+    },
+    "people_icon2": {
+        "description_zh": "第二個人物圖示或人物插圖，用來呈現參與者、學生或人群感。",
+        "aliases": ["第二個人物圖", "人物插圖2", "人形圖示2", "另一個人物圖", "右邊人物圖"],
+    },
+    "qr_code": {
+        "description_zh": "報名 QR code 圖像本身，觀眾掃描後進入報名或了解更多資訊。",
+        "aliases": ["QR", "QR code", "掃碼", "報名碼", "右下角 QR", "報名 QR"],
+    },
+    "qr_caption": {
+        "description_zh": "QR code 附近的說明文字或行動呼籲，例如報名連結、掃描報名。",
+        "aliases": ["QR 說明", "QR 文字", "報名連結", "掃描說明", "QR 下方文字", "CTA 文字"],
+    },
+    "contact_info": {
+        "description_zh": "參與資訊、參與對象、贈品、抽獎資格或聯絡資訊等報名誘因內容。",
+        "aliases": ["參與對象", "贈品資訊", "抽獎資格", "報名誘因", "聯絡資訊", "誰可以參加"],
+    },
+    "organizer_list": {
+        "description_zh": "主辦、協辦或辦理單位的文字與 logo 清單。",
+        "aliases": ["主辦資訊", "主辦單位", "協辦單位", "辦理單位", "單位 logo", "logo 清單"],
+    },
+    "reminder": {
+        "description_zh": "指導單位、注意事項或提醒文字。",
+        "aliases": ["指導單位", "注意事項", "提醒文字", "備註", "小提醒"],
+    },
+    "event_info": {
+        "description_zh": "響應活動、活動標章或世界淨灘日相關資訊。",
+        "aliases": ["響應活動", "活動標章", "世界淨灘日資訊", "ICC 資訊", "活動資訊標章"],
+    },
+    "activity_icon1": {
+        "description_zh": "第一個活動圖示或淨灘相關插圖，用來表現海岸、垃圾清理或活動情境。",
+        "aliases": ["第一個活動圖", "淨灘圖示1", "活動插圖1", "左上角那張圖", "海岸插圖"],
+    },
+    "activity_icon2": {
+        "description_zh": "第二個活動圖示或淨灘相關插圖，用來表現海岸、垃圾清理或活動情境。",
+        "aliases": ["第二個活動圖", "淨灘圖示2", "活動插圖2", "左下角那張圖", "垃圾清理圖"],
+    },
+    "qr_code_group": {
+        "description_zh": "QR code 與其說明文字形成的報名區塊。",
+        "aliases": ["報名區", "QR 區塊", "QR 碼區", "右下角報名區", "掃碼區", "QR 和文字"],
+    },
+    "title_group": {
+        "description_zh": "主標題與副標題形成的上方標題群組。",
+        "aliases": ["標題區", "上方標題群", "主副標題", "標題群", "上面那組文字", "活動名稱區"],
+    },
+    "info_group2": {
+        "description_zh": "下方主辦單位、指導單位與響應活動形成的底部資訊群組。",
+        "aliases": ["底部資訊", "下方資訊", "footer", "下方單位資訊", "下面那個單位資訊", "主辦指導響應", "底部 logo"],
+    },
+    "background": {
+        "description_zh": "海報底色、背景圖或海洋感底圖，不是單一前景元件。",
+        "aliases": ["背景圖", "底圖", "海洋背景", "藍色背景", "背景色", "整張底色"],
+    },
+}
+
+for component in PHASE1_POSTER_COMPONENTS:
+    metadata = PHASE1_COMPONENT_DETECTION_METADATA.get(component["id"], {})
+    if metadata.get("description_zh"):
+        component["description_zh"] = metadata["description_zh"]
+    component["aliases"] = list(dict.fromkeys(metadata.get("aliases", [])))
+
 PHASE1_ACTION_ITEMS = [
     {
         "id": "remove",

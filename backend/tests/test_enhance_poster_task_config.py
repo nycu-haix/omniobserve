@@ -3,6 +3,10 @@ import unittest
 from fastapi import HTTPException
 
 from app.services.private_phase_task_item_service import _build_statement, _resolve_component_action
+from app.services.task_item_generation import (
+    _format_builder_option_line,
+    build_poster_component_ids_by_keyword,
+)
 from app.task_config.enhance_the_poster import (
     CUSTOM_DETAIL_ACTION_ID,
     PHASE1_ACTION_ITEMS,
@@ -70,6 +74,47 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
         self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
         self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
+
+    def test_poster_components_include_detection_metadata(self) -> None:
+        components_by_id = {component["id"]: component for component in PHASE1_POSTER_COMPONENTS}
+
+        for component in PHASE1_POSTER_COMPONENTS:
+            with self.subTest(component_id=component["id"]):
+                self.assertIsInstance(component.get("description_zh"), str)
+                self.assertTrue(component["description_zh"].strip())
+                self.assertIsInstance(component.get("aliases"), list)
+                self.assertTrue(component["aliases"])
+
+        self.assertIn("右下角報名區", components_by_id["qr_code_group"]["aliases"])
+        self.assertIn("左上角那張圖", components_by_id["activity_icon1"]["aliases"])
+        self.assertIn("底部資訊", components_by_id["info_group2"]["aliases"])
+
+    def test_poster_component_keyword_matching_uses_aliases_and_descriptions(self) -> None:
+        cases = [
+            ("右下角報名區應該靠近參與資訊", "qr_code_group"),
+            ("左上角那張圖可以換成更像淨灘的圖", "activity_icon1"),
+            ("下面那個單位資訊不要太搶眼", "info_group2"),
+            ("第一個場次的時間地點說明需要更好讀", "description1"),
+        ]
+
+        for text, expected_component_id in cases:
+            with self.subTest(text=text):
+                self.assertIn(
+                    expected_component_id,
+                    build_poster_component_ids_by_keyword(
+                        text,
+                        task_name="enhance-the-poster",
+                    ),
+                )
+
+    def test_builder_prompt_lines_include_component_descriptions_and_aliases(self) -> None:
+        qr_group = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_code_group")
+
+        line = _format_builder_option_line(qr_group)
+
+        self.assertIn('id="qr_code_group"', line)
+        self.assertIn('description="QR code 與其說明文字形成的報名區塊。"', line)
+        self.assertIn('aliases="報名區, QR 區塊, QR 碼區, 右下角報名區, 掃碼區, QR 和文字"', line)
 
 
 if __name__ == "__main__":

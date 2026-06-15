@@ -71,9 +71,9 @@ class TaskPromptConfig:
     idea_block_topic_context: str
     similarity_system_prompt: str
     task_items: list[dict[str, Any]]
-    poster_components: list[dict[str, str]] | None = None
-    actions: list[dict[str, str]] | None = None
-    advanced_actions: list[dict[str, str]] | None = None
+    poster_components: list[dict[str, Any]] | None = None
+    actions: list[dict[str, Any]] | None = None
+    advanced_actions: list[dict[str, Any]] | None = None
 
 
 def normalize_task_name(task_name: str | None) -> str:
