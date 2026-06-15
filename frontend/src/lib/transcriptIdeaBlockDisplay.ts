@@ -56,7 +56,7 @@ export function getTranscriptIdeaBlockStatus(line: TranscriptLine, blocks: IdeaB
 		return "linked";
 	}
 
-	const matchingPendingBlock = blocks.find(block => isPendingIdeaBlock(block) && blockMatchesTranscriptLine(block, line));
+	const matchingPendingBlock = blocks.find(block => isPendingIdeaBlock(block) && blockMatchesTranscriptLine(block, line, { allowTextMatch: !isTerminalTranscriptIdeaBlockStatus(line) }));
 	if (matchingPendingBlock) {
 		return "pending";
 	}

@@ -738,31 +738,32 @@ async def handle_audio_stream_websocket(
                     pipeline_failure_payload: dict[str, Any] | None = None
                     if transcript_segments and stream_context.scope == Visibility.PRIVATE:
                         try:
-                            pipeline_result = await handle_transcript_segment(
-                                db,
-                                session_name=session_name,
-                                user_id=_participant_id_to_int(participant_id),
-                                transcript=None,
-                                is_final=True,
-                                visibility=stream_context.scope,
-                                task_name=task_name,
-                                on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
-                                    websocket,
+                            for index, transcript_segment in enumerate(transcript_segments):
+                                pipeline_result = await handle_transcript_segment(
+                                    db,
                                     session_name=session_name,
-                                    participant_id=participant_id,
-                                    idea_blocks=idea_blocks,
-                                ),
-                                on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
-                                    websocket,
-                                    participant_id=participant_id,
-                                    provisional_idea_blocks=provisional_idea_blocks,
-                                    scope=stream_context.scope.value,
-                                    transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
-                                    transcript_segment_ids=completed_transcript_segment_ids,
-                                    client_segment_id=None,
-                                    client_segment_ids=[],
-                                ),
-                            )
+                                    user_id=_participant_id_to_int(participant_id),
+                                    transcript=transcript_segment,
+                                    is_final=index == len(transcript_segments) - 1,
+                                    visibility=stream_context.scope,
+                                    task_name=task_name,
+                                    on_similarity_update=lambda idea_blocks: send_similarity_idea_blocks_update(
+                                        websocket,
+                                        session_name=session_name,
+                                        participant_id=participant_id,
+                                        idea_blocks=idea_blocks,
+                                    ),
+                                    on_provisional_idea_blocks_update=lambda provisional_idea_blocks: send_provisional_idea_blocks_update(
+                                        websocket,
+                                        participant_id=participant_id,
+                                        provisional_idea_blocks=provisional_idea_blocks,
+                                        scope=stream_context.scope.value,
+                                        transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
+                                        transcript_segment_ids=completed_transcript_segment_ids,
+                                        client_segment_id=None,
+                                        client_segment_ids=[],
+                                    ),
+                                )
                         except Exception:
                             logger.exception(
                                 "Transcript pipeline failed session_name=%s participant_id=%s",

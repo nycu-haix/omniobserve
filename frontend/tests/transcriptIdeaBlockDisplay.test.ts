@@ -76,6 +76,14 @@ test("preserves terminal transcript states when only duplicate text matches", ()
 	assert.equal(linkedLines[0]?.ideaBlockStatus, "no_idea");
 });
 
+test("preserves terminal transcript states when only pending text matches", () => {
+	const line = transcriptLine({ ideaBlockStatus: "failed" });
+	const blocks = [ideaBlock({ id: "pending-block", status: "generating", transcriptLineId: "other-t1" })];
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "failed");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+});
+
 test("ignores deleted and public transcript matches", () => {
 	const privateLine = transcriptLine({ linkedBlockId: "deleted" });
 	const publicLine = transcriptLine({ id: "p1", source: "public" });

@@ -3,6 +3,7 @@ import unittest
 
 from app.schemas import StreamTranscript
 from app.services import streaming
+from app.services.transcript_pipeline import PipelineResult
 
 
 class FakeSessionLocal:
@@ -52,7 +53,7 @@ class FakeAudioWebSocket:
 
 
 class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pipeline_failure_is_sent_after_final_transcript_updates(self) -> None:
+    async def run_private_audio_stop(self, handle_transcript_segment):
         websocket = FakeAudioWebSocket()
         admin_events: list[dict] = []
         original_logger_disabled = streaming.logger.disabled
@@ -79,9 +80,6 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
         async def fake_save_ws_transcript_segment(db, **kwargs) -> StreamTranscript:
             return StreamTranscript(segment_id="42", text=kwargs["transcript_text"])
 
-        async def failing_handle_transcript_segment(*args, **kwargs):
-            raise RuntimeError("pipeline failed")
-
         async def fake_broadcast_admin_transcript(session_name: str, **kwargs) -> None:
             admin_events.append({"type": "transcript", **kwargs})
 
@@ -100,7 +98,7 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
             streaming._sync_cached_participant_roles = noop_sync_roles
             streaming.transcribe_ws_chunk = fake_transcribe_ws_chunk
             streaming.save_ws_transcript_segment = fake_save_ws_transcript_segment
-            streaming.handle_transcript_segment = failing_handle_transcript_segment
+            streaming.handle_transcript_segment = handle_transcript_segment
             streaming.broadcast_admin_transcript = fake_broadcast_admin_transcript
             streaming.broadcast_admin_idea_blocks_update = fake_broadcast_admin_idea_blocks_update
             streaming.broadcast_admin_terminal_error = fake_broadcast_admin_terminal_error
@@ -119,6 +117,20 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
             for name, value in originals.items():
                 setattr(streaming, name, value)
 
+        return websocket, admin_events
+
+    async def test_pipeline_failure_is_sent_after_final_transcript_updates(self) -> None:
+        pipeline_calls: list[dict] = []
+
+        async def failing_handle_transcript_segment(*args, **kwargs):
+            pipeline_calls.append(kwargs)
+            raise RuntimeError("pipeline failed")
+
+        websocket, admin_events = await self.run_private_audio_stop(failing_handle_transcript_segment)
+
+        self.assertEqual([call["transcript"].segment_id for call in pipeline_calls], ["42"])
+        self.assertEqual([call["is_final"] for call in pipeline_calls], [True])
+
         participant_types = [message["type"] for message in websocket.sent]
         self.assertEqual(
             participant_types[-4:],
@@ -134,6 +146,33 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
         terminal_admin_messages = admin_events[-3:]
         self.assertEqual(terminal_admin_messages[1]["generation_complete"], False)
         self.assertEqual(terminal_admin_messages[2]["transcript_segment_ids"], ["42"])
+
+    async def test_no_result_private_audio_stop_resolves_as_no_idea_completion(self) -> None:
+        pipeline_calls: list[dict] = []
+
+        async def empty_handle_transcript_segment(*args, **kwargs):
+            pipeline_calls.append(kwargs)
+            return PipelineResult(idea_blocks=[], task_items=[])
+
+        websocket, admin_events = await self.run_private_audio_stop(empty_handle_transcript_segment)
+
+        self.assertEqual([call["transcript"].segment_id for call in pipeline_calls], ["42"])
+        self.assertEqual([call["is_final"] for call in pipeline_calls], [True])
+
+        participant_types = [message["type"] for message in websocket.sent]
+        self.assertEqual(participant_types[-3:], ["transcript_update", "idea_blocks_update", "task_items_update"])
+        terminal_messages = websocket.sent[-3:]
+        self.assertEqual(terminal_messages[1]["idea_blocks"], [])
+        self.assertEqual(terminal_messages[1]["generation_complete"], True)
+        self.assertEqual(terminal_messages[1]["transcript_segment_ids"], ["42"])
+        self.assertNotIn("pipeline_error", participant_types)
+
+        admin_types = [message["type"] for message in admin_events]
+        self.assertEqual(admin_types[-2:], ["transcript", "idea_blocks_update"])
+        self.assertEqual(admin_events[-1]["idea_blocks"], [])
+        self.assertEqual(admin_events[-1]["generation_complete"], True)
+        self.assertEqual(admin_events[-1]["transcript_segment_ids"], ["42"])
+        self.assertNotIn("pipeline_error", admin_types)
 
 
 if __name__ == "__main__":
