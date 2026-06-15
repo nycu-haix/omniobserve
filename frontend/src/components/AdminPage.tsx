@@ -20,7 +20,7 @@ import {
 	X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
+import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, computePublicNowAgeMs, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -145,8 +145,12 @@ interface PublicContextComponentStateMessage extends RealtimeMessage {
 	timestamp_ms?: unknown;
 	stateUpdatedAtMs?: unknown;
 	state_updated_at_ms?: unknown;
+	adminBroadcastAtMs?: unknown;
+	admin_broadcast_at_ms?: unknown;
 	eventTimestampMs?: unknown;
 	event_timestamp_ms?: unknown;
+	eventToAdminBroadcastMs?: unknown;
+	event_to_admin_broadcast_ms?: unknown;
 	eventToStateMs?: unknown;
 	event_to_state_ms?: unknown;
 	matchingDurationMs?: unknown;
@@ -194,7 +198,10 @@ interface LatestParticipantTranscript {
 
 interface PublicNowDiagnostics {
 	stateUpdatedAtMs: number | null;
+	adminBroadcastAtMs: number | null;
+	receivedAtMs: number | null;
 	eventTimestampMs: number | null;
+	eventToAdminBroadcastMs: number | null;
 	eventToStateMs: number | null;
 	displayLatencyMs: number | null;
 	matchingDurationMs: number | null;
@@ -287,7 +294,10 @@ const PARTICIPANT_ROLE_SEGMENT_CLASSES: Record<ParticipantRole, string> = {
 const PARTICIPANT_ROLE_OPTIONS: ParticipantRole[] = ["participant", "confederate", "observer", "facilitator", "test"];
 const EMPTY_PUBLIC_NOW_DIAGNOSTICS: PublicNowDiagnostics = {
 	stateUpdatedAtMs: null,
+	adminBroadcastAtMs: null,
+	receivedAtMs: null,
 	eventTimestampMs: null,
+	eventToAdminBroadcastMs: null,
 	eventToStateMs: null,
 	displayLatencyMs: null,
 	matchingDurationMs: null,
@@ -1111,6 +1121,8 @@ export function AdminPage() {
 		if (isPublicContextComponentStateMessage(message)) {
 			const stateUpdatedAtMs = normalizeOptionalNumberValue(message.stateUpdatedAtMs ?? message.state_updated_at_ms ?? message.timestamp_ms);
 			const eventTimestampMs = normalizeOptionalNumberValue(message.eventTimestampMs ?? message.event_timestamp_ms);
+			const adminBroadcastAtMs = normalizeOptionalNumberValue(message.adminBroadcastAtMs ?? message.admin_broadcast_at_ms);
+			const eventToAdminBroadcastMs = normalizeOptionalNumberValue(message.eventToAdminBroadcastMs ?? message.event_to_admin_broadcast_ms);
 			setPublicNowComponentIds(normalizeStringList(message.componentIds ?? message.component_ids));
 			setPublicNowTaskItemIds(normalizeNumberList(message.taskItemIds ?? message.task_item_ids));
 			setPublicNowSource(typeof message.source === "string" ? message.source : null);
@@ -1118,9 +1130,12 @@ export function AdminPage() {
 			setPublicNowDeliveredCount(normalizeNumberValue(message.deliveredCount ?? message.delivered_count, 0));
 			setPublicNowDiagnostics({
 				stateUpdatedAtMs,
+				adminBroadcastAtMs,
+				receivedAtMs,
 				eventTimestampMs,
+				eventToAdminBroadcastMs,
 				eventToStateMs: normalizeOptionalNumberValue(message.eventToStateMs ?? message.event_to_state_ms),
-				displayLatencyMs: eventTimestampMs === null ? null : Math.max(0, receivedAtMs - eventTimestampMs),
+				displayLatencyMs: eventToAdminBroadcastMs ?? (eventTimestampMs === null ? null : Math.max(0, receivedAtMs - eventTimestampMs)),
 				matchingDurationMs: normalizeOptionalNumberValue(message.matchingDurationMs ?? message.matching_duration_ms),
 				queueDelayMs: normalizeOptionalNumberValue(message.queueDelayMs ?? message.queue_delay_ms),
 				debounceMs: normalizeOptionalNumberValue(message.debounceMs ?? message.debounce_ms),
@@ -1577,11 +1592,15 @@ export function AdminPage() {
 		targetCount: publicNowTargetCount
 	});
 	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
-	const publicNowAgeMs = publicNowDiagnostics.stateUpdatedAtMs === null ? null : Math.max(0, clockNowMs - publicNowDiagnostics.stateUpdatedAtMs);
+	const publicNowAgeMs = computePublicNowAgeMs({
+		stateUpdatedAtMs: publicNowDiagnostics.stateUpdatedAtMs,
+		adminBroadcastAtMs: publicNowDiagnostics.adminBroadcastAtMs,
+		receivedAtMs: publicNowDiagnostics.receivedAtMs,
+		nowMs: clockNowMs
+	});
 	const isPublicNowStateStale = isPublicNowStale({
 		targetCount: publicNowTargetCount,
-		stateUpdatedAtMs: publicNowDiagnostics.stateUpdatedAtMs,
-		nowMs: clockNowMs,
+		ageMs: publicNowAgeMs,
 		staleBudgetMs: PUBLIC_NOW_STALE_BUDGET_MS
 	});
 	const publicNowStatusLabel = publicNowTargetCount === 0 ? "none" : isPublicNowStateStale ? "STALE" : "fresh";
