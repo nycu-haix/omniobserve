@@ -11,12 +11,16 @@ export interface LatestTranscriptIdeaBlockStatusUpdate {
 	transcriptSegmentIds: string[];
 }
 
+export function latestTranscriptMatchesSegmentIds(current: LatestTranscriptIdeaBlockStatusState, transcriptSegmentIds: string[]): boolean {
+	return !(current.transcriptSegmentId && transcriptSegmentIds.length > 0 && !transcriptSegmentIds.includes(current.transcriptSegmentId));
+}
+
 export function getLatestTranscriptIdeaBlockStatusAfterUpdate(current: LatestTranscriptIdeaBlockStatusState, update: LatestTranscriptIdeaBlockStatusUpdate): LatestTranscriptIdeaBlockStatus {
 	if (!update.generationComplete) {
 		return current.ideaBlockStatus;
 	}
 
-	if (current.transcriptSegmentId && update.transcriptSegmentIds.length > 0 && !update.transcriptSegmentIds.includes(current.transcriptSegmentId)) {
+	if (!latestTranscriptMatchesSegmentIds(current, update.transcriptSegmentIds)) {
 		return current.ideaBlockStatus;
 	}
 

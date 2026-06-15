@@ -19,8 +19,8 @@ import {
 	Users,
 	X
 } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getLatestTranscriptIdeaBlockStatusAfterUpdate, type LatestTranscriptIdeaBlockStatus } from "../lib/adminLatestTranscriptStatus";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { getLatestTranscriptIdeaBlockStatusAfterUpdate, latestTranscriptMatchesSegmentIds, type LatestTranscriptIdeaBlockStatus } from "../lib/adminLatestTranscriptStatus";
 import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
@@ -141,6 +141,8 @@ interface AudioTerminalErrorMessage extends RealtimeMessage {
 	participant_id?: unknown;
 	user_id?: unknown;
 	userId?: unknown;
+	transcript_segment_id?: unknown;
+	transcript_segment_ids?: unknown;
 }
 
 interface PublicContextComponentStateMessage extends RealtimeMessage {
@@ -1217,9 +1219,18 @@ export function AdminPage() {
 		if (isAudioTerminalErrorMessage(message)) {
 			const participantId = normalizeOptionalStringValue(message.participant_id ?? message.user_id ?? message.userId);
 			if (participantId) {
+				const errorTranscriptSegmentIds = [normalizeOptionalStringValue(message.transcript_segment_id), ...normalizeOptionalStringValues(message.transcript_segment_ids)].filter(
+					(id): id is string => !!id
+				);
 				setLatestTranscripts(current => {
 					const latestTranscript = current[participantId];
 					if (!latestTranscript) {
+						return current;
+					}
+					if (!latestTranscriptMatchesSegmentIds(latestTranscript, errorTranscriptSegmentIds)) {
+						return current;
+					}
+					if (latestTranscript.ideaBlockStatus === "failed") {
 						return current;
 					}
 					return {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getLatestTranscriptIdeaBlockStatusAfterUpdate } from "../src/lib/adminLatestTranscriptStatus.ts";
+import { getLatestTranscriptIdeaBlockStatusAfterUpdate, latestTranscriptMatchesSegmentIds } from "../src/lib/adminLatestTranscriptStatus.ts";
 
 test("ignores non-completion idea block updates", () => {
 	assert.equal(
@@ -18,6 +18,12 @@ test("ignores completion updates for an older transcript segment", () => {
 		),
 		"pending"
 	);
+});
+
+test("matches terminal updates only to their transcript segment when ids are present", () => {
+	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, ["segment-1"]), false);
+	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, ["segment-2"]), true);
+	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, []), true);
 });
 
 test("marks matching completion updates as generated or no idea", () => {
