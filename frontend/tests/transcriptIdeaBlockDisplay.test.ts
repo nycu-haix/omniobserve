@@ -65,6 +65,17 @@ test("links transcript lines only after a ready idea block exists", () => {
 	assert.equal(linkedLines[0]?.ideaBlockStatus, undefined);
 });
 
+test("preserves terminal transcript states when only duplicate text matches", () => {
+	const line = transcriptLine({ ideaBlockStatus: "no_idea" });
+	const blocks = [ideaBlock({ id: "duplicate-block", transcriptLineId: "original-t1" })];
+	const linkedLines = linkTranscriptLinesToReadyBlocks([line], blocks);
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "no_idea");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+	assert.equal(linkedLines[0]?.linkedBlockId, undefined);
+	assert.equal(linkedLines[0]?.ideaBlockStatus, "no_idea");
+});
+
 test("ignores deleted and public transcript matches", () => {
 	const privateLine = transcriptLine({ linkedBlockId: "deleted" });
 	const publicLine = transcriptLine({ id: "p1", source: "public" });

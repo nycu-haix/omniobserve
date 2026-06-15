@@ -20,6 +20,7 @@ import {
 	X
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getLatestTranscriptIdeaBlockStatusAfterUpdate, type LatestTranscriptIdeaBlockStatus } from "../lib/adminLatestTranscriptStatus";
 import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
@@ -131,6 +132,8 @@ interface IdeaBlocksUpdateMessage extends RealtimeMessage {
 	idea_blocks?: unknown;
 	duplicate_idea_blocks?: unknown;
 	generation_complete?: unknown;
+	transcript_segment_id?: unknown;
+	transcript_segment_ids?: unknown;
 }
 
 interface AudioTerminalErrorMessage extends RealtimeMessage {
@@ -175,7 +178,7 @@ interface LatestParticipantTranscript {
 	persisted: boolean;
 	receivedAt: string;
 	transcriptSegmentId: string | null;
-	ideaBlockStatus: "captured" | "pending" | "generated" | "no_idea" | "failed";
+	ideaBlockStatus: LatestTranscriptIdeaBlockStatus;
 }
 
 interface ChatMessageResponse {
@@ -471,6 +474,24 @@ function normalizeNumberValue(value: unknown, fallback: number) {
 function normalizeOptionalStringValue(value: unknown): string | null {
 	const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
 	return text || null;
+}
+
+function normalizeOptionalStringValues(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+	value.forEach(item => {
+		const text = normalizeOptionalStringValue(item);
+		if (!text || seen.has(text)) {
+			return;
+		}
+		seen.add(text);
+		normalized.push(text);
+	});
+	return normalized;
 }
 
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {
@@ -1162,21 +1183,31 @@ export function AdminPage() {
 
 		if (isIdeaBlocksUpdateMessage(message)) {
 			const ideaBlockItems = Array.isArray(message.idea_blocks) ? message.idea_blocks : [];
-			const duplicateIdeaBlockItems = Array.isArray(message.duplicate_idea_blocks) ? message.duplicate_idea_blocks : [];
 			const participantId = normalizeOptionalStringValue(message.participant_id);
 			const nextBlocks = ideaBlockItems.map(item => normalizeWsIdeaBlock(item, participantId ?? undefined)).filter((item): item is IdeaBlockRecord => item !== null);
 			setIdeaBlocks(current => upsertById(current, nextBlocks));
-			if (participantId && (message.generation_complete === true || ideaBlockItems.length > 0 || duplicateIdeaBlockItems.length > 0)) {
+			if (participantId && message.generation_complete === true) {
+				const completionTranscriptSegmentIds = [normalizeOptionalStringValue(message.transcript_segment_id), ...normalizeOptionalStringValues(message.transcript_segment_ids)].filter(
+					(id): id is string => !!id
+				);
 				setLatestTranscripts(current => {
 					const latestTranscript = current[participantId];
 					if (!latestTranscript) {
+						return current;
+					}
+					const ideaBlockStatus = getLatestTranscriptIdeaBlockStatusAfterUpdate(latestTranscript, {
+						generationComplete: message.generation_complete === true,
+						ideaBlockCount: ideaBlockItems.length,
+						transcriptSegmentIds: completionTranscriptSegmentIds
+					});
+					if (ideaBlockStatus === latestTranscript.ideaBlockStatus) {
 						return current;
 					}
 					return {
 						...current,
 						[participantId]: {
 							...latestTranscript,
-							ideaBlockStatus: ideaBlockItems.length > 0 ? "generated" : "no_idea"
+							ideaBlockStatus
 						}
 					};
 				});

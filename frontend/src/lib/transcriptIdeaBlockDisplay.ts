@@ -14,9 +14,17 @@ function blockTranscriptIds(block: IdeaBlock): string[] {
 	return [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
 }
 
-function blockMatchesTranscriptLine(block: IdeaBlock, line: TranscriptLine): boolean {
+function isTerminalTranscriptIdeaBlockStatus(line: TranscriptLine): boolean {
+	return line.ideaBlockStatus === "no_idea" || line.ideaBlockStatus === "failed";
+}
+
+function blockMatchesTranscriptLine(block: IdeaBlock, line: TranscriptLine, options: { allowTextMatch?: boolean } = {}): boolean {
 	if (blockTranscriptIds(block).some(transcriptId => transcriptId === line.id)) {
 		return true;
+	}
+
+	if (options.allowTextMatch === false) {
+		return false;
 	}
 
 	const transcriptText = block.transcript?.trim();
@@ -35,7 +43,7 @@ export function getTranscriptIdeaBlockTargetId(line: TranscriptLine, blocks: Ide
 		}
 	}
 
-	const matchingReadyBlock = blocks.find(block => isReadyIdeaBlock(block) && blockMatchesTranscriptLine(block, line));
+	const matchingReadyBlock = blocks.find(block => isReadyIdeaBlock(block) && blockMatchesTranscriptLine(block, line, { allowTextMatch: !isTerminalTranscriptIdeaBlockStatus(line) }));
 	return matchingReadyBlock?.id ?? null;
 }
 
