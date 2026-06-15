@@ -17,7 +17,8 @@ from ..task_config.registry import normalize_task_name
 from ..utils import utc_now
 from .asr import transcribe_ws_chunk
 from .board_payloads import serialize_frontend_board_idea_block, serialize_frontend_board_idea_block_update
-from .participant_status import mark_audio_disconnected, update_audio_status
+from .participant_roles import is_audio_transcription_role, list_session_participant_roles
+from .participant_status import get_cached_participant_role, mark_audio_disconnected, sync_participant_roles, update_audio_status
 from .realtime import board_manager, broadcast_admin_idea_blocks_update, broadcast_admin_transcript, broadcast_presence_state, broadcast_public_transcript_line
 from .transcript_pipeline import handle_transcript_segment, serialize_idea_blocks, serialize_pipeline_result
 from .transcripts import save_ws_transcript_segment
@@ -31,6 +32,32 @@ def _resolve_stream_task_name(session_name: str, task_name: str | None) -> str:
     if task_name is not None:
         return normalize_task_name(task_name)
     return resolve_task_id(session_name=session_name)
+
+
+async def _sync_cached_participant_roles(db: Any, session_name: str) -> None:
+    sync_participant_roles(
+        session_name,
+        await list_session_participant_roles(db, session_name=session_name),
+    )
+
+
+def _participant_audio_transcription_role(session_name: str, participant_id: str) -> str:
+    return get_cached_participant_role(session_name, participant_id)
+
+
+def _is_audio_transcription_enabled(session_name: str, participant_id: str) -> bool:
+    return is_audio_transcription_role(_participant_audio_transcription_role(session_name, participant_id))
+
+
+def _transcription_disabled_payload(session_name: str, participant_id: str, *, scope: str | None = None) -> dict[str, Any]:
+    return {
+        "type": "transcription_disabled",
+        "reason": "role_excluded_from_asr",
+        "session_name": session_name,
+        "participant_id": participant_id,
+        "participant_role": _participant_audio_transcription_role(session_name, participant_id),
+        "scope": scope,
+    }
 
 
 def _bounded_stream_seconds(value: float, *, default: float, minimum: float) -> float:
@@ -314,11 +341,22 @@ async def handle_audio_stream_websocket(
     last_sent_live_text = ""
     final_transcript_saved = False
     stop_received = False
+    transcription_disabled_notified = False
     silence_start_at: datetime | None = None
     segment_started_at: datetime | None = None
     segment_index = 0
 
     async with SessionLocal() as db:
+
+        async def notify_transcription_disabled(scope: str | None = None) -> None:
+            nonlocal transcription_disabled_notified
+            if transcription_disabled_notified:
+                return
+            transcription_disabled_notified = True
+            await send_ws_json_safe(
+                websocket,
+                _transcription_disabled_payload(session_name, participant_id, scope=scope),
+            )
 
         def sample_timestamp(sample_index: int) -> datetime:
             if stream_context is None or first_audio_received_at is None:
@@ -366,8 +404,21 @@ async def handle_audio_stream_websocket(
             )
 
         async def process_audio_buffer(force: bool) -> None:
-            nonlocal int16_buffer, next_window_start_sample, merged_transcript_text, last_sent_live_text
+            nonlocal buffer_start_sample, int16_buffer, next_window_start_sample, merged_transcript_text, last_sent_live_text
             if stream_context is None:
+                return
+            if not _is_audio_transcription_enabled(session_name, participant_id):
+                logger.info(
+                    "audio stream ASR skipped for excluded role session_name=%s participant_id=%s participant_role=%s buffered_samples=%s",
+                    session_name,
+                    participant_id,
+                    _participant_audio_transcription_role(session_name, participant_id),
+                    int16_buffer.size,
+                )
+                await notify_transcription_disabled(stream_context.scope.value)
+                int16_buffer = np.empty(0, dtype=np.int16)
+                buffer_start_sample = total_samples_received
+                next_window_start_sample = total_samples_received
                 return
             if first_audio_received_at is None or int16_buffer.size == 0:
                 return
@@ -423,6 +474,11 @@ async def handle_audio_stream_websocket(
             if final_transcript_saved:
                 return transcript_segments[-1] if transcript_segments else None
 
+            if stream_context is not None and not _is_audio_transcription_enabled(session_name, participant_id):
+                final_transcript_saved = True
+                await notify_transcription_disabled(stream_context.scope.value)
+                return None
+
             await process_audio_buffer(force=True)
             final_text = merged_transcript_text.strip()
             final_transcript_saved = True
@@ -451,6 +507,14 @@ async def handle_audio_stream_websocket(
         async def finalize_silence_segment() -> StreamTranscript | None:
             nonlocal merged_transcript_text, last_sent_live_text, next_window_start_sample
             nonlocal silence_start_at, segment_started_at, segment_index
+
+            if stream_context is not None and not _is_audio_transcription_enabled(session_name, participant_id):
+                merged_transcript_text = ""
+                last_sent_live_text = ""
+                silence_start_at = None
+                segment_started_at = None
+                await notify_transcription_disabled(stream_context.scope.value)
+                return None
 
             await process_audio_buffer(force=True)
             final_text = merged_transcript_text.strip()
@@ -519,10 +583,13 @@ async def handle_audio_stream_websocket(
         try:
             first_message = await websocket.receive_text()
             stream_context = parse_stream_start_message(first_message, expected_session_name=session_name)
+            await _sync_cached_participant_roles(db, session_name)
             logger.info(
-                "Audio stream started session_name=%s participant_id=%s encoding=%s sample_rate=%s channels=%s",
+                "Audio stream started session_name=%s participant_id=%s participant_role=%s transcription_enabled=%s encoding=%s sample_rate=%s channels=%s",
                 session_name,
                 participant_id,
+                _participant_audio_transcription_role(session_name, participant_id),
+                _is_audio_transcription_enabled(session_name, participant_id),
                 stream_context.encoding,
                 stream_context.sample_rate,
                 stream_context.channels,
@@ -576,6 +643,11 @@ async def handle_audio_stream_websocket(
                     if int16_array.size == 0:
                         continue
 
+                    if not _is_audio_transcription_enabled(session_name, participant_id):
+                        total_samples_received += int16_array.size
+                        await notify_transcription_disabled(stream_context.scope.value)
+                        continue
+
                     if first_audio_received_at is None:
                         first_audio_received_at = utc_now()
 
@@ -620,6 +692,25 @@ async def handle_audio_stream_websocket(
 
                 if payload.get("type") == "stop":
                     stop_received = True
+                    if stream_context is not None and not _is_audio_transcription_enabled(session_name, participant_id):
+                        await notify_transcription_disabled(stream_context.scope.value)
+                        await send_ws_json_safe(
+                            websocket,
+                            {
+                                "type": "idea_blocks_update",
+                                "idea_blocks": [],
+                                "duplicate_idea_blocks": [],
+                                "scope": stream_context.scope.value,
+                                "participant_id": participant_id,
+                                "transcript_segment_id": None,
+                                "transcript_segment_ids": [],
+                                "client_segment_id": None,
+                                "generation_complete": False,
+                            },
+                        )
+                        await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                        await close_ws_safe(websocket)
+                        return
                     saved_final_segment = await finalize_stream_transcript()
                     completed_transcript_segment_ids = _transcript_segment_ids(transcript_segments)
                     pipeline_result = None
@@ -844,8 +935,21 @@ async def handle_transcript_segments_websocket(
     )
 
     batch_key = (session_name, participant_id)
+    transcription_disabled_notified = False
 
     async with SessionLocal() as db:
+        await _sync_cached_participant_roles(db, session_name)
+
+        async def notify_transcription_disabled(scope: str | None = None) -> None:
+            nonlocal transcription_disabled_notified
+            if transcription_disabled_notified:
+                return
+            transcription_disabled_notified = True
+            await send_ws_json_safe(
+                websocket,
+                _transcription_disabled_payload(session_name, participant_id, scope=scope),
+            )
+
         try:
             while True:
                 payload = await websocket.receive_json()
@@ -879,6 +983,45 @@ async def handle_transcript_segments_websocket(
                 visibility = _normalize_visibility(payload.get("scope") or payload.get("visibility") or "private")
                 retranscribed_final = payload.get("retranscribedFinal") is True
                 client_segment_id = str(payload.get("client_segment_id") or "").strip()
+                if not _is_audio_transcription_enabled(session_name, participant_id):
+                    async with _pending_transcript_batch_locks[batch_key]:
+                        _pending_transcript_batch_texts.pop(batch_key, None)
+                        _pending_transcript_batch_client_ids.pop(batch_key, None)
+                    logger.info(
+                        "pipeline_ws_transcript_skipped_for_excluded_role session_name=%s participant_id=%s participant_role=%s visibility=%s reason=%s",
+                        session_name,
+                        participant_id,
+                        _participant_audio_transcription_role(session_name, participant_id),
+                        visibility.value,
+                        reason or "unknown",
+                    )
+                    await notify_transcription_disabled(visibility.value)
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "idea_blocks_update",
+                            "idea_blocks": [],
+                            "duplicate_idea_blocks": [],
+                            "scope": visibility.value,
+                            "participant_id": participant_id,
+                            "transcript_segment_id": None,
+                            "transcript_segment_ids": [],
+                            "client_segment_id": client_segment_id or None,
+                            "generation_complete": False,
+                        },
+                    )
+                    await send_ws_json_safe(websocket, {"type": "task_items_update", "task_items": []})
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "transcript_segments_stopped",
+                            "reason": "role_excluded_from_asr",
+                            "participant_id": participant_id,
+                            "scope": visibility.value,
+                        },
+                    )
+                    await close_ws_safe(websocket)
+                    return
                 if not text:
                     logger.info(
                         "pipeline_ws_skip_empty_transcript session_name=%s participant_id=%s reason=%s",

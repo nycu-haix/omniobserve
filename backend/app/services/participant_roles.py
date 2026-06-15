@@ -24,6 +24,10 @@ NON_ANALYSIS_PARTICIPANT_ROLES = {
     FACILITATOR_ROLE,
     TEST_ROLE,
 }
+AUDIO_TRANSCRIPTION_ROLES = {
+    PARTICIPANT_ROLE,
+    CONFEDERATE_ROLE,
+}
 PARTICIPANT_ROLE_ALIASES = {
     "nonparticipant": OBSERVER_ROLE,
     "non-participant": OBSERVER_ROLE,
@@ -68,6 +72,13 @@ def is_participant_analysis_role(value: Any) -> bool:
 def is_non_analysis_participant_role(value: Any) -> bool:
     try:
         return normalize_participant_role(value) in NON_ANALYSIS_PARTICIPANT_ROLES
+    except ApiError:
+        return False
+
+
+def is_audio_transcription_role(value: Any) -> bool:
+    try:
+        return normalize_participant_role(value) in AUDIO_TRANSCRIPTION_ROLES
     except ApiError:
         return False
 

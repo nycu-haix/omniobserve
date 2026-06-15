@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { normalizePresenceParticipantsPayload, type ParticipantPresence } from "../lib/presenceParticipants";
 
 function getWsBaseUrl() {
 	const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -7,6 +8,7 @@ function getWsBaseUrl() {
 
 export function usePresenceWebSocket(sessionId: string, participantId?: string, displayName?: string) {
 	const [isConnected, setIsConnected] = useState(false);
+	const [participants, setParticipants] = useState<ParticipantPresence[]>([]);
 	const retryCountRef = useRef(0);
 	const retryTimerRef = useRef<number | null>(null);
 	const socketRef = useRef<WebSocket | null>(null);
@@ -37,6 +39,7 @@ export function usePresenceWebSocket(sessionId: string, participantId?: string, 
 
 			socket.onclose = () => {
 				setIsConnected(false);
+				setParticipants([]);
 				if (!disposed && retryCountRef.current < 5) {
 					retryCountRef.current += 1;
 					retryTimerRef.current = window.setTimeout(connect, 3000);
@@ -45,6 +48,20 @@ export function usePresenceWebSocket(sessionId: string, participantId?: string, 
 
 			socket.onerror = () => {
 				socket.close();
+			};
+
+			socket.onmessage = event => {
+				if (typeof event.data !== "string") {
+					return;
+				}
+				try {
+					const message = JSON.parse(event.data) as { type?: unknown; participants?: unknown; participant_ids?: unknown };
+					if (message.type === "presence_state") {
+						setParticipants(normalizePresenceParticipantsPayload(message));
+					}
+				} catch {
+					// Ignore malformed presence payloads; the socket retry path handles disconnects.
+				}
 			};
 		};
 
@@ -57,8 +74,9 @@ export function usePresenceWebSocket(sessionId: string, participantId?: string, 
 			}
 			socketRef.current?.close();
 			socketRef.current = null;
+			setParticipants([]);
 		};
 	}, [displayName, participantId, sessionId]);
 
-	return { isConnected };
+	return { isConnected, participants };
 }

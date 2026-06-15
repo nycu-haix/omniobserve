@@ -6,10 +6,12 @@ import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, K
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
+import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperimentSpaceShortcut } from "../lib/keyboardShortcuts";
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
+import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
 import {
 	DEFAULT_SESSION_PHASE,
 	getSessionPhaseLabel,
@@ -978,8 +980,10 @@ export default function MeetingRoom() {
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
+	const { participants: presenceParticipants } = usePresenceWebSocket(sessionId, connectionParticipantId, displayName);
+	const participantTranscriptionEnabled = useMemo(() => getParticipantTranscriptionEnabled(presenceParticipants, connectionParticipantId), [presenceParticipants, connectionParticipantId]);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
-	const { startAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
+	const { startAudioStream, stopAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName, participantTranscriptionEnabled);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
@@ -1107,10 +1111,15 @@ export default function MeetingRoom() {
 			const shouldRetryCurrentMode = micMode === mode && hasAudioConnectionError;
 			const nextMode = shouldRetryCurrentMode ? mode : mode;
 
+			if (participantTranscriptionEnabled !== true) {
+				await startAudioStream(nextMode);
+				return;
+			}
+
 			setMicMode(nextMode);
 			await startAudioStream(nextMode);
 		},
-		[hasAudioConnectionError, micMode, startAudioStream]
+		[hasAudioConnectionError, micMode, participantTranscriptionEnabled, startAudioStream]
 	);
 
 	const handleAudioReconnect = useCallback(() => {
@@ -1122,7 +1131,7 @@ export default function MeetingRoom() {
 	}, [handleMic, micMode]);
 
 	useEffect(() => {
-		if (!connectionParticipantId || joinRejectedMessage) {
+		if (!connectionParticipantId || joinRejectedMessage || participantTranscriptionEnabled !== true) {
 			return;
 		}
 
@@ -1134,7 +1143,18 @@ export default function MeetingRoom() {
 		autoStartedMicKeyRef.current = autoStartKey;
 		setMicMode("private");
 		void startAudioStream("private");
-	}, [connectionParticipantId, joinRejectedMessage, sessionId, startAudioStream]);
+	}, [connectionParticipantId, joinRejectedMessage, participantTranscriptionEnabled, sessionId, startAudioStream]);
+
+	useEffect(() => {
+		if (participantTranscriptionEnabled !== false) {
+			return;
+		}
+		const timer = window.setTimeout(() => {
+			setMicMode("private");
+			void stopAudioStream();
+		}, 0);
+		return () => window.clearTimeout(timer);
+	}, [participantTranscriptionEnabled, stopAudioStream]);
 
 	useEffect(() => {
 		const handleMicShortcutKeyDown = (event: KeyboardEvent) => {

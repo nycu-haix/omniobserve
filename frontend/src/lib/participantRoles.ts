@@ -13,6 +13,7 @@ const PARTICIPANT_ROLE_ALIASES = new Map<string, ParticipantRole>([
 	["mock-participant", "test"],
 	["test-client", "test"]
 ]);
+const AUDIO_TRANSCRIPTION_ROLES = new Set<ParticipantRole>(["participant", "confederate"]);
 
 export function normalizeParticipantRole(value: unknown): ParticipantRole {
 	const role = String(value || "participant")
@@ -35,6 +36,10 @@ export function isParticipantAnalysisRole(value: unknown): boolean {
 export function isAdminRankingRole(value: unknown): boolean {
 	const role = normalizeParticipantRole(value);
 	return role === "participant" || role === "confederate";
+}
+
+export function isAudioTranscriptionRole(value: unknown): boolean {
+	return AUDIO_TRANSCRIPTION_ROLES.has(normalizeParticipantRole(value));
 }
 
 export function isAdminParticipantId(participantId: string | number | null | undefined): boolean {

@@ -242,6 +242,19 @@ async def create_frontend_board_block(
     return {"accepted": True, "generated_count": len(idea_blocks)}
 
 
+def _session_active_participant_ids(session_name: str) -> list[str]:
+    return sorted(
+        {
+            *presence_manager.get_participants(session_name),
+            *board_manager.get_participants(session_name),
+        }
+    )
+
+
+def _session_presence_diagnostic_participant_ids(session_name: str, participant_roles: dict[str, str]) -> list[str]:
+    return sorted({*_session_active_participant_ids(session_name), *participant_roles.keys()})
+
+
 @router.get(
     "/api/sessions/{session_name}/presence",
     summary="Get Session Presence",
@@ -251,20 +264,16 @@ async def get_session_presence(
     session_name: str,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    participant_ids = sorted(
-        {
-            *presence_manager.get_participants(session_name),
-            *board_manager.get_participants(session_name),
-        }
-    )
-
     participant_roles = await list_session_participant_roles(db, session_name=session_name)
+    participant_ids = _session_active_participant_ids(session_name)
+    diagnostic_participant_ids = _session_presence_diagnostic_participant_ids(session_name, participant_roles)
+
     sync_participant_roles(session_name, participant_roles)
 
     return {
         "session_name": session_name,
         "participant_ids": participant_ids,
-        "participants": get_participant_presence(session_name, participant_ids, participant_roles),
+        "participants": get_participant_presence(session_name, diagnostic_participant_ids, participant_roles),
     }
 
 
