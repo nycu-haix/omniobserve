@@ -16,6 +16,7 @@ import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
+import { clearPendingTranscriptLinesIdeaBlockStatus, getIdeaBlockTranscriptLineIdsForBlockIds, markTranscriptLinesIdeaBlockStatus } from "../../lib/transcriptLineIdeaBlockStatus";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -872,44 +873,6 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 				: item
 		)
 	);
-}
-
-function ideaBlockTranscriptLineIds(block: IdeaBlock): string[] {
-	return [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
-}
-
-function getIdeaBlockTranscriptLineIdsForBlockIds(blocks: IdeaBlock[], blockIds: Set<string>): Set<string> {
-	const transcriptLineIds = new Set<string>();
-	blocks.forEach(block => {
-		if (!blockIds.has(block.id)) {
-			return;
-		}
-		ideaBlockTranscriptLineIds(block).forEach(transcriptLineId => transcriptLineIds.add(transcriptLineId));
-	});
-	return transcriptLineIds;
-}
-
-function markTranscriptLinesIdeaBlockStatus(lines: TranscriptLineType[], transcriptLineIds: Set<string>, ideaBlockStatus: TranscriptLineType["ideaBlockStatus"]): TranscriptLineType[] {
-	if (transcriptLineIds.size === 0) {
-		return lines;
-	}
-
-	let didChange = false;
-	const nextLines = lines.map(line => {
-		if (line.source !== "private" || !transcriptLineIds.has(line.id)) {
-			return line;
-		}
-		if (line.ideaBlockStatus === ideaBlockStatus && !line.linkedBlockId) {
-			return line;
-		}
-		didChange = true;
-		return {
-			...line,
-			linkedBlockId: undefined,
-			ideaBlockStatus
-		};
-	});
-	return didChange ? nextLines : lines;
 }
 
 function mergeTranscriptLines(baseLines: TranscriptLineType[], nextLines: TranscriptLineType[]): TranscriptLineType[] {
@@ -1891,6 +1854,17 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		return !!current.segmentKey && segmentKeys.includes(current.segmentKey);
 	}, []);
 
+	const getTranscriptLineIdsForDraftKeys = useCallback((segmentKeys: string[]) => {
+		const transcriptLineIds = new Set<string>();
+		segmentKeys.forEach(segmentKey => {
+			const draft = activeTranscriptDraftsRef.current.get(segmentKey);
+			if (draft?.id) {
+				transcriptLineIds.add(draft.id);
+			}
+		});
+		return transcriptLineIds;
+	}, []);
+
 	const removeVoiceGeneratingBlocksByIds = useCallback(
 		(blockIds: Set<string>) => {
 			if (blockIds.size === 0) {
@@ -1913,14 +1887,20 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	);
 
 	const clearAllVoiceGeneratingBlocks = useCallback(() => {
+		const segmentKeys = Array.from(voiceGeneratingBlocksRef.current.keys());
 		const blockIds = new Set<string>();
 		for (const segmentBlockIds of voiceGeneratingBlocksRef.current.values()) {
 			segmentBlockIds.forEach(blockId => blockIds.add(blockId));
 		}
+		const transcriptLineIds = getIdeaBlockTranscriptLineIdsForBlockIds(ideaBlocksRef.current, blockIds);
+		getTranscriptLineIdsForDraftKeys(segmentKeys).forEach(transcriptLineId => transcriptLineIds.add(transcriptLineId));
+		if (transcriptLineIds.size > 0) {
+			setTranscriptLines(prev => clearPendingTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds));
+		}
 		voiceGeneratingBlocksRef.current.clear();
 		removeVoiceGeneratingBlocksByIds(blockIds);
 		setWhisperTransient({ status: "idle", text: "" });
-	}, [removeVoiceGeneratingBlocksByIds]);
+	}, [getTranscriptLineIdsForDraftKeys, removeVoiceGeneratingBlocksByIds]);
 
 	const markTranscriptIdeaBlockStatusByLineIds = useCallback((transcriptLineIds: Set<string>, ideaBlockStatus: TranscriptLineType["ideaBlockStatus"]) => {
 		setTranscriptLines(prev => markTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds, ideaBlockStatus));
@@ -1932,17 +1912,6 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			return;
 		}
 		setTranscriptLines(prev => markTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds, ideaBlockStatus));
-	}, []);
-
-	const getTranscriptLineIdsForDraftKeys = useCallback((segmentKeys: string[]) => {
-		const transcriptLineIds = new Set<string>();
-		segmentKeys.forEach(segmentKey => {
-			const draft = activeTranscriptDraftsRef.current.get(segmentKey);
-			if (draft?.id) {
-				transcriptLineIds.add(draft.id);
-			}
-		});
-		return transcriptLineIds;
 	}, []);
 
 	const scheduleVoiceGeneratingTimeout = useCallback(
