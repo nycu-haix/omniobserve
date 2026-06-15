@@ -1,6 +1,14 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { UIEvent } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	activeCompletionTargetKey,
+	completionTargetKeys,
+	completionTargetSegmentIds,
+	completionTargetSource,
+	completionTargetUserId,
+	matchingDraftCompletionTargetKeys
+} from "../../lib/audioCompletionTargets";
 import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
 import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
@@ -916,53 +924,6 @@ function audioTranscriptDraftSegmentId(message: AudioDraftTargetMessage): string
 
 function transcriptDraftTargetKey(message: AudioDraftTargetMessage, line: TranscriptLineType, participantId: string): string {
 	return [line.source ?? "unknown", line.userId ?? participantId, audioTranscriptDraftSegmentId(message) ?? "active"].join("|");
-}
-
-function appendAudioCompletionSegmentIds(segmentIds: Set<string>, values: Array<string | number | null> | null | undefined): void {
-	if (!Array.isArray(values)) {
-		return;
-	}
-
-	values.forEach(value => {
-		if (value == null) {
-			return;
-		}
-		const segmentId = String(value).trim();
-		if (segmentId) {
-			segmentIds.add(segmentId);
-		}
-	});
-}
-
-function addAudioCompletionSegmentId(segmentIds: Set<string>, value: string | number | null | undefined): void {
-	if (value == null) {
-		return;
-	}
-	const segmentId = String(value).trim();
-	if (segmentId) {
-		segmentIds.add(segmentId);
-	}
-}
-
-function completionTargetKeys(message: IdeaBlockCompletionTargetFields, participantId: string): string[] {
-	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
-	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
-	const segmentIds = new Set<string>();
-	appendAudioCompletionSegmentIds(segmentIds, message.replace_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.client_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.transcript_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.segment_ids);
-	addAudioCompletionSegmentId(segmentIds, message.replace_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.client_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.transcript_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.segment_id);
-	return Array.from(segmentIds, segmentId => [source, String(userId), segmentId].join("|"));
-}
-
-function activeCompletionTargetKey(message: IdeaBlockCompletionTargetFields, participantId: string): string {
-	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
-	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
-	return [source, String(userId), "active"].join("|");
 }
 
 function isUnpersistedTranscriptDraftId(id: string): boolean {
@@ -1901,12 +1862,19 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const resolveActiveCompletionSegmentKeys = useCallback(
 		(message: IdeaBlockCompletionTargetFields) => {
 			const baseCompletionSegmentKeys = completionTargetKeys(message, participantId);
+			const draftCompletionSegmentKeys = matchingDraftCompletionTargetKeys({
+				drafts: activeTranscriptDraftsRef.current.entries(),
+				segmentIds: completionTargetSegmentIds(message),
+				source: completionTargetSource(message),
+				userId: completionTargetUserId(message, participantId)
+			});
+			const completionSegmentKeys = [...new Set([...baseCompletionSegmentKeys, ...draftCompletionSegmentKeys])];
 			const activeCompletionKey = activeCompletionTargetKey(message, participantId);
-			const hasMatchingCompletionKey = baseCompletionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
+			const hasMatchingCompletionKey = completionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
 			if (!hasMatchingCompletionKey && activeCompletionKey && voiceGeneratingBlocksRef.current.has(activeCompletionKey)) {
-				return [...baseCompletionSegmentKeys, activeCompletionKey];
+				return [...completionSegmentKeys, activeCompletionKey];
 			}
-			return baseCompletionSegmentKeys;
+			return completionSegmentKeys;
 		},
 		[participantId]
 	);
