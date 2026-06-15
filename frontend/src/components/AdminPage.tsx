@@ -20,7 +20,12 @@ import {
 	X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { getLatestTranscriptIdeaBlockStatusAfterUpdate, latestTranscriptMatchesSegmentIds, type LatestTranscriptIdeaBlockStatus } from "../lib/adminLatestTranscriptStatus";
+import {
+	getInitialLatestTranscriptIdeaBlockStatus,
+	getLatestTranscriptIdeaBlockStatusAfterUpdate,
+	latestTranscriptMatchesSegmentIds,
+	type LatestTranscriptIdeaBlockStatus
+} from "../lib/adminLatestTranscriptStatus";
 import { buildPublicNowLabel } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
@@ -1174,7 +1179,10 @@ export function AdminPage() {
 					persisted: message.persisted === true,
 					receivedAt,
 					transcriptSegmentId: normalizeOptionalStringValue(message.transcript_segment_id ?? transcriptId),
-					ideaBlockStatus: scope === "private" && (message.is_final === true || message.persisted === true) ? "pending" : "captured"
+					ideaBlockStatus: getInitialLatestTranscriptIdeaBlockStatus({
+						scope,
+						persisted: message.persisted === true
+					})
 				}
 			}));
 		}

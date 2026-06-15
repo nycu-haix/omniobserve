@@ -11,6 +11,15 @@ export interface LatestTranscriptIdeaBlockStatusUpdate {
 	transcriptSegmentIds: string[];
 }
 
+export interface LatestTranscriptInitialStatusInput {
+	scope: string;
+	persisted: boolean;
+}
+
+export function getInitialLatestTranscriptIdeaBlockStatus(input: LatestTranscriptInitialStatusInput): LatestTranscriptIdeaBlockStatus {
+	return input.scope === "private" && input.persisted ? "pending" : "captured";
+}
+
 export function latestTranscriptMatchesSegmentIds(current: LatestTranscriptIdeaBlockStatusState, transcriptSegmentIds: string[]): boolean {
 	if (transcriptSegmentIds.length === 0) {
 		return true;

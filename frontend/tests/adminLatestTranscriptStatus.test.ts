@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getLatestTranscriptIdeaBlockStatusAfterUpdate, latestTranscriptMatchesSegmentIds } from "../src/lib/adminLatestTranscriptStatus.ts";
+import { getInitialLatestTranscriptIdeaBlockStatus, getLatestTranscriptIdeaBlockStatusAfterUpdate, latestTranscriptMatchesSegmentIds } from "../src/lib/adminLatestTranscriptStatus.ts";
+
+test("marks only persisted private transcripts as initially pending", () => {
+	assert.equal(getInitialLatestTranscriptIdeaBlockStatus({ scope: "private", persisted: true }), "pending");
+	assert.equal(getInitialLatestTranscriptIdeaBlockStatus({ scope: "private", persisted: false }), "captured");
+	assert.equal(getInitialLatestTranscriptIdeaBlockStatus({ scope: "public", persisted: true }), "captured");
+});
 
 test("ignores non-completion idea block updates", () => {
 	assert.equal(
