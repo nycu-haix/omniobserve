@@ -238,6 +238,14 @@ async def send_similarity_idea_blocks_update(websocket: WebSocket, *, session_na
     )
 
 
+def _is_completed_private_generation(
+    scope: Visibility,
+    transcript_segments: list[Any],
+    pipeline_result: object | None,
+) -> bool:
+    return scope == Visibility.PRIVATE and bool(transcript_segments) and pipeline_result is not None
+
+
 async def send_provisional_idea_blocks_update(
     websocket: WebSocket,
     *,
@@ -774,6 +782,11 @@ async def handle_audio_stream_websocket(
                     last_segment_id = saved_final_segment.segment_id if saved_final_segment else None
                     last_text = saved_final_segment.text if saved_final_segment else merged_transcript_text.strip()
                     final_persisted = saved_final_segment is not None
+                    generation_complete = _is_completed_private_generation(
+                        stream_context.scope,
+                        transcript_segments,
+                        pipeline_result,
+                    )
                     await send_ws_json_safe(
                         websocket,
                         {
@@ -815,7 +828,7 @@ async def handle_audio_stream_websocket(
                             "transcript_segment_id": last_segment_id,
                             "transcript_segment_ids": completed_transcript_segment_ids,
                             "client_segment_id": None,
-                            "generation_complete": stream_context.scope == Visibility.PRIVATE and bool(transcript_segments),
+                            "generation_complete": generation_complete,
                         },
                     )
                     await broadcast_admin_idea_blocks_update(
@@ -828,8 +841,7 @@ async def handle_audio_stream_websocket(
                         transcript_segment_ids=completed_transcript_segment_ids,
                         client_segment_id=None,
                         client_segment_ids=[],
-                        generation_complete=stream_context.scope == Visibility.PRIVATE
-                        and bool(transcript_segments),
+                        generation_complete=generation_complete,
                     )
                     if pipeline_result is not None:
                         await send_board_idea_blocks_update(
