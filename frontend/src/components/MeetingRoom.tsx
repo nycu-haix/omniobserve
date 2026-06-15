@@ -12,16 +12,8 @@ import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperi
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
-import {
-	DEFAULT_SESSION_PHASE,
-	getSessionPhaseLabel,
-	isGroupPhase,
-	isPrivatePhase1,
-	isPrivatePhase2,
-	normalizeSessionPhase,
-	normalizeSessionPhaseOptions,
-	type SessionPhase
-} from "../lib/sessionPhase";
+import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, isPrivatePhase1, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
+import { createDefaultTaskPaneLayout, getTaskPaneContentAvailability, TASK_PANE_CONTENT_LABELS, type TaskPaneContent, type TaskPaneLeaf, type TaskPaneNode } from "../lib/taskPaneLayout";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
@@ -45,25 +37,6 @@ interface LostAtSeaItem {
 }
 
 type RankingScope = "public" | "private";
-type TaskPaneContent = "task-instructions" | "phase-task-items" | "private-ranking" | "public-ranking";
-type TaskSplitDirection = "horizontal" | "vertical";
-
-interface TaskPaneLeaf {
-	type: "leaf";
-	id: string;
-	content: TaskPaneContent;
-}
-
-interface TaskPaneSplit {
-	type: "split";
-	id: string;
-	direction: TaskSplitDirection;
-	ratio: number;
-	first: TaskPaneNode;
-	second: TaskPaneNode;
-}
-
-type TaskPaneNode = TaskPaneLeaf | TaskPaneSplit;
 
 const jitsiStatusLabels: Record<JitsiConnectionStatus, string> = {
 	loading: "連線中",
@@ -101,15 +74,7 @@ const JITSI_RESIZE_HANDLE_HEIGHT = 16;
 const MIC_CONTROLS_HEIGHT = 40;
 const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
-const MAX_TASK_PANES = 3;
-const MIN_TASK_PANE_RATIO = 24;
 const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
-const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
-	"task-instructions": "Task Instructions",
-	"phase-task-items": "Task Items",
-	"private-ranking": "Private Ranking",
-	"public-ranking": "Public Ranking"
-};
 const ITEM_DESCRIPTIONS: Record<string, string> = {
 	sextant: "航海上用來測量天體或地平線角度的儀器。",
 	shaving_mirror: "小型鏡子，通常用來刮鬍子或整理儀容。",
@@ -443,97 +408,6 @@ function createPhaseLayoutConfigById(phases: Array<{ id?: unknown; default_layou
 		}
 	});
 	return layoutsByPhase;
-}
-
-function createTaskPaneLeaf(content: TaskPaneContent): TaskPaneLeaf {
-	return {
-		type: "leaf",
-		id: `task-pane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		content
-	};
-}
-
-function isTaskPaneContent(value: unknown): value is TaskPaneContent {
-	return typeof value === "string" && value in TASK_PANE_CONTENT_LABELS;
-}
-
-function createTaskPaneLayoutFromConfig(config: TaskPaneLayoutConfig | undefined, phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneNode | null {
-	if (!config) {
-		return null;
-	}
-
-	if (config.type === "leaf") {
-		if (!isTaskPaneContent(config.content) || !getTaskPaneContentAvailability(config.content, phase, phase1BuilderEnabled)) {
-			return null;
-		}
-		return createTaskPaneLeaf(config.content);
-	}
-
-	if (config.type !== "split") {
-		return null;
-	}
-
-	const first = createTaskPaneLayoutFromConfig(config.first, phase, phase1BuilderEnabled);
-	const second = createTaskPaneLayoutFromConfig(config.second, phase, phase1BuilderEnabled);
-	if (!first || !second) {
-		return null;
-	}
-
-	const configuredLayout: TaskPaneSplit = {
-		type: "split",
-		id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		direction: config.direction === "vertical" ? "vertical" : "horizontal",
-		ratio: Math.min(Math.max(Number(config.ratio) || 50, MIN_TASK_PANE_RATIO), 100 - MIN_TASK_PANE_RATIO),
-		first,
-		second
-	};
-
-	return countTaskPaneLeaves(configuredLayout) <= MAX_TASK_PANES ? configuredLayout : null;
-}
-
-function createDefaultTaskPaneLayout(phase: SessionPhase, phase1BuilderEnabled = false, layoutConfig?: TaskPaneLayoutConfig): TaskPaneNode {
-	const configuredLayout = createTaskPaneLayoutFromConfig(layoutConfig, phase, phase1BuilderEnabled);
-	if (configuredLayout) {
-		return configuredLayout;
-	}
-
-	if (isGroupPhase(phase)) {
-		return {
-			type: "split",
-			id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-			direction: "horizontal",
-			ratio: 50,
-			first: createTaskPaneLeaf("public-ranking"),
-			second: createTaskPaneLeaf("private-ranking")
-		};
-	}
-
-	if (isPrivatePhase1(phase) && phase1BuilderEnabled) {
-		return createTaskPaneLeaf("phase-task-items");
-	}
-
-	if (isPrivatePhase2(phase)) {
-		return createTaskPaneLeaf("private-ranking");
-	}
-
-	return createTaskPaneLeaf("private-ranking");
-}
-
-function countTaskPaneLeaves(node: TaskPaneNode): number {
-	return node.type === "leaf" ? 1 : countTaskPaneLeaves(node.first) + countTaskPaneLeaves(node.second);
-}
-
-function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase, phase1BuilderEnabled = false): boolean {
-	if (content === "phase-task-items") {
-		return isPrivatePhase1(phase) && phase1BuilderEnabled;
-	}
-	if (content === "private-ranking") {
-		return !isPrivatePhase1(phase) || !phase1BuilderEnabled;
-	}
-	if (content === "public-ranking") {
-		return isGroupPhase(phase);
-	}
-	return true;
 }
 
 function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[]; change_count?: number } {

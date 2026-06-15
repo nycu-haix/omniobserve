@@ -280,19 +280,29 @@ PRIVATE_RANKING_LAYOUT = {
     "type": "leaf",
     "content": "private-ranking",
 }
+TASK_INSTRUCTIONS_LAYOUT = {
+    "type": "leaf",
+    "content": "task-instructions",
+}
 PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
     "ratio": 58,
-    "first": {"type": "leaf", "content": "private-ranking"},
-    "second": {"type": "leaf", "content": "task-instructions"},
+    "first": PRIVATE_RANKING_LAYOUT,
+    "second": TASK_INSTRUCTIONS_LAYOUT,
 }
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
-    "ratio": 50,
+    "ratio": 58,
     "first": {"type": "leaf", "content": "public-ranking"},
-    "second": {"type": "leaf", "content": "private-ranking"},
+    "second": {
+        "type": "split",
+        "direction": "vertical",
+        "ratio": 50,
+        "first": PRIVATE_RANKING_LAYOUT,
+        "second": TASK_INSTRUCTIONS_LAYOUT,
+    },
 }
 
 TASK_PHASES = [
