@@ -127,17 +127,8 @@ interface PresenceStateMessage extends RealtimeMessage {
 
 interface IdeaBlocksUpdateMessage extends RealtimeMessage {
 	type: "idea_blocks_update";
-	participant_id?: unknown;
+	participant_id?: string | number;
 	idea_blocks?: unknown;
-	duplicate_idea_blocks?: unknown;
-	generation_complete?: unknown;
-}
-
-interface AudioTerminalErrorMessage extends RealtimeMessage {
-	type: "transcript_error" | "pipeline_error" | "asr_error";
-	participant_id?: unknown;
-	user_id?: unknown;
-	userId?: unknown;
 }
 
 interface PublicContextComponentStateMessage extends RealtimeMessage {
@@ -199,8 +190,6 @@ interface LatestParticipantTranscript {
 	isFinal: boolean;
 	persisted: boolean;
 	receivedAt: string;
-	transcriptSegmentId: string | null;
-	ideaBlockStatus: "captured" | "pending" | "generated" | "no_idea" | "failed";
 }
 
 interface PublicNowDiagnostics {
@@ -280,20 +269,6 @@ const SIMILARITY_REASON_TAG_CLASSES: Record<SimilarityReasonKind, string> = {
 	same: "border-green-700/30 bg-green-100 text-green-900",
 	different: "border-yellow-700/30 bg-yellow-100 text-yellow-900",
 	mixed: "border-neutral-900/30 bg-[#ffeace] text-neutral-900"
-};
-const LATEST_TRANSCRIPT_STATUS_LABELS: Record<LatestParticipantTranscript["ideaBlockStatus"], string> = {
-	captured: "speech captured",
-	pending: "idea pending",
-	generated: "idea generated",
-	no_idea: "no new idea",
-	failed: "idea failed"
-};
-const LATEST_TRANSCRIPT_STATUS_CLASSES: Record<LatestParticipantTranscript["ideaBlockStatus"], string> = {
-	captured: "border-sky-200 bg-sky-50 text-sky-900",
-	pending: "border-slate-200 bg-slate-50 text-slate-800",
-	generated: "border-emerald-200 bg-emerald-50 text-emerald-900",
-	no_idea: "border-amber-200 bg-amber-50 text-amber-900",
-	failed: "border-destructive/30 bg-destructive/10 text-destructive"
 };
 const PARTICIPANT_ROLE_LABELS: Record<ParticipantRole, string> = {
 	participant: "Participant",
@@ -555,11 +530,7 @@ function isPresenceStateMessage(message: RealtimeMessage | null): message is Pre
 }
 
 function isIdeaBlocksUpdateMessage(message: RealtimeMessage | null): message is IdeaBlocksUpdateMessage {
-	return message?.type === "idea_blocks_update";
-}
-
-function isAudioTerminalErrorMessage(message: RealtimeMessage | null): message is AudioTerminalErrorMessage {
-	return message?.type === "transcript_error" || message?.type === "pipeline_error" || message?.type === "asr_error";
+	return message?.type === "idea_blocks_update" && Array.isArray(message.idea_blocks);
 }
 
 function isPublicContextComponentStateMessage(message: RealtimeMessage | null): message is PublicContextComponentStateMessage {
@@ -1218,7 +1189,6 @@ export function AdminPage() {
 			const transcriptText = message.text ?? "";
 			const transcriptId = message.transcript_segment_id ?? message.timestamp_ms ?? `${message.participant_id}-${receivedAt}`;
 			const timeStamp = typeof message.timestamp_ms === "number" ? new Date(message.timestamp_ms).toISOString() : new Date().toISOString();
-			const scope = typeof message.scope === "string" ? message.scope : "unknown";
 			const transcriptRecord: TranscriptRecord = {
 				id: transcriptId,
 				user_id: participantIdToNumber(message.participant_id),
@@ -1230,13 +1200,11 @@ export function AdminPage() {
 			setLatestTranscripts(current => ({
 				...current,
 				[message.participant_id]: {
-					scope,
+					scope: typeof message.scope === "string" ? message.scope : "unknown",
 					text: transcriptText.trim(),
 					isFinal: message.is_final === true,
 					persisted: message.persisted === true,
-					receivedAt,
-					transcriptSegmentId: normalizeOptionalStringValue(message.transcript_segment_id ?? transcriptId),
-					ideaBlockStatus: scope === "private" && (message.is_final === true || message.persisted === true) ? "pending" : "captured"
+					receivedAt
 				}
 			}));
 		}
@@ -1246,45 +1214,8 @@ export function AdminPage() {
 		}
 
 		if (isIdeaBlocksUpdateMessage(message)) {
-			const ideaBlockItems = Array.isArray(message.idea_blocks) ? message.idea_blocks : [];
-			const duplicateIdeaBlockItems = Array.isArray(message.duplicate_idea_blocks) ? message.duplicate_idea_blocks : [];
-			const participantId = normalizeOptionalStringValue(message.participant_id);
-			const nextBlocks = ideaBlockItems.map(item => normalizeWsIdeaBlock(item, participantId ?? undefined)).filter((item): item is IdeaBlockRecord => item !== null);
+			const nextBlocks = (message.idea_blocks as unknown[]).map(item => normalizeWsIdeaBlock(item, message.participant_id)).filter((item): item is IdeaBlockRecord => item !== null);
 			setIdeaBlocks(current => upsertById(current, nextBlocks));
-			if (participantId && (message.generation_complete === true || ideaBlockItems.length > 0 || duplicateIdeaBlockItems.length > 0)) {
-				setLatestTranscripts(current => {
-					const latestTranscript = current[participantId];
-					if (!latestTranscript) {
-						return current;
-					}
-					return {
-						...current,
-						[participantId]: {
-							...latestTranscript,
-							ideaBlockStatus: ideaBlockItems.length > 0 || duplicateIdeaBlockItems.length > 0 ? "generated" : "no_idea"
-						}
-					};
-				});
-			}
-		}
-
-		if (isAudioTerminalErrorMessage(message)) {
-			const participantId = normalizeOptionalStringValue(message.participant_id ?? message.user_id ?? message.userId);
-			if (participantId) {
-				setLatestTranscripts(current => {
-					const latestTranscript = current[participantId];
-					if (!latestTranscript) {
-						return current;
-					}
-					return {
-						...current,
-						[participantId]: {
-							...latestTranscript,
-							ideaBlockStatus: "failed"
-						}
-					};
-				});
-			}
 		}
 
 		if (message.type === "public_chat_message") {
@@ -2217,13 +2148,8 @@ export function AdminPage() {
 													{latestTranscript && (
 														<div className="mt-1 rounded-md bg-muted px-2 py-1.5 text-xs leading-5">
 															<div className="mb-1 flex items-center justify-between gap-2 text-muted-foreground">
-																<div className="flex min-w-0 items-center gap-1.5">
-																	<span className="shrink-0">{latestTranscript.scope}</span>
-																	<Badge variant="outline" className={cn("px-1.5 py-0 text-[10px]", LATEST_TRANSCRIPT_STATUS_CLASSES[latestTranscript.ideaBlockStatus])}>
-																		{LATEST_TRANSCRIPT_STATUS_LABELS[latestTranscript.ideaBlockStatus]}
-																	</Badge>
-																</div>
-																<span className="shrink-0">{latestTranscript.receivedAt}</span>
+																<span>{latestTranscript.scope}</span>
+																<span>{latestTranscript.receivedAt}</span>
 															</div>
 															<p className="line-clamp-3 whitespace-pre-wrap break-words text-foreground">{latestTranscript.text}</p>
 														</div>

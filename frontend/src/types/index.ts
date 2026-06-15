@@ -1,5 +1,4 @@
 export type IdeaBlockStatus = "generating" | "ready";
-export type TranscriptIdeaBlockProcessingStatus = "captured" | "pending" | "no_idea" | "failed";
 
 export interface IdeaBlock {
 	id: string;
@@ -46,7 +45,6 @@ export interface TranscriptLine {
 	isOwn?: boolean;
 	isDraft?: boolean;
 	linkedBlockId?: string;
-	ideaBlockStatus?: TranscriptIdeaBlockProcessingStatus;
 }
 
 export interface SimilarityPairCueData {

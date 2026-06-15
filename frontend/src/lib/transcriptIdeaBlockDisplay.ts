@@ -1,6 +1,6 @@
 import type { IdeaBlock, TranscriptLine } from "../types";
 
-export type TranscriptIdeaBlockStatus = "raw" | "captured" | "pending" | "linked" | "no_idea" | "failed";
+export type TranscriptIdeaBlockStatus = "raw" | "pending" | "linked";
 
 function isReadyIdeaBlock(block: IdeaBlock): boolean {
 	return block.status !== "generating" && !block.isDeleted;
@@ -49,11 +49,7 @@ export function getTranscriptIdeaBlockStatus(line: TranscriptLine, blocks: IdeaB
 	}
 
 	const matchingPendingBlock = blocks.find(block => isPendingIdeaBlock(block) && blockMatchesTranscriptLine(block, line));
-	if (matchingPendingBlock) {
-		return "pending";
-	}
-
-	return line.ideaBlockStatus ?? "raw";
+	return matchingPendingBlock ? "pending" : "raw";
 }
 
 export function linkTranscriptLinesToReadyBlocks<T extends TranscriptLine>(lines: T[], blocks: IdeaBlock[]): T[] {
@@ -73,15 +69,14 @@ export function linkTranscriptLinesToReadyBlocks<T extends TranscriptLine>(lines
 			};
 		}
 
-		if (line.linkedBlockId === targetBlockId && !line.ideaBlockStatus) {
+		if (line.linkedBlockId === targetBlockId) {
 			return line;
 		}
 
 		didChange = true;
 		return {
 			...line,
-			linkedBlockId: targetBlockId,
-			ideaBlockStatus: undefined
+			linkedBlockId: targetBlockId
 		};
 	});
 
