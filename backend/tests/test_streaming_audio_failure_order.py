@@ -52,6 +52,37 @@ class FakeAudioWebSocket:
         self.application_state = streaming.WebSocketState.DISCONNECTED
 
 
+class FakeTranscriptSegmentsWebSocket:
+    def __init__(self) -> None:
+        self._messages = [
+            {
+                "type": "transcript_segment",
+                "text": "gateway final speech",
+                "reason": "silence",
+                "scope": "private",
+                "start": 0,
+            },
+            {"type": "stop"},
+        ]
+        self.sent: list[dict] = []
+        self.client_state = streaming.WebSocketState.CONNECTED
+        self.application_state = streaming.WebSocketState.CONNECTED
+
+    async def accept(self) -> None:
+        return None
+
+    async def receive_json(self) -> dict:
+        if not self._messages:
+            raise streaming.WebSocketDisconnect()
+        return self._messages.pop(0)
+
+    async def send_json(self, payload: dict) -> None:
+        self.sent.append(payload)
+
+    async def close(self, code: int = 1000) -> None:
+        self.application_state = streaming.WebSocketState.DISCONNECTED
+
+
 class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
     async def run_private_audio_stop(self, handle_transcript_segment):
         websocket = FakeAudioWebSocket()
@@ -119,6 +150,65 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
 
         return websocket, admin_events
 
+    async def run_gateway_transcript_segment(self, handle_transcript_segment):
+        websocket = FakeTranscriptSegmentsWebSocket()
+        admin_events: list[dict] = []
+        original_logger_disabled = streaming.logger.disabled
+        originals = {
+            "SessionLocal": streaming.SessionLocal,
+            "_sync_cached_participant_roles": streaming._sync_cached_participant_roles,
+            "_is_audio_transcription_enabled": streaming._is_audio_transcription_enabled,
+            "save_ws_transcript_segment": streaming.save_ws_transcript_segment,
+            "handle_transcript_segment": streaming.handle_transcript_segment,
+            "broadcast_admin_transcript": streaming.broadcast_admin_transcript,
+            "broadcast_admin_idea_blocks_update": streaming.broadcast_admin_idea_blocks_update,
+            "broadcast_admin_terminal_error": streaming.broadcast_admin_terminal_error,
+            "send_board_idea_blocks_update": streaming.send_board_idea_blocks_update,
+        }
+
+        async def noop_sync_roles(db, session_name: str) -> None:
+            return None
+
+        async def fake_save_ws_transcript_segment(db, **kwargs) -> StreamTranscript:
+            return StreamTranscript(segment_id="84", text=kwargs["transcript_text"])
+
+        async def fake_broadcast_admin_transcript(session_name: str, **kwargs) -> None:
+            admin_events.append({"type": "transcript", **kwargs})
+
+        async def fake_broadcast_admin_idea_blocks_update(session_name: str, **kwargs) -> None:
+            admin_events.append({"type": "idea_blocks_update", **kwargs})
+
+        async def fake_broadcast_admin_terminal_error(session_name: str, *, error_type: str, **kwargs) -> None:
+            admin_events.append({"type": error_type, **kwargs})
+
+        async def fake_send_board_idea_blocks_update(**kwargs) -> None:
+            return None
+
+        try:
+            streaming.logger.disabled = True
+            streaming.SessionLocal = lambda: FakeSessionLocal()
+            streaming._sync_cached_participant_roles = noop_sync_roles
+            streaming._is_audio_transcription_enabled = lambda *args, **kwargs: True
+            streaming.save_ws_transcript_segment = fake_save_ws_transcript_segment
+            streaming.handle_transcript_segment = handle_transcript_segment
+            streaming.broadcast_admin_transcript = fake_broadcast_admin_transcript
+            streaming.broadcast_admin_idea_blocks_update = fake_broadcast_admin_idea_blocks_update
+            streaming.broadcast_admin_terminal_error = fake_broadcast_admin_terminal_error
+            streaming.send_board_idea_blocks_update = fake_send_board_idea_blocks_update
+
+            await streaming.handle_transcript_segments_websocket(
+                websocket,
+                session_name="session-gateway",
+                participant_id="7",
+                task_name="lost-at-sea",
+            )
+        finally:
+            streaming.logger.disabled = original_logger_disabled
+            for name, value in originals.items():
+                setattr(streaming, name, value)
+
+        return websocket, admin_events
+
     async def test_pipeline_failure_is_sent_after_final_transcript_and_before_stop_ack(self) -> None:
         pipeline_calls: list[dict] = []
 
@@ -173,6 +263,30 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admin_events[-1]["generation_complete"], True)
         self.assertEqual(admin_events[-1]["transcript_segment_ids"], ["42"])
         self.assertNotIn("pipeline_error", admin_types)
+
+    async def test_gateway_admin_transcript_precedes_completion_update(self) -> None:
+        pipeline_calls: list[dict] = []
+
+        async def empty_handle_transcript_segment(*args, **kwargs):
+            pipeline_calls.append(kwargs)
+            return PipelineResult(idea_blocks=[], task_items=[])
+
+        websocket, admin_events = await self.run_gateway_transcript_segment(empty_handle_transcript_segment)
+
+        self.assertEqual([call["transcript"].segment_id for call in pipeline_calls], ["84"])
+        self.assertEqual([call["is_final"] for call in pipeline_calls], [True])
+
+        participant_types = [message["type"] for message in websocket.sent]
+        self.assertIn("transcript_update", participant_types)
+        self.assertIn("idea_blocks_update", participant_types)
+
+        admin_types = [message["type"] for message in admin_events]
+        self.assertEqual(admin_types[-2:], ["transcript", "idea_blocks_update"])
+        self.assertEqual(admin_events[-2]["text"], "gateway final speech")
+        self.assertEqual(admin_events[-2]["transcript_segment_id"], "84")
+        self.assertEqual(admin_events[-2]["reason"], "silence")
+        self.assertEqual(admin_events[-1]["generation_complete"], True)
+        self.assertEqual(admin_events[-1]["transcript_segment_ids"], ["84"])
 
 
 if __name__ == "__main__":

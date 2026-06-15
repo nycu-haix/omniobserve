@@ -1371,6 +1371,16 @@ async def handle_transcript_segments_websocket(
                         "client_segment_ids": batch_client_segment_ids,
                     },
                 )
+                await broadcast_admin_transcript(
+                    session_name,
+                    participant_id=participant_id,
+                    scope=visibility.value,
+                    text=saved_segment.text,
+                    is_final=True,
+                    persisted=True,
+                    transcript_segment_id=saved_segment.segment_id,
+                    reason=reason,
+                )
 
                 try:
                     logger.info(
