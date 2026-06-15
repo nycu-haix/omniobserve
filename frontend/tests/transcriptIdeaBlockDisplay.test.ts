@@ -84,6 +84,17 @@ test("preserves terminal transcript states when only pending text matches", () =
 	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
 });
 
+test("preserves terminal transcript states when a stale linked block remains", () => {
+	const line = transcriptLine({ linkedBlockId: "ready-block", ideaBlockStatus: "failed" });
+	const blocks = [ideaBlock({ id: "ready-block" })];
+	const linkedLines = linkTranscriptLinesToReadyBlocks([line], blocks);
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "failed");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+	assert.equal(linkedLines[0]?.linkedBlockId, undefined);
+	assert.equal(linkedLines[0]?.ideaBlockStatus, "failed");
+});
+
 test("ignores deleted and public transcript matches", () => {
 	const privateLine = transcriptLine({ linkedBlockId: "deleted" });
 	const publicLine = transcriptLine({ id: "p1", source: "public" });

@@ -36,6 +36,10 @@ export function getTranscriptIdeaBlockTargetId(line: TranscriptLine, blocks: Ide
 		return null;
 	}
 
+	if (isTerminalTranscriptIdeaBlockStatus(line)) {
+		return null;
+	}
+
 	if (line.linkedBlockId) {
 		const linkedBlock = blocks.find(block => block.id === line.linkedBlockId);
 		if (linkedBlock && isReadyIdeaBlock(linkedBlock)) {

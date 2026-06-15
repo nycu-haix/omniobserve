@@ -896,12 +896,16 @@ function markTranscriptLinesIdeaBlockStatus(lines: TranscriptLineType[], transcr
 
 	let didChange = false;
 	const nextLines = lines.map(line => {
-		if (line.source !== "private" || !transcriptLineIds.has(line.id) || line.ideaBlockStatus === ideaBlockStatus) {
+		if (line.source !== "private" || !transcriptLineIds.has(line.id)) {
+			return line;
+		}
+		if (line.ideaBlockStatus === ideaBlockStatus && !line.linkedBlockId) {
 			return line;
 		}
 		didChange = true;
 		return {
 			...line,
+			linkedBlockId: undefined,
 			ideaBlockStatus
 		};
 	});
