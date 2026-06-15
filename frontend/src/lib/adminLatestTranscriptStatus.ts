@@ -12,7 +12,15 @@ export interface LatestTranscriptIdeaBlockStatusUpdate {
 }
 
 export function latestTranscriptMatchesSegmentIds(current: LatestTranscriptIdeaBlockStatusState, transcriptSegmentIds: string[]): boolean {
-	return !(current.transcriptSegmentId && transcriptSegmentIds.length > 0 && !transcriptSegmentIds.includes(current.transcriptSegmentId));
+	if (transcriptSegmentIds.length === 0) {
+		return true;
+	}
+
+	if (!current.transcriptSegmentId) {
+		return false;
+	}
+
+	return transcriptSegmentIds.includes(current.transcriptSegmentId);
 }
 
 export function getLatestTranscriptIdeaBlockStatusAfterUpdate(current: LatestTranscriptIdeaBlockStatusState, update: LatestTranscriptIdeaBlockStatusUpdate): LatestTranscriptIdeaBlockStatus {

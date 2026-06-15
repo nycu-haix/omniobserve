@@ -735,6 +735,7 @@ async def handle_audio_stream_websocket(
                     serialized_result = {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                     idea_blocks_payload: list[dict[str, Any]] = []
                     task_items_payload: list[dict[str, Any]] = []
+                    pipeline_failure_payload: dict[str, Any] | None = None
                     if transcript_segments and stream_context.scope == Visibility.PRIVATE:
                         try:
                             pipeline_result = await handle_transcript_segment(
@@ -768,26 +769,14 @@ async def handle_audio_stream_websocket(
                                 session_name,
                                 participant_id,
                             )
-                            await send_ws_json_safe(
-                                websocket,
-                                {
-                                    "type": "pipeline_error",
-                                    "reason": "idea_block_or_task_item_generation_failed",
-                                    "scope": stream_context.scope.value,
-                                    "participant_id": participant_id,
-                                    "transcript_segment_id": saved_final_segment.segment_id if saved_final_segment else None,
-                                    "transcript_segment_ids": completed_transcript_segment_ids,
-                                },
-                            )
-                            await broadcast_admin_terminal_error(
-                                session_name,
-                                error_type="pipeline_error",
-                                participant_id=participant_id,
-                                reason="idea_block_or_task_item_generation_failed",
-                                scope=stream_context.scope.value,
-                                transcript_segment_id=saved_final_segment.segment_id if saved_final_segment else None,
-                                transcript_segment_ids=completed_transcript_segment_ids,
-                            )
+                            pipeline_failure_payload = {
+                                "type": "pipeline_error",
+                                "reason": "idea_block_or_task_item_generation_failed",
+                                "scope": stream_context.scope.value,
+                                "participant_id": participant_id,
+                                "transcript_segment_id": saved_final_segment.segment_id if saved_final_segment else None,
+                                "transcript_segment_ids": completed_transcript_segment_ids,
+                            }
                             pipeline_result = None
 
                         if pipeline_result is not None:
@@ -870,6 +859,17 @@ async def handle_audio_stream_websocket(
                             transcript_segment_ids=completed_transcript_segment_ids,
                             client_segment_id=None,
                             client_segment_ids=[],
+                        )
+                    if pipeline_failure_payload is not None:
+                        await send_ws_json_safe(websocket, pipeline_failure_payload)
+                        await broadcast_admin_terminal_error(
+                            session_name,
+                            error_type="pipeline_error",
+                            participant_id=participant_id,
+                            reason="idea_block_or_task_item_generation_failed",
+                            scope=stream_context.scope.value,
+                            transcript_segment_id=last_segment_id,
+                            transcript_segment_ids=completed_transcript_segment_ids,
                         )
                     await send_ws_json_safe(
                         websocket,

@@ -24,6 +24,8 @@ test("matches terminal updates only to their transcript segment when ids are pre
 	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, ["segment-1"]), false);
 	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, ["segment-2"]), true);
 	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: "segment-2", ideaBlockStatus: "pending" }, []), true);
+	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: null, ideaBlockStatus: "pending" }, ["segment-1"]), false);
+	assert.equal(latestTranscriptMatchesSegmentIds({ transcriptSegmentId: null, ideaBlockStatus: "pending" }, []), true);
 });
 
 test("marks matching completion updates as generated or no idea", () => {
@@ -40,5 +42,15 @@ test("marks matching completion updates as generated or no idea", () => {
 			{ generationComplete: true, ideaBlockCount: 0, transcriptSegmentIds: ["segment-1"] }
 		),
 		"no_idea"
+	);
+});
+
+test("keeps live latest transcript pending when identified completion belongs to another segment", () => {
+	assert.equal(
+		getLatestTranscriptIdeaBlockStatusAfterUpdate(
+			{ transcriptSegmentId: null, ideaBlockStatus: "pending" },
+			{ generationComplete: true, ideaBlockCount: 1, transcriptSegmentIds: ["persisted-segment"] }
+		),
+		"pending"
 	);
 });
