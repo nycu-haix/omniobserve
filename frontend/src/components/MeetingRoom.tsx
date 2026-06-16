@@ -667,7 +667,7 @@ function SortableLostAtSeaItem({
 			: hasRankDelta
 				? `與 Public 排序差 ${rankDeltaAmount} 位`
 				: undefined;
-	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${isOwnItem ? "，你的 task item" : ""}`;
+	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${isOwnItem ? "，此項目由你提出" : ""}`;
 
 	return (
 		<div
@@ -717,8 +717,8 @@ function SortableLostAtSeaItem({
 			<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 leading-5">
 				<span className="min-w-0 whitespace-normal break-words">{item.label}</span>
 				{isOwnItem && (
-					<span className="inline-flex shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold leading-4 text-primary" aria-label="這是你的 task item">
-						你的項目
+					<span className="inline-flex shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold leading-4 text-primary" aria-label="此項目由你提出">
+						你提出
 					</span>
 				)}
 			</span>
