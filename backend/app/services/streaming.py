@@ -731,6 +731,39 @@ async def handle_audio_stream_websocket(
                         return
                     saved_final_segment = await finalize_stream_transcript()
                     completed_transcript_segment_ids = _transcript_segment_ids(transcript_segments)
+                    last_segment_id = saved_final_segment.segment_id if saved_final_segment else None
+                    last_text = saved_final_segment.text if saved_final_segment else merged_transcript_text.strip()
+                    final_persisted = saved_final_segment is not None
+                    await send_ws_json_safe(
+                        websocket,
+                        {
+                            "type": "transcript_update",
+                            "transcript_segment_id": last_segment_id,
+                            "participant_id": participant_id,
+                            "scope": stream_context.scope.value,
+                            "text": last_text,
+                            "is_final": True,
+                            "persisted": final_persisted,
+                            "client_segment_id": None,
+                        },
+                    )
+                    if last_text:
+                        await broadcast_admin_transcript(
+                            session_name,
+                            participant_id=participant_id,
+                            scope=stream_context.scope.value,
+                            text=last_text,
+                            is_final=True,
+                            persisted=final_persisted,
+                            transcript_segment_id=last_segment_id,
+                        )
+                        if stream_context.scope != Visibility.PRIVATE:
+                            await broadcast_public_transcript_line(
+                                session_name,
+                                participant_id=participant_id,
+                                text=last_text,
+                                transcript_segment_id=last_segment_id,
+                            )
                     pipeline_result = None
                     serialized_result = {"idea_blocks": [], "duplicate_idea_blocks": [], "task_items": []}
                     idea_blocks_payload: list[dict[str, Any]] = []
@@ -785,44 +818,11 @@ async def handle_audio_stream_websocket(
                             idea_blocks_payload = serialized_result["idea_blocks"]
                             task_items_payload = serialized_result["task_items"]
 
-                    last_segment_id = saved_final_segment.segment_id if saved_final_segment else None
-                    last_text = saved_final_segment.text if saved_final_segment else merged_transcript_text.strip()
-                    final_persisted = saved_final_segment is not None
                     generation_complete = _is_completed_private_generation(
                         stream_context.scope,
                         transcript_segments,
                         pipeline_result,
                     )
-                    await send_ws_json_safe(
-                        websocket,
-                        {
-                            "type": "transcript_update",
-                            "transcript_segment_id": last_segment_id,
-                            "participant_id": participant_id,
-                            "scope": stream_context.scope.value,
-                            "text": last_text,
-                            "is_final": True,
-                            "persisted": final_persisted,
-                            "client_segment_id": None,
-                        },
-                    )
-                    if last_text:
-                        await broadcast_admin_transcript(
-                            session_name,
-                            participant_id=participant_id,
-                            scope=stream_context.scope.value,
-                            text=last_text,
-                            is_final=True,
-                            persisted=final_persisted,
-                            transcript_segment_id=last_segment_id,
-                        )
-                        if stream_context.scope != Visibility.PRIVATE:
-                            await broadcast_public_transcript_line(
-                                session_name,
-                                participant_id=participant_id,
-                                text=last_text,
-                                transcript_segment_id=last_segment_id,
-                            )
                     if pipeline_failure_payload is not None:
                         await send_ws_json_safe(websocket, pipeline_failure_payload)
                         await broadcast_admin_terminal_error(

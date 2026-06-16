@@ -87,6 +87,7 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
     async def run_private_audio_stop(self, handle_transcript_segment):
         websocket = FakeAudioWebSocket()
         admin_events: list[dict] = []
+        pipeline_call_observations: list[dict] = []
         original_logger_disabled = streaming.logger.disabled
         originals = {
             "SessionLocal": streaming.SessionLocal,
@@ -123,13 +124,24 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
         async def fake_broadcast_presence_state(session_name: str) -> None:
             return None
 
+        async def recorded_handle_transcript_segment(*args, **kwargs):
+            pipeline_call_observations.append(
+                {
+                    "participant_types": [message["type"] for message in websocket.sent],
+                    "participant_messages": [dict(message) for message in websocket.sent],
+                    "admin_types": [message["type"] for message in admin_events],
+                    "admin_messages": [dict(message) for message in admin_events],
+                }
+            )
+            return await handle_transcript_segment(*args, **kwargs)
+
         try:
             streaming.logger.disabled = True
             streaming.SessionLocal = lambda: FakeSessionLocal()
             streaming._sync_cached_participant_roles = noop_sync_roles
             streaming.transcribe_ws_chunk = fake_transcribe_ws_chunk
             streaming.save_ws_transcript_segment = fake_save_ws_transcript_segment
-            streaming.handle_transcript_segment = handle_transcript_segment
+            streaming.handle_transcript_segment = recorded_handle_transcript_segment
             streaming.broadcast_admin_transcript = fake_broadcast_admin_transcript
             streaming.broadcast_admin_idea_blocks_update = fake_broadcast_admin_idea_blocks_update
             streaming.broadcast_admin_terminal_error = fake_broadcast_admin_terminal_error
@@ -148,7 +160,7 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
             for name, value in originals.items():
                 setattr(streaming, name, value)
 
-        return websocket, admin_events
+        return websocket, admin_events, pipeline_call_observations
 
     async def run_gateway_transcript_segment(self, handle_transcript_segment):
         websocket = FakeTranscriptSegmentsWebSocket()
@@ -216,10 +228,14 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
             pipeline_calls.append(kwargs)
             raise RuntimeError("pipeline failed")
 
-        websocket, admin_events = await self.run_private_audio_stop(failing_handle_transcript_segment)
+        websocket, admin_events, pipeline_call_observations = await self.run_private_audio_stop(failing_handle_transcript_segment)
 
         self.assertEqual([call["transcript"].segment_id for call in pipeline_calls], ["42"])
         self.assertEqual([call["is_final"] for call in pipeline_calls], [True])
+        self.assertEqual(pipeline_call_observations[0]["participant_types"][-1], "transcript_update")
+        self.assertEqual(pipeline_call_observations[0]["participant_messages"][-1]["transcript_segment_id"], "42")
+        self.assertEqual(pipeline_call_observations[0]["admin_types"][-1], "transcript")
+        self.assertEqual(pipeline_call_observations[0]["admin_messages"][-1]["transcript_segment_id"], "42")
 
         participant_types = [message["type"] for message in websocket.sent]
         self.assertEqual(
@@ -244,10 +260,14 @@ class StreamingAudioFailureOrderTests(unittest.IsolatedAsyncioTestCase):
             pipeline_calls.append(kwargs)
             return PipelineResult(idea_blocks=[], task_items=[])
 
-        websocket, admin_events = await self.run_private_audio_stop(empty_handle_transcript_segment)
+        websocket, admin_events, pipeline_call_observations = await self.run_private_audio_stop(empty_handle_transcript_segment)
 
         self.assertEqual([call["transcript"].segment_id for call in pipeline_calls], ["42"])
         self.assertEqual([call["is_final"] for call in pipeline_calls], [True])
+        self.assertEqual(pipeline_call_observations[0]["participant_types"][-1], "transcript_update")
+        self.assertEqual(pipeline_call_observations[0]["participant_messages"][-1]["transcript_segment_id"], "42")
+        self.assertEqual(pipeline_call_observations[0]["admin_types"][-1], "transcript")
+        self.assertEqual(pipeline_call_observations[0]["admin_messages"][-1]["transcript_segment_id"], "42")
 
         participant_types = [message["type"] for message in websocket.sent]
         self.assertEqual(participant_types[-3:], ["transcript_update", "idea_blocks_update", "task_items_update"])
