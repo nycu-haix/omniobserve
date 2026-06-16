@@ -37,6 +37,7 @@ from .participant_status import (
     update_audio_status,
 )
 from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, is_audio_transcription_role, list_session_participant_roles
+from .pipeline_latency import record_public_now_latency_events
 from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
@@ -277,6 +278,22 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _optional_ms(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _elapsed_ms(started_at_ms: int | None, ended_at_ms: int | None) -> int | None:
+    if started_at_ms is None or ended_at_ms is None:
+        return None
+    return max(0, ended_at_ms - started_at_ms)
+
+
 def _get_session_phase(session_id: str) -> str:
     phase = session_phases.get(session_id)
     if phase is None:
@@ -344,6 +361,15 @@ def _public_context_component_state_message(session_id: str) -> dict[str, Any]:
     state = session_public_context_state.get(session_id) or {}
     component_ids = list(state.get("component_ids") or [])
     task_item_ids = list(state.get("task_item_ids") or [])
+    state_updated_at_ms = _optional_ms(state.get("timestamp_ms"))
+    event_timestamp_ms = _optional_ms(state.get("event_timestamp_ms"))
+    matching_started_at_ms = _optional_ms(state.get("matching_started_at_ms"))
+    matching_completed_at_ms = _optional_ms(state.get("matching_completed_at_ms")) or state_updated_at_ms
+    admin_broadcast_at_ms = _now_ms()
+    event_to_state_ms = _optional_ms(state.get("event_to_state_ms")) or _elapsed_ms(
+        event_timestamp_ms,
+        matching_completed_at_ms,
+    )
     return {
         "type": "public_context_component_state",
         "componentIds": component_ids,
@@ -355,7 +381,39 @@ def _public_context_component_state_message(session_id: str) -> dict[str, Any]:
         "match_count": _normalize_int(state.get("match_count"), 0),
         "deliveredCount": _normalize_int(state.get("delivered_count"), 0),
         "delivered_count": _normalize_int(state.get("delivered_count"), 0),
-        "timestamp_ms": _normalize_int(state.get("timestamp_ms"), 0),
+        "timestamp_ms": state_updated_at_ms,
+        "stateUpdatedAtMs": state_updated_at_ms,
+        "state_updated_at_ms": state_updated_at_ms,
+        "eventTimestampMs": event_timestamp_ms,
+        "event_timestamp_ms": event_timestamp_ms,
+        "matchingStartedAtMs": matching_started_at_ms,
+        "matching_started_at_ms": matching_started_at_ms,
+        "matchingCompletedAtMs": matching_completed_at_ms,
+        "matching_completed_at_ms": matching_completed_at_ms,
+        "adminBroadcastAtMs": admin_broadcast_at_ms,
+        "admin_broadcast_at_ms": admin_broadcast_at_ms,
+        "debounceMs": _optional_ms(state.get("debounce_ms")),
+        "debounce_ms": _optional_ms(state.get("debounce_ms")),
+        "queueDelayMs": _optional_ms(state.get("queue_delay_ms")),
+        "queue_delay_ms": _optional_ms(state.get("queue_delay_ms")),
+        "matchingDurationMs": _optional_ms(state.get("matching_duration_ms")),
+        "matching_duration_ms": _optional_ms(state.get("matching_duration_ms")),
+        "eventToStateMs": event_to_state_ms,
+        "event_to_state_ms": event_to_state_ms,
+        "eventToAdminBroadcastMs": _elapsed_ms(event_timestamp_ms, admin_broadcast_at_ms),
+        "event_to_admin_broadcast_ms": _elapsed_ms(event_timestamp_ms, admin_broadcast_at_ms),
+        "textChars": _optional_ms(state.get("text_chars")),
+        "text_chars": _optional_ms(state.get("text_chars")),
+        "contextChars": _optional_ms(state.get("context_chars")),
+        "context_chars": _optional_ms(state.get("context_chars")),
+        "targetParticipantCount": _optional_ms(state.get("target_participant_count")),
+        "target_participant_count": _optional_ms(state.get("target_participant_count")),
+        "boardConnectionCount": _optional_ms(state.get("board_connection_count")),
+        "board_connection_count": _optional_ms(state.get("board_connection_count")),
+        "adminConnectionCount": _optional_ms(state.get("admin_connection_count")),
+        "admin_connection_count": _optional_ms(state.get("admin_connection_count")),
+        "transcriptSegmentId": state.get("transcript_segment_id"),
+        "transcript_segment_id": state.get("transcript_segment_id"),
     }
 
 
@@ -532,6 +590,7 @@ async def broadcast_public_transcript_line(
     transcript_segment_id: str | int | None = None,
 ) -> None:
     display_name = get_participant_display_name(session_id, participant_id)
+    timestamp_ms = _now_ms()
     await board_manager.broadcast(
         session_id,
         {
@@ -539,12 +598,12 @@ async def broadcast_public_transcript_line(
             "payload": {
                 "id": str(transcript_segment_id)
                 if transcript_segment_id is not None
-                else f"public-{participant_id}-{_now_ms()}",
+                else f"public-{participant_id}-{timestamp_ms}",
                 "source": "public",
                 "origin": "live",
                 "userId": participant_id,
                 "displayName": display_name,
-                "timestampMs": _now_ms(),
+                "timestampMs": timestamp_ms,
                 "text": text,
             },
         },
@@ -554,6 +613,7 @@ async def broadcast_public_transcript_line(
         participant_id=participant_id,
         text=text,
         transcript_segment_id=transcript_segment_id,
+        event_timestamp_ms=timestamp_ms,
     )
 
 
@@ -563,24 +623,29 @@ def _schedule_public_context_matching(
     participant_id: str,
     text: str,
     transcript_segment_id: str | int | None,
+    event_timestamp_ms: int,
 ) -> None:
     if not text.strip():
         return
     match_text = _append_public_context_text(session_id, text)
+    scheduled_at_ms = _now_ms()
+    debounce_ms = round(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS * 1000)
 
     async def run_matching() -> None:
         try:
             await asyncio.sleep(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS)
+            matching_started_at_ms = _now_ms()
             async with SessionLocal() as db:
                 matches = await find_public_context_matches(
                     db,
                     session_name=session_id,
                     public_text=match_text,
                 )
+            matching_completed_at_ms = _now_ms()
             if not matches:
                 return
 
-            await _publish_public_context_matches(
+            state = await _publish_public_context_matches(
                 session_id,
                 matches=matches,
                 source="auto",
@@ -588,7 +653,43 @@ def _schedule_public_context_matching(
                 transcript_segment_id=transcript_segment_id,
                 text_chars=len(text),
                 context_chars=len(match_text),
+                latency_metadata={
+                    "event_timestamp_ms": event_timestamp_ms,
+                    "scheduled_at_ms": scheduled_at_ms,
+                    "debounce_ms": debounce_ms,
+                    "queue_delay_ms": _elapsed_ms(scheduled_at_ms, matching_started_at_ms),
+                    "matching_started_at_ms": matching_started_at_ms,
+                    "matching_completed_at_ms": matching_completed_at_ms,
+                    "matching_duration_ms": _elapsed_ms(matching_started_at_ms, matching_completed_at_ms),
+                    "event_to_state_ms": _elapsed_ms(event_timestamp_ms, matching_completed_at_ms),
+                    "transcript_segment_id": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                },
             )
+            async with SessionLocal() as db:
+                await record_public_now_latency_events(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    phase=_get_session_phase(session_id),
+                    transcript_id=_normalize_optional_int(transcript_segment_id),
+                    transcript_chars=len(text),
+                    context_chars=len(match_text),
+                    source="auto",
+                    event_to_state_ms=_optional_ms(state.get("event_to_state_ms")),
+                    matching_duration_ms=_optional_ms(state.get("matching_duration_ms")),
+                    queue_delay_ms=_optional_ms(state.get("queue_delay_ms")),
+                    debounce_ms=_optional_ms(state.get("debounce_ms")),
+                    match_count=_normalize_int(state.get("match_count"), 0),
+                    delivered_count=_normalize_int(state.get("delivered_count"), 0),
+                    target_participant_count=_normalize_int(state.get("target_participant_count"), 0),
+                    board_connection_count=_normalize_int(state.get("board_connection_count"), 0),
+                    admin_connection_count=_normalize_int(state.get("admin_connection_count"), 0),
+                    component_ids=list(state.get("component_ids") or []),
+                    task_item_ids=list(state.get("task_item_ids") or []),
+                    metadata={
+                        "transcript_segment_id": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                    },
+                )
         except asyncio.CancelledError:
             return
         except Exception as exc:
@@ -629,7 +730,8 @@ async def _publish_public_context_matches(
     context_chars: int = 0,
     component_ids: list[str] | None = None,
     task_item_ids: list[int] | None = None,
-) -> None:
+    latency_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     resolved_component_ids = _unique_strings(
         component_ids if component_ids is not None else [component_id for match in matches for component_id in match.component_ids]
     )
@@ -641,9 +743,10 @@ async def _publish_public_context_matches(
         matches_by_user.setdefault(str(match.user_id), []).append(match)
 
     delivered_count = 0
+    board_participant_ids = board_manager.get_participants(session_id)
     target_participant_ids = [
         target_participant_id
-        for target_participant_id in board_manager.get_participants(session_id)
+        for target_participant_id in board_participant_ids
         if _is_participant_ranking_subject(session_id, target_participant_id)
     ]
     for target_participant_id in target_participant_ids:
@@ -671,15 +774,40 @@ async def _publish_public_context_matches(
             delivered_count += 1
 
     timestamp_ms = _now_ms()
-    session_public_context_state[session_id] = {
+    next_state = {
         "component_ids": resolved_component_ids,
         "task_item_ids": resolved_task_item_ids,
         "source": source,
         "match_count": len(matches),
         "delivered_count": delivered_count,
         "timestamp_ms": timestamp_ms,
+        "text_chars": text_chars,
+        "context_chars": context_chars,
+        "target_participant_count": len(target_participant_ids),
+        "board_connection_count": len(board_participant_ids),
+        "admin_connection_count": len(admin_manager.get_participants(session_id)),
     }
+    next_state.update(latency_metadata or {})
+    session_public_context_state[session_id] = next_state
+    logger.info(
+        (
+            "public_context_now_latency session_id=%s source=%s event_to_state_ms=%s "
+            "matching_duration_ms=%s queue_delay_ms=%s match_count=%s delivered_count=%s "
+            "targets=%s text_chars=%s context_chars=%s"
+        ),
+        session_id,
+        source,
+        next_state.get("event_to_state_ms"),
+        next_state.get("matching_duration_ms"),
+        next_state.get("queue_delay_ms"),
+        len(matches),
+        delivered_count,
+        len(target_participant_ids),
+        text_chars,
+        context_chars,
+    )
     await admin_manager.broadcast(session_id, _public_context_component_state_message(session_id))
+    return next_state
 
 
 def _public_context_match_payload(match: PublicContextMatch) -> dict[str, Any]:
