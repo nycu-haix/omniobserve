@@ -144,7 +144,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 說明 private / public / reflect phase。
 - [ ] 說明 think-aloud 不是只講最後答案，而是把正在比較、排序、建立 item 的理由說出來。
 - [ ] 說明如果不想出聲，也可以用文字輸入記錄理由，文字也會生成 idea blocks / notes。
-- [ ] 準備 quiet participant fallback prompt：同一真實參與者連續 2 分鐘沒有出聲 reasoning、悄悄話 transcript、手動 idea block 或文字輸入理由時才提醒「可以講正在比較的理由；不想出聲也可以打字」，不得補任務答案或排序方向；每次使用都要記錄 `event_type=facilitator_prompt`。
+- [ ] 準備 quiet participant fallback prompt：同一真實參與者連續 2 分鐘沒有出聲 reasoning、悄悄話 transcript、手動 idea block 或文字輸入理由時才提醒「可以講正在比較的理由；不想出聲也可以打字」，且每位真實參與者每個 private phase 最多提醒一次；不得補任務答案或排序方向；每次使用都要記錄 `event_type=facilitator_prompt`。
 - [ ] 說明 chat 是正式公開發言管道，沒有 private chat。
 - [ ] 若第一個 task 是 with cue，說明 similarity cue。
 - [ ] 不揭露暗樁。
@@ -203,7 +203,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 開始 8 分鐘 timer。
 - [ ] 確認 think-aloud transcript / idea blocks 有產生。
 - [ ] 確認文字輸入理由也被記錄並可對應到 participant。
-- [ ] 若同一真實參與者連續 2 分鐘沒有出聲或文字 reasoning，Host 使用標準 quiet fallback prompt，不提供排序建議，並在 Observer note 記錄 prompt use。
+- [ ] 若同一真實參與者連續 2 分鐘沒有出聲或文字 reasoning，且該 participant 本 private phase 尚未被提醒，Host 使用標準 quiet fallback prompt，不提供排序建議，並在 Observer note 記錄 prompt use。
 - [ ] 切到 public phase。
 - [ ] 確認 group ranking 需排序 15 items。
 - [ ] 開始 20 分鐘 timer。
@@ -221,7 +221,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 開始 5 分鐘 timer。
 - [ ] 確認每位參與者建立至少 4 個 component + action items。
 - [ ] 確認 component + action item 文字會進入 logs / idea block pipeline。
-- [ ] 確認參與者有用出聲或文字記錄建立 item 的理由；若同一真實參與者連續 2 分鐘沒有出聲或文字 reasoning，Host 使用標準 quiet fallback prompt，並在 Observer note 記錄 prompt use。
+- [ ] 確認參與者有用出聲或文字記錄建立 item 的理由；若同一真實參與者連續 2 分鐘沒有出聲或文字 reasoning，且該 participant 本 private phase 尚未被提醒，Host 使用標準 quiet fallback prompt，並在 Observer note 記錄 prompt use。
 - [ ] 切到 Poster private phase 2。
 - [ ] 鎖定 item 內容。
 - [ ] 產生可排序 item list。
