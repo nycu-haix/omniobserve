@@ -1,6 +1,6 @@
 # OmniObserve 正式實驗 Procedure
 
-本文件是正式實驗執行手冊。它描述一場約 150 分鐘的 within-subject 實驗，包含 Lost-at-Sea 與 Enhance-the-Poster 兩個 task。兩個 task 的順序與 cue / no-cue 條件要 counterbalance；近期先做兩組時，實際順序暫定皆為 Lost-at-Sea 後 Enhance-the-Poster，但文件不得把這個順序寫死。
+本文件是正式實驗執行手冊。它描述一場約 150-152 分鐘的 within-subject 實驗，包含 Lost-at-Sea 與 Enhance-the-Poster 兩個 task。兩個 task 的順序與 cue / no-cue 條件要 counterbalance；近期先做兩組時，實際順序暫定皆為 Lost-at-Sea 後 Enhance-the-Poster，但文件不得把這個順序寫死。
 
 本文件只寫目前已確定的正式流程。找不到來源或使用者尚未定義的內容，一律標示 `TBD`，不得自行補假設。
 
@@ -65,27 +65,27 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 - 若因排程限制仍使用熟識組，session summary 和後續分析必須明確註記，不得把 private channel 低使用量直接解讀為系統設計失效。
 - 熟悉度篩選、task 後詢問與個別訪談題目見 [問卷與訪談題綱](../forms/問卷與訪談題綱.md)。
 
-## 2. 150 分鐘時間表
+## 2. 約 150-152 分鐘時間表
 
-下列為完整場次時間配置。兩個 task、兩次 task 後小訪談 / 小表單與三位真實參與者個別訪談合計 112 分鐘，其餘約 38 分鐘作為報到、影片/口頭說明、系統教學、任務切換、正式休息、最後 Debrief 與收尾緩衝。38 分鐘內除了 5 分鐘正式休息外，其餘是建議分配；只要總長維持約 150 分鐘，可依影片長度與現場狀況在說明、教學、切換、Debrief 與收尾之間微調。
+下列為完整場次時間配置。Lost-at-Sea 固定 30 分鐘，Enhance-the-Poster 固定 34 分鐘；兩個 task、兩次 task 後小訪談 / 小表單與三位真實參與者個別訪談合計 114 分鐘，其餘約 38 分鐘作為報到、影片/口頭說明、系統教學、任務切換、正式休息、最後 Debrief 與收尾緩衝。目前 pilot 後 run-of-show 以上限 152 分鐘控時；若需壓回 150 分鐘，應由 #103 統一調整非 task 緩衝，不得臨時縮短 task phase。
 
 | 區段 | 時間 | 說明 |
 | --- | ---: | --- |
 | 報到、設備、第二螢幕、Google Meet 錄影與研究說明 | 8 分鐘 | 確認四人到場、每位使用者遠距會議室都有第二螢幕、開啟錄影、關閉通知、進入系統 |
 | 系統教學與 Task 1 說明 | 10 分鐘 | 影片尚未完成前由 Host 口頭說明 |
-| Task 1 | 30 或 32 分鐘 | Lost-at-Sea 為 30 分鐘；Poster 為 32 分鐘 |
+| Task 1 | 30 或 34 分鐘 | Lost-at-Sea 為 30 分鐘；Poster 為 34 分鐘 |
 | Task 1 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填 Google Form |
 | 正式休息與任務切換 | 5 分鐘 | 切換 task/material/condition |
 | Task 2 說明與系統確認 | 5 分鐘 | 影片尚未完成前由 Host 口頭說明 |
-| Task 2 | 30 或 32 分鐘 | 另一個 task |
+| Task 2 | 30 或 34 分鐘 | 另一個 task；Lost-at-Sea 為 30 分鐘，Poster 為 34 分鐘 |
 | Task 2 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填 Google Form |
 | 個別訪談分流與訪談 | 30 分鐘 | 三位實驗人員分別訪談三位真實參與者；訪談中不揭露暗樁 |
 | 最後 Debrief | 5 分鐘 | 個別訪談完成後，再說明其中一位為暗樁；可由影片或 Host 口頭呈現 |
 | 收尾與資料確認 | 5 分鐘 | 檢查錄影、問卷、log、訪談錄音 |
 
-若 Task 1 是 Poster、Task 2 是 Lost，固定 task 時間仍依各 task 自身 phase 執行；總長仍控制在約 150 分鐘。
+若 Task 1 是 Poster、Task 2 是 Lost，固定 task 時間仍依各 task 自身 phase 執行；目前總長仍控制在約 150-152 分鐘。
 
-時間核對：8 + 10 + Task 1 + 10 + 5 + 5 + Task 2 + 10 + 30 + 5 + 5 = 150。若現場延誤，優先壓縮報到、影片/口頭說明、系統教學、切換或收尾緩衝；不得任意縮短 task phase、兩次 task 後小訪談、個別訪談或最後 Debrief，除非 Host 在 incident log 記錄原因。
+時間核對：固定區段 88 分鐘 + Lost-at-Sea 30 分鐘 + Enhance-the-Poster 34 分鐘 = 152 分鐘。若現場延誤，優先壓縮報到、影片/口頭說明、系統教學、切換或收尾緩衝；不得任意縮短 task phase、兩次 task 後小訪談、個別訪談或最後 Debrief，除非 Host 在 incident log 記錄原因。
 
 ## 3. 場前準備
 
@@ -95,7 +95,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 - 依 [受試者事前通知信](../communications/受試者事前通知信.md) 寄出正式通知信。
 - 排程前先用內部 familiarity screener 記錄同組受試者是否認識、是否固定合作，以及是否需要改排或作為 covariate 保留。
-- 信件時間區間需預留約 150 分鐘。
+- 信件時間區間需預留約 150-152 分鐘。
 - 信件需提醒攜帶筆電、會議用耳機與充電器，並提醒筆電需能連接 HDMI 或自備對應轉接頭。
 - 信件需提醒事前測試耳機、麥克風或電腦內建麥克風。
 - 信件不得透露 task order、cue/no-cue 條件、暗樁安排或研究假設。
@@ -155,7 +155,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 ### 4.1 開場
 
-> 謝謝大家今天參與 OmniObserve 實驗。整場大約 150 分鐘，會包含兩個團體任務，中間會有短暫休息，後段會有個別訪談，活動最後會有研究說明。
+> 謝謝大家今天參與 OmniObserve 實驗。整場大約 150 分鐘多一點，會包含兩個團體任務，中間會有短暫休息，後段會有個別訪談，活動最後會有研究說明。
 >
 > 今天不是能力測驗，也沒有個人分數。我們關心的是小組討論時，大家如何先形成自己的想法，如何公開討論，以及系統是否能幫助你回顧自己的想法或找到適合提出的時機。
 >
@@ -207,12 +207,12 @@ Host 說明：
 
 ### 5.2 Enhance-the-Poster
 
-Enhance-the-Poster 固定 32 分鐘。
+Enhance-the-Poster 固定 34 分鐘。2026-06-12 pilot 後，Private phase 2 暫定從 5 分鐘加到 7 分鐘，避免參與者來不及完成個人排序；完整場次長度仍由 #103 追蹤確認。
 
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
 | Private phase 1 | 5 分鐘 | 看 Canva 海報、任務需求、圖床、文字 / slogan library 與 component library；若材料包含 reviewer feedback，將其作為參考；建立至少 4 個 component + action items，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
-| Private phase 2 | 5 分鐘 | 對整理後的 items 做個人排序 | 鎖定 item 內容，產生可排序列表 | initial personal ranking |
+| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；務必在進入 Public phase 前完成自己的前 15 項排序 | 鎖定 item 內容，產生可排序列表；切換 Public phase 前用 Admin ranking state 確認每位真實參與者的 private ranking revision 至少為 `r1`，或 participant 明確確認已完成；`r0` seeded ranking 不算完成 | initial personal ranking |
 | Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
 
@@ -224,7 +224,7 @@ Host 說明：
 >
 > Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、任務需求、圖床、文字 / slogan library、component library、你自己的設計判斷來建立；若本輪材料有 reviewer feedback，也可以把它納入考量。
 >
-> Private phase 2 有 5 分鐘，系統會整理大家建立的 items，請你先做自己的排序。
+> Private phase 2 有 7 分鐘，系統會整理大家建立的 items，請你先做自己的排序。這個階段一定要完成你的個人排序，Public phase 會以這份排序作為你的初始個人清單；如果時間快到，請先把你認為最重要的 items 排到最前面。
 >
 > Public phase 有 20 分鐘，你們要一起討論，最多選 15 個 items，並從最重要到最不重要排序。這個階段可以開啟公開麥克風和其他人討論；每位參與者請至少公開發言兩次，口頭或聊天室都算公開發言。
 >

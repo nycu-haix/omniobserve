@@ -169,20 +169,20 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 ### Enhance-the-Poster
 
 - [ ] Private phase 1：5 分鐘。
-- [ ] Private phase 2：5 分鐘。
+- [ ] Private phase 2：7 分鐘。
 - [ ] Public phase：20 分鐘。
 - [ ] Reflect phase：2 分鐘。
 - [ ] 小訪談 / 小表單：10 分鐘。
 
-### 150 分鐘核對
+### 全場長度核對
 
 - [ ] 固定非 task 時間共 38 分鐘。
 - [ ] Lost-at-Sea 固定 30 分鐘。
-- [ ] Enhance-the-Poster 固定 32 分鐘。
+- [ ] Enhance-the-Poster 固定 34 分鐘。
 - [ ] 兩次小訪談 / 小表單共 20 分鐘。
 - [ ] Debrief 前個別訪談 30 分鐘。
 - [ ] 最後 Debrief 5 分鐘。
-- [ ] 全場合計 150 分鐘。
+- [ ] 全場合計暫定 152 分鐘；若需要壓回 150 分鐘，由 #103 統一調整，不在現場臨時刪減 ranking 時間。
 
 ### 中間休息與 Task 2 連結切換
 
@@ -220,8 +220,9 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 切到 Poster private phase 2。
 - [ ] 鎖定 item 內容。
 - [ ] 產生可排序 item list。
-- [ ] 開始 5 分鐘 timer。
-- [ ] 確認每位真實參與者完成個人排序。
+- [ ] 開始 7 分鐘 timer。
+- [ ] 在 Admin dashboard 的 ranking state / private ranking 欄位確認每位真實參與者都有完成訊號：private ranking revision 至少為 `r1`，或 participant 明確口頭 / 聊天確認已完成排序；系統剛產生的 `r0` seeded ranking 不算完成。
+- [ ] 若有真實參與者尚未出現完成訊號，先口頭提醒並延後切 phase；若仍未完成，記錄 participant ID、原因與當下時間，再切 public phase。
 - [ ] 切到 public phase。
 - [ ] 確認 group ranking 最多選 15 items，且由最重要排到最不重要。
 - [ ] 開始 20 分鐘 timer。

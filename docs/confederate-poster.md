@@ -7,7 +7,7 @@
 - 腳本版本：2026-06-15。
 - 對齊依據：`backend/app/task_config/enhance_the_poster.py`，`task_id=enhance-the-poster`，`reference_image_src=/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main`。
 - 流程依據：`docs/procedure/OmniObserve_正式實驗Procedure.md` 與 `docs/procedure/主持人_Admin_Observer_Checklists.md` 的 Enhance-the-Poster 流程。
-- 現行流程：Private Phase 1 5 分鐘建立至少 4 個 component + action items；Private Phase 2 5 分鐘做個人排序；Public Phase 20 分鐘做 group ranking，最多選前 15 個 items；Reflect Phase 2 分鐘只調整個人排序。
+- 現行流程：Private Phase 1 5 分鐘建立至少 4 個 component + action items；Private Phase 2 7 分鐘做個人排序；Public Phase 20 分鐘做 group ranking，最多選前 15 個 items；Reflect Phase 2 分鐘只調整個人排序。
 - 現行維護狀態：#90、#91、#99、#100、#101 尚未落地前，本稿仍以目前 backend config 和正式 procedure 為準。若任一 issue 改變 Public/Reflect 版面、QR 元件命名、component grouping 或排序數量，需同步更新本文件與 [`poster.js`](poster.js)，並在 session summary 記錄實際使用版本。
 
 ### 目前可用的 Private Phase 1 元件與動作
