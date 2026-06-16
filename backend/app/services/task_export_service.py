@@ -411,6 +411,16 @@ def _build_data_files(
     files.extend(_ranking_snapshot_files(context, ranking_snapshots, participant_roles))
     files.extend(_phase_task_item_snapshot_files(context, phase_task_snapshots, participant_roles))
     files.extend(_transcript_files(context, participant_roles, participants, transcripts, phase_windows))
+    files.extend(
+        _private_reasoning_capture_files(
+            context,
+            participant_roles,
+            participants,
+            transcripts,
+            idea_blocks,
+            phase_windows,
+        )
+    )
     files.append(_idea_blocks_file(context, participant_roles, idea_blocks, phase_windows))
     files.append(_public_chat_file(context, participant_roles, chat_messages, phase_windows))
     files.extend(_cue_files(context, idea_blocks, similarities, cue_events, phase_windows))
@@ -615,7 +625,7 @@ def _transcript_files(
                 artifact="private_transcript",
                 scope="participant",
                 record_count=len(participant_transcripts),
-                required=True,
+                required=False,
                 media_type="text/plain",
                 content=_transcript_text(context, participant_roles, participant_transcripts, phase_windows),
             )
@@ -633,6 +643,139 @@ def _transcript_files(
         )
     )
     return files
+
+
+def _private_reasoning_capture_files(
+    context: ExportContext,
+    participant_roles: dict[str, str],
+    participants: list[dict[str, Any]],
+    transcripts: list[Transcript],
+    idea_blocks: list[IdeaBlock],
+    phase_windows: list[dict[str, Any]],
+) -> list[TaskExportFile]:
+    participant_ids = [
+        str(participant["system_id"])
+        for participant in participants
+        if participant.get("participant_analysis_included", True)
+    ]
+    rows_by_participant: dict[str, list[dict[str, Any]]] = {
+        participant_id: []
+        for participant_id in participant_ids
+    }
+
+    for transcript in transcripts:
+        participant_id = str(transcript.user_id)
+        if (
+            transcript.visibility != "private"
+            or participant_id not in rows_by_participant
+            or not _is_analysis_participant_id(participant_roles, participant_id)
+        ):
+            continue
+        phase = _infer_phase_for_timestamp(transcript.time_stamp, phase_windows) or "unknown"
+        if not _is_private_reasoning_phase(phase):
+            continue
+        rows_by_participant[participant_id].append(
+            _private_reasoning_capture_row(
+                context,
+                participant_roles,
+                participant_id=participant_id,
+                timestamp=transcript.time_stamp,
+                phase=phase,
+                capture_mode="speech",
+                content=transcript.transcript,
+                source_ref=f"transcript:{transcript.id}",
+            )
+        )
+
+    for block in idea_blocks:
+        participant_id = str(block.user_id)
+        if (
+            participant_id not in rows_by_participant
+            or not _is_analysis_participant_id(participant_roles, participant_id)
+        ):
+            continue
+        phase = _infer_phase_for_timestamp(block.time_stamp, phase_windows) or "unknown"
+        if not _is_private_reasoning_phase(phase):
+            continue
+        transcript_ids = _idea_block_transcript_ids(block)
+        if transcript_ids:
+            continue
+        rows_by_participant[participant_id].append(
+            _private_reasoning_capture_row(
+                context,
+                participant_roles,
+                participant_id=participant_id,
+                timestamp=block.time_stamp,
+                phase=phase,
+                capture_mode="text",
+                content=_idea_block_reasoning_content(block),
+                source_ref=f"idea_block:{block.id}",
+            )
+        )
+
+    files = []
+    for participant_id, rows in sorted(
+        rows_by_participant.items(),
+        key=lambda entry: _participant_sort_key(entry[0]),
+    ):
+        rows.sort(
+            key=lambda row: (
+                str(row.get("timestamp") or ""),
+                str(row.get("source_ref") or ""),
+            )
+        )
+        participant_token = _participant_code(context.group_id, participant_id)
+        filename = f"{_artifact_prefix(context)}_private_reasoning_capture_{participant_token}.jsonl"
+        files.append(
+            TaskExportFile(
+                path=_package_path(context, filename),
+                artifact="private_reasoning_capture",
+                scope="participant",
+                record_count=len(rows),
+                required=True,
+                media_type="application/x-ndjson",
+                content=_jsonl_content(rows),
+            )
+        )
+    return files
+
+
+def _private_reasoning_capture_row(
+    context: ExportContext,
+    participant_roles: dict[str, str],
+    *,
+    participant_id: str,
+    timestamp: datetime | None,
+    phase: str,
+    capture_mode: str,
+    content: str | None,
+    source_ref: str,
+) -> dict[str, Any]:
+    return {
+        "timestamp": _isoformat(timestamp),
+        "participant_id": participant_id,
+        "participant_code": _participant_code(context.group_id, participant_id),
+        "participant_role": _participant_role_for_id(participant_roles, participant_id),
+        "task": context.task_token,
+        "condition": context.condition.token,
+        "phase": phase,
+        "capture_mode": capture_mode,
+        "content": content or "",
+        "source_ref": source_ref,
+    }
+
+
+def _idea_block_reasoning_content(block: IdeaBlock) -> str:
+    title = str(block.title or "").strip()
+    summary = str(block.summary or "").strip()
+    if title and summary and title not in summary:
+        return f"{title}: {summary}"
+    return summary or title
+
+
+def _is_private_reasoning_phase(phase: str | None) -> bool:
+    normalized = str(phase or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in {"", "unknown"} or normalized == "private" or normalized.startswith("private_")
 
 
 def _idea_blocks_file(
@@ -1351,7 +1494,7 @@ def _idea_block_transcript_ids(block: IdeaBlock) -> list[int]:
 def _idea_block_source_metadata(block: IdeaBlock, transcript_ids: list[int]) -> tuple[str, str]:
     if transcript_ids:
         return "speech", ";".join(f"transcript:{transcript_id}" for transcript_id in transcript_ids)
-    return "manual", f"idea_block:{block.id}"
+    return "text", f"idea_block:{block.id}"
 
 
 def _infer_similarity_phase(
@@ -1593,6 +1736,11 @@ def _build_manifest(
             "transcripts": len(transcripts),
             "private_transcripts": sum(1 for transcript in transcripts if transcript.visibility == "private"),
             "public_transcripts": sum(1 for transcript in transcripts if transcript.visibility == "public"),
+            "private_reasoning_capture_rows": sum(
+                file.record_count
+                for file in files
+                if file.artifact == "private_reasoning_capture"
+            ),
             "idea_blocks": len(idea_blocks),
             "public_chat_messages": len(chat_messages),
             "cue_similarity_pairs": len(similarities),
@@ -1641,11 +1789,11 @@ def _build_checklist(
         if _ranking_artifact_name(snapshot, participant_roles) == "final_ranking"
     }
     group_ranking_count = sum(1 for snapshot in latest_snapshots if _ranking_artifact_name(snapshot, participant_roles) == "group_ranking")
-    private_transcript_subjects = {
-        str(transcript.user_id)
-        for transcript in transcripts
-        if transcript.visibility == "private" and _is_analysis_participant_id(participant_roles, transcript.user_id)
-    }
+    private_reasoning_capture_count = sum(
+        1
+        for file in files
+        if file.artifact == "private_reasoning_capture" and file.record_count > 0
+    )
     public_transcript_count = sum(1 for transcript in transcripts if transcript.visibility == "public")
     phase_end_count = sum(1 for window in phase_windows if window.get("ended_at"))
     system_version = _system_version_metadata().get("version")
@@ -1684,12 +1832,12 @@ def _build_checklist(
             required=context.task_id == "enhance-the-poster",
         ),
         _checklist_item(
-            "private_transcripts",
-            "Private transcripts",
-            _participant_status(len(private_transcript_subjects), participant_count),
-            _files_for_artifacts(files, {"private_transcript"}),
-            len(private_transcript_subjects),
-            f"{len(private_transcript_subjects)}/{participant_count or '?'} participant transcript files present.",
+            "private_reasoning_capture",
+            "Private reasoning capture",
+            _participant_status(private_reasoning_capture_count, participant_count),
+            _files_for_artifacts(files, {"private_reasoning_capture"}),
+            private_reasoning_capture_count,
+            f"{private_reasoning_capture_count}/{participant_count or '?'} participant private reasoning capture files have rows.",
         ),
         _checklist_item(
             "public_transcripts",
@@ -1901,6 +2049,12 @@ def _csv_value(value: Any) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(_jsonable(value), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _jsonl_content(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    return "\n".join(json.dumps(_jsonable(row), ensure_ascii=False, sort_keys=True) for row in rows) + "\n"
 
 
 def _jsonable(value: Any) -> Any:
