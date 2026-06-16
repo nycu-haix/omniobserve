@@ -25,6 +25,7 @@ export interface Phase1BuilderOption {
 	id: string;
 	label_zh: string;
 	label_en?: string;
+	category?: string;
 	description_zh?: string;
 	aliases?: string[];
 	template_zh?: string;

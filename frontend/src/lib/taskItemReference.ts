@@ -2,8 +2,10 @@ export interface TaskReferenceOption {
 	id: string;
 	label_zh: string;
 	label_en?: string;
+	category?: string;
 	description_zh?: string;
 	template_zh?: string;
+	allowed_action_ids?: string[];
 	requires_detail?: boolean | null;
 	detail_input?: {
 		label_zh?: string | null;
@@ -21,6 +23,18 @@ export function getTaskReferenceLabel(option: TaskReferenceOption): string {
 
 export function getComponentReferenceDescription(option: TaskReferenceOption): string {
 	return normalizeText(option.description_zh) || normalizeText(option.label_en) || "尚無補充說明";
+}
+
+export function isBackgroundReferenceOption(option: TaskReferenceOption): boolean {
+	return normalizeText(option.category) === "background" || option.id === "background";
+}
+
+export function getComponentReferenceCategoryLabel(option: TaskReferenceOption): string {
+	return isBackgroundReferenceOption(option) ? "背景/底色" : "";
+}
+
+export function getComponentReferenceMeta(option: TaskReferenceOption): string {
+	return isBackgroundReferenceOption(option) ? "背景類元件，只提供改顏色與透明度。" : "";
 }
 
 export function getActionReferenceDescription(option: TaskReferenceOption): string {

@@ -2,6 +2,7 @@ import unittest
 
 from fastapi import HTTPException
 
+from app.schemas.board import TaskConfigResponse
 from app.services.private_phase_task_item_service import _build_statement, _resolve_component_action
 from app.services.task_item_generation import (
     _format_builder_option_line,
@@ -15,6 +16,7 @@ from app.task_config.enhance_the_poster import (
     TASK_PHASES,
     TASK_TOPIC_DETAIL,
 )
+from app.task_config import serialize_task_config
 
 
 def _option_by_id(options, option_id: str):
@@ -30,8 +32,13 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
 
     def test_background_component_supports_color_changes(self) -> None:
         background = _option_by_id(PHASE1_POSTER_COMPONENTS, "background")
+        change_color = _option_by_id(PHASE1_ACTION_ITEMS, "change_color")
 
-        self.assertEqual(background["label_zh"], "背景")
+        self.assertEqual(background["label_zh"], "背景圖／底色")
+        self.assertEqual(background["label_en"], "Background image/color")
+        self.assertEqual(background["category"], "background")
+        self.assertIn("整張海報", background["description_zh"])
+        self.assertIn("底色", background["aliases"])
         self.assertIn("change_color", background["allowed_action_ids"])
         self.assertIn("transparency", background["allowed_action_ids"])
         self.assertNotIn("remove", background["allowed_action_ids"])
@@ -39,6 +46,15 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertNotIn("enlarge", background["allowed_action_ids"])
         self.assertNotIn("shrink", background["allowed_action_ids"])
         self.assertNotIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
+        self.assertIn("背景圖／底色", change_color["description_zh"])
+        self.assertEqual(_build_statement(background, change_color, ""), "改「背景圖／底色」顏色")
+
+    def test_task_config_response_preserves_component_category(self) -> None:
+        payload = serialize_task_config(task_id="enhance-the-poster")
+        response_payload = TaskConfigResponse.model_validate(payload).model_dump()
+        background = _option_by_id(response_payload["phase1_builder"]["components"], "background")
+
+        self.assertEqual(background["category"], "background")
 
     def test_background_component_rejects_fixed_context_actions(self) -> None:
         for action_id in ("remove", "move", CUSTOM_DETAIL_ACTION_ID):
@@ -119,6 +135,7 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
             ("左上角那張圖可以換成更像淨灘的圖", "activity_icon1"),
             ("下面那個單位資訊不要太搶眼", "info_group2"),
             ("第一個場次的時間地點說明需要更好讀", "description1"),
+            ("整張海報底色可以改成更有海洋感的藍色", "background"),
         ]
 
         for text, expected_component_id in cases:

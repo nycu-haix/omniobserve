@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { getPrivatePhaseTaskItemActionLabel, reindexPrivatePhaseTaskItems, sortPrivatePhaseTaskItems } from "../lib/privatePhaseTaskItems";
-import { getActionReferenceDescription, getComponentReferenceDescription } from "../lib/taskItemReference";
+import { getActionReferenceDescription, getComponentReferenceCategoryLabel, getComponentReferenceDescription, isBackgroundReferenceOption } from "../lib/taskItemReference";
 import { cn } from "../lib/utils";
 import {
 	createPrivatePhaseTaskItem,
@@ -141,18 +141,27 @@ function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: 
 
 function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind; option: Phase1BuilderOption; isSelected: boolean; onSelect: () => void }) {
 	const description = kind === "component" ? getComponentReferenceDescription(option) : getActionReferenceDescription(option);
+	const categoryLabel = kind === "component" ? getComponentReferenceCategoryLabel(option) : "";
+	const isBackgroundComponent = kind === "component" && isBackgroundReferenceOption(option);
 	return (
 		<button
 			type="button"
 			className={cn(
-				"inline-flex min-h-9 min-w-0 items-center rounded-md border bg-card px-2.5 py-1.5 text-left text-xs font-medium leading-5 shadow-sm transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-				isSelected && "border-primary bg-primary/10 text-primary"
+				"inline-flex min-h-9 min-w-0 items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-left text-xs font-medium leading-5 shadow-sm transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				isBackgroundComponent && "border-cyan-500/45 bg-cyan-50/80 text-cyan-950 hover:border-cyan-600/70 dark:border-cyan-300/30 dark:bg-cyan-950/30 dark:text-cyan-100",
+				isSelected && !isBackgroundComponent && "border-primary bg-primary/10 text-primary",
+				isSelected && isBackgroundComponent && "border-cyan-600 bg-cyan-100 text-cyan-950 ring-1 ring-cyan-500/30 dark:border-cyan-300 dark:bg-cyan-900/50 dark:text-cyan-50"
 			)}
 			onClick={onSelect}
 			aria-pressed={isSelected}
-			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}，${description}`}
+			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}，${categoryLabel ? `${categoryLabel}，` : ""}${description}`}
 			title={description}
 		>
+			{categoryLabel && (
+				<span className="shrink-0 rounded border border-cyan-600/30 bg-white/60 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-800 dark:border-cyan-200/30 dark:bg-cyan-950/40 dark:text-cyan-100">
+					{categoryLabel}
+				</span>
+			)}
 			<span className="min-w-0 break-words">{option.label_zh}</span>
 		</button>
 	);
@@ -230,6 +239,8 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const hasDetailValue = form.detail.trim().length > 0;
 	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
+	const backgroundComponents = builder.components.filter(isBackgroundReferenceOption);
+	const foregroundComponents = builder.components.filter(component => !isBackgroundReferenceOption(component));
 	const isDeletingTaskItem = deletingItemId !== null;
 	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving && !isDeletingTaskItem;
 	const requiredItemCount = minimumItemCount(builder);
@@ -499,11 +510,23 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					<div className="text-xs font-semibold text-muted-foreground">可選項目</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">海報元件</div>
-						<div className="flex flex-wrap gap-2">
-							{builder.components.map(component => (
-								<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
-							))}
-						</div>
+						{foregroundComponents.length > 0 && (
+							<div className="flex flex-wrap gap-2">
+								{foregroundComponents.map(component => (
+									<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
+								))}
+							</div>
+						)}
+						{backgroundComponents.length > 0 && (
+							<div className="grid gap-1.5">
+								<div className="text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">背景與底色</div>
+								<div className="flex flex-wrap gap-2">
+									{backgroundComponents.map(component => (
+										<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
+									))}
+								</div>
+							</div>
+						)}
 					</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">改善動作</div>

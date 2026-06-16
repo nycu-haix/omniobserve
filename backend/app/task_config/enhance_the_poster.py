@@ -313,8 +313,9 @@ PHASE1_POSTER_COMPONENTS = [
     },
     {
         "id": "background",
-        "label_zh": "背景",
-        "label_en": "Background",
+        "label_zh": "背景圖／底色",
+        "label_en": "Background image/color",
+        "category": "background",
         "allowed_action_ids": ["change_color", "transparency"],
     },
 ]
@@ -389,8 +390,8 @@ PHASE1_COMPONENT_DETECTION_METADATA = {
         "aliases": ["底部資訊", "下方資訊", "footer", "下方單位資訊", "下面那個單位資訊", "主辦指導響應", "底部 logo"],
     },
     "background": {
-        "description_zh": "海報底色、背景圖或海洋感底圖，不是單一前景元件。",
-        "aliases": ["背景圖", "底圖", "海洋背景", "藍色背景", "背景色", "整張底色"],
+        "description_zh": "整張海報的底色、背景圖或海洋感底圖，不是單一前景元件。",
+        "aliases": ["背景", "背景圖", "底圖", "海洋背景", "藍色背景", "背景色", "底色", "整張底色", "整張海報底色"],
     },
 }
 
@@ -429,6 +430,7 @@ PHASE1_ACTION_ITEMS = [
         "id": "change_color",
         "label_zh": "改顏色",
         "label_en": "Change color",
+        "description_zh": "調整文字、圖示或背景的顏色；選「背景圖／底色」時就是改整張海報底色。",
         "template_zh": "改「{component}」顏色",
     },
     {
