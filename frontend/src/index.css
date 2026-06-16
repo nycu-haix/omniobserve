@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+	.private-board-header {
+		container-type: inline-size;
+	}
+
+	.private-board-toolbar {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.private-board-status {
+		grid-column: 1 / -1;
+		justify-self: end;
+	}
+
+	@container (min-width: 40rem) {
+		.private-board-toolbar {
+			grid-template-columns: auto minmax(0, 1fr) auto;
+		}
+
+		.private-board-status {
+			grid-column: auto;
+		}
+	}
+}
+
 @layer base {
 	:root {
 		--background: 0 0% 100%;
