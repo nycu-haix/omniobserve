@@ -11,3 +11,12 @@ export function isOwnedRankingItem(sourceUserIds: readonly unknown[] | null | un
 
 	return sourceUserIds.some(sourceUserId => normalizeRankingOwnerId(sourceUserId) === normalizedParticipantId);
 }
+
+export function getRankingOwnerLabel(displayName: unknown, participantId: unknown): string {
+	const normalizedDisplayName = String(displayName ?? "").trim();
+	if (normalizedDisplayName) {
+		return normalizedDisplayName;
+	}
+
+	return `Participant ${String(participantId ?? "").trim() || "?"}`;
+}

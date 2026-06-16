@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isOwnedRankingItem, normalizeRankingOwnerId } from "../src/lib/rankingOwnership.ts";
+import { getRankingOwnerLabel, isOwnedRankingItem, normalizeRankingOwnerId } from "../src/lib/rankingOwnership.ts";
 
 test("normalizes positive participant ids for ranking ownership", () => {
 	assert.equal(normalizeRankingOwnerId("1"), 1);
@@ -17,4 +17,11 @@ test("detects current participant ownership from source user ids", () => {
 	assert.equal(isOwnedRankingItem([1, 2], "3"), false);
 	assert.equal(isOwnedRankingItem(undefined, "1"), false);
 	assert.equal(isOwnedRankingItem([1], "admin"), false);
+});
+
+test("formats ranking owner label from participant display name", () => {
+	assert.equal(getRankingOwnerLabel("Alice", "1"), "Alice");
+	assert.equal(getRankingOwnerLabel("  Alice  ", "1"), "Alice");
+	assert.equal(getRankingOwnerLabel("", "2"), "Participant 2");
+	assert.equal(getRankingOwnerLabel(null, null), "Participant ?");
 });
