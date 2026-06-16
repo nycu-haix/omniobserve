@@ -17,14 +17,12 @@ test("Jitsi noise suppression is enabled by default", () => {
 });
 
 test("Jitsi public audio ducks only while the local participant speaks in private mode", () => {
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: true, isLocalSpeaking: true }), true);
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: true, isLocalSpeaking: false }), false);
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "public", duckingEnabled: true, isLocalSpeaking: true }), false);
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: false, isLocalSpeaking: true }), false);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: true, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: true, isLocalSpeaking: false }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "public", duckingEnabled: true, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: false, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", isLocalSpeaking: true }), true);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", isLocalSpeaking: false }), false);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "public", isLocalSpeaking: true }), false);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", isLocalSpeaking: false }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "public", isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
 });
 
 test("Jitsi remote participant volume commands skip local and duplicate participants", () => {
