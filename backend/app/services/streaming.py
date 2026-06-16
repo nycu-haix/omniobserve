@@ -19,6 +19,7 @@ from .asr import transcribe_ws_chunk
 from .board_payloads import serialize_frontend_board_idea_block, serialize_frontend_board_idea_block_update
 from .participant_roles import is_audio_transcription_role, list_session_participant_roles
 from .participant_status import get_cached_participant_role, mark_audio_disconnected, sync_participant_roles, update_audio_status
+from .pipeline_latency import record_audio_transcript_latency_events
 from .realtime import (
     board_manager,
     broadcast_admin_idea_blocks_update,
@@ -353,6 +354,7 @@ async def handle_audio_stream_websocket(
     int16_buffer = np.empty(0, dtype=np.int16)
     buffer_start_sample = 0
     total_samples_received = 0
+    total_audio_bytes_received = 0
     next_window_start_sample = 0
     first_audio_received_at: datetime | None = None
     merged_transcript_text = ""
@@ -362,6 +364,7 @@ async def handle_audio_stream_websocket(
     transcription_disabled_notified = False
     silence_start_at: datetime | None = None
     segment_started_at: datetime | None = None
+    segment_start_sample: int | None = None
     segment_index = 0
 
     async with SessionLocal() as db:
@@ -505,8 +508,10 @@ async def handle_audio_stream_websocket(
                 return None
 
             sample_rate = max(stream_context.sample_rate, 1)
-            started_at = first_audio_received_at or utc_now()
-            ended_at = started_at + timedelta(seconds=total_samples_received / sample_rate)
+            current_segment_start_sample = segment_start_sample if segment_start_sample is not None else 0
+            current_segment_samples = max(0, total_samples_received - current_segment_start_sample)
+            started_at = sample_timestamp(current_segment_start_sample)
+            ended_at = sample_timestamp(total_samples_received)
             visibility = stream_context.scope if stream_context.scope == Visibility.PRIVATE else Visibility.PUBLIC
             saved_segment = await save_ws_transcript_segment(
                 db,
@@ -520,11 +525,34 @@ async def handle_audio_stream_websocket(
             )
             if saved_segment:
                 transcript_segments.append(saved_segment)
+                await record_audio_transcript_latency_events(
+                    db,
+                    session_name=session_name,
+                    task_name=task_name,
+                    participant_id=participant_id,
+                    scope=visibility.value,
+                    transcript_id=saved_segment.segment_id,
+                    transcript_chars=len(saved_segment.text),
+                    audio_started_at=started_at,
+                    audio_ended_at=ended_at,
+                    sample_rate=sample_rate,
+                    channels=stream_context.channels,
+                    audio_samples=current_segment_samples,
+                    audio_bytes=_audio_byte_count(current_segment_samples, stream_context.encoding),
+                    source=stream_context.source or "audio_stream",
+                    reason="client_stop",
+                    metadata={
+                        "encoding": stream_context.encoding,
+                        "client_id": stream_context.client_id,
+                        "connection_audio_samples": total_samples_received,
+                        "connection_audio_bytes": total_audio_bytes_received,
+                    },
+                )
             return saved_segment
 
         async def finalize_silence_segment() -> StreamTranscript | None:
             nonlocal merged_transcript_text, last_sent_live_text, next_window_start_sample
-            nonlocal silence_start_at, segment_started_at, segment_index
+            nonlocal silence_start_at, segment_started_at, segment_start_sample, segment_index
 
             if stream_context is not None and not _is_audio_transcription_enabled(session_name, participant_id):
                 merged_transcript_text = ""
@@ -536,8 +564,10 @@ async def handle_audio_stream_websocket(
 
             await process_audio_buffer(force=True)
             final_text = merged_transcript_text.strip()
-            seg_started_at = segment_started_at or first_audio_received_at or utc_now()
-            ended_at = utc_now()
+            current_segment_start_sample = segment_start_sample if segment_start_sample is not None else 0
+            current_segment_samples = max(0, total_samples_received - current_segment_start_sample)
+            seg_started_at = sample_timestamp(current_segment_start_sample)
+            ended_at = sample_timestamp(total_samples_received)
 
             # Reset state for next segment before any awaits that could interleave
             merged_transcript_text = ""
@@ -546,6 +576,7 @@ async def handle_audio_stream_websocket(
             trim_processed_audio()
             silence_start_at = None
             segment_started_at = None
+            segment_start_sample = None
 
             if not final_text or stream_context is None:
                 return None
@@ -563,6 +594,29 @@ async def handle_audio_stream_websocket(
             )
             if saved_segment:
                 transcript_segments.append(saved_segment)
+                await record_audio_transcript_latency_events(
+                    db,
+                    session_name=session_name,
+                    task_name=task_name,
+                    participant_id=participant_id,
+                    scope=visibility.value,
+                    transcript_id=saved_segment.segment_id,
+                    transcript_chars=len(saved_segment.text),
+                    audio_started_at=seg_started_at,
+                    audio_ended_at=ended_at,
+                    sample_rate=max(stream_context.sample_rate, 1),
+                    channels=stream_context.channels,
+                    audio_samples=current_segment_samples,
+                    audio_bytes=_audio_byte_count(current_segment_samples, stream_context.encoding),
+                    source=stream_context.source or "audio_stream",
+                    reason="silence",
+                    metadata={
+                        "encoding": stream_context.encoding,
+                        "client_id": stream_context.client_id,
+                        "connection_audio_samples": total_samples_received,
+                        "connection_audio_bytes": total_audio_bytes_received,
+                    },
+                )
 
             segment_id = saved_segment.segment_id if saved_segment else f"silence-{segment_index}"
             timestamp_ms = int(ended_at.timestamp() * 1000)
@@ -651,6 +705,7 @@ async def handle_audio_stream_websocket(
                     aligned_size = len(raw_bytes) - (len(raw_bytes) % bytes_per_sample)
                     if aligned_size <= 0:
                         continue
+                    total_audio_bytes_received += aligned_size
 
                     if stream_context.encoding == "float32_pcm":
                         float32_array = np.frombuffer(raw_bytes[:aligned_size], dtype="<f4")
@@ -681,6 +736,7 @@ async def handle_audio_stream_websocket(
                         silence_start_at = None
                         if segment_started_at is None:
                             segment_started_at = utc_now()
+                            segment_start_sample = max(0, total_samples_received - int16_array.size)
                     elif silence_start_at is None:
                         silence_start_at = utc_now()
 
@@ -912,6 +968,24 @@ def _timestamp_from_seconds(value: Any) -> datetime:
     if isinstance(value, (int, float)) and value >= 0:
         return utc_now() + timedelta(seconds=0)
     return utc_now()
+
+
+def _audio_sample_count(
+    started_at: datetime | None,
+    ended_at: datetime | None,
+    sample_rate: int,
+) -> int | None:
+    if started_at is None or ended_at is None:
+        return None
+    duration_seconds = max(0.0, (ended_at - started_at).total_seconds())
+    return max(0, round(duration_seconds * max(sample_rate, 1)))
+
+
+def _audio_byte_count(sample_count: int | None, encoding: str | None) -> int | None:
+    if sample_count is None:
+        return None
+    bytes_per_sample = 4 if encoding == "float32_pcm" else 2
+    return max(0, sample_count) * bytes_per_sample
 
 
 FINAL_TRANSCRIPT_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}

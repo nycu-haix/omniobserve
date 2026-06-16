@@ -4,6 +4,7 @@ import json
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -37,7 +38,7 @@ from .participant_status import (
     update_audio_status,
 )
 from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, is_audio_transcription_role, list_session_participant_roles
-from .pipeline_latency import record_public_now_latency_events
+from .pipeline_latency import record_audio_transcript_latency_events, record_public_now_latency_events
 from .public_context_matching import (
     PublicContextMatch,
     find_public_context_component_matches,
@@ -249,6 +250,8 @@ class AudioConnectionState:
     is_speaking: bool = False
     transcription_disabled_notified: bool = False
     audio_buffer: bytearray = field(default_factory=bytearray)
+    audio_buffer_started_at: datetime | None = None
+    audio_buffer_bytes: int = 0
 
 
 audio_manager = ConnectionManager()
@@ -2379,6 +2382,10 @@ async def handle_audio_websocket(
                 return
             raw_bytes = bytes(state.audio_buffer)
             state.audio_buffer.clear()
+            audio_started_at = state.audio_buffer_started_at or utc_now()
+            audio_bytes = state.audio_buffer_bytes or len(raw_bytes)
+            state.audio_buffer_started_at = None
+            state.audio_buffer_bytes = 0
             participant_role = get_cached_participant_role(session_id, participant_id)
             if not is_audio_transcription_role(participant_role):
                 logger.info(
@@ -2403,6 +2410,10 @@ async def handle_audio_websocket(
             if aligned_size <= 0:
                 return
             chunk = raw_bytes[:aligned_size]
+            audio_samples = aligned_size // 2
+            audio_ended_at = audio_started_at + timedelta(
+                seconds=audio_samples / max(state.sample_rate, 1)
+            )
             transcript_text = await transcribe_ws_chunk(
                 pcm16_bytes=chunk,
                 sample_rate=state.sample_rate,
@@ -2418,18 +2429,35 @@ async def handle_audio_websocket(
                     state.mic_mode,
                     len(transcript_text),
                 )
-                now = utc_now()
                 saved_segment = await save_ws_transcript_segment(
                     db,
                     session_name=session_id,
                     participant_id=participant_id,
                     visibility=Visibility.PUBLIC,
                     transcript_text=transcript_text,
-                    started_at=now,
-                    ended_at=now,
+                    started_at=audio_started_at,
+                    ended_at=audio_ended_at,
                     display_name=state.display_name,
                 )
                 segment_id = saved_segment.segment_id if saved_segment else None
+                if saved_segment is not None:
+                    await record_audio_transcript_latency_events(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        scope=Visibility.PUBLIC.value,
+                        transcript_id=saved_segment.segment_id,
+                        transcript_chars=len(saved_segment.text),
+                        audio_started_at=audio_started_at,
+                        audio_ended_at=audio_ended_at,
+                        sample_rate=state.sample_rate,
+                        channels=1,
+                        audio_samples=audio_samples,
+                        audio_bytes=audio_bytes,
+                        source="legacy_audio_ws",
+                        reason="flush_public",
+                        metadata={"mic_mode": state.mic_mode},
+                    )
                 await audio_manager.send_to(
                     session_id,
                     participant_id,
@@ -2459,7 +2487,6 @@ async def handle_audio_websocket(
                     transcript_segment_id=segment_id,
                 )
                 return
-            now = utc_now()
             saved_segment = await save_ws_transcript_segment(
                 db,
                 session_name=session_id,
@@ -2468,12 +2495,32 @@ async def handle_audio_websocket(
                 if state.mic_mode == "private"
                 else Visibility.PUBLIC,
                 transcript_text=transcript_text,
-                started_at=now,
-                ended_at=now,
+                started_at=audio_started_at,
+                ended_at=audio_ended_at,
                 display_name=state.display_name,
             )
             if saved_segment:
                 transcript_segments.append(saved_segment)
+                saved_segment_visibility = (
+                    Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC
+                ).value
+                await record_audio_transcript_latency_events(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    scope=saved_segment_visibility,
+                    transcript_id=saved_segment.segment_id,
+                    transcript_chars=len(saved_segment.text),
+                    audio_started_at=audio_started_at,
+                    audio_ended_at=audio_ended_at,
+                    sample_rate=state.sample_rate,
+                    channels=1,
+                    audio_samples=audio_samples,
+                    audio_bytes=audio_bytes,
+                    source="legacy_audio_ws",
+                    reason="flush_private" if saved_segment_visibility == Visibility.PRIVATE.value else "flush_public",
+                    metadata={"mic_mode": state.mic_mode},
+                )
                 logger.info(
                     "audio ws transcript session_id=%s participant_id=%s segment_id=%s text=%s",
                     session_id,
@@ -2512,7 +2559,11 @@ async def handle_audio_websocket(
 
                 raw_bytes = message.get("bytes")
                 if raw_bytes is not None:
+                    if not state.audio_buffer:
+                        state.audio_buffer_started_at = utc_now()
+                        state.audio_buffer_bytes = 0
                     state.audio_buffer.extend(raw_bytes)
+                    state.audio_buffer_bytes += len(raw_bytes)
                     if len(state.audio_buffer) >= STREAM_CHUNK_SAMPLES * 2:
                         await flush_buffer()
                     continue
