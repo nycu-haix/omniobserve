@@ -187,7 +187,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 ### 4.5 Quiet participant fallback
 
-若 private phase 中真實參與者長時間沒有出聲或輸入文字，Host 可用同一段中性提醒，不要補任務答案或引導排序方向：
+固定門檻：private phase 開始後，若同一位真實參與者連續 2 分鐘沒有可辨識的出聲 reasoning、悄悄話 transcript、手動 idea block 或文字輸入理由，Host 才可用同一段中性提醒，不要補任務答案或引導排序方向。每位真實參與者每個 private phase 最多提醒一次；每次使用都必須在 Observer note 記錄 `event_type=facilitator_prompt`、timestamp、participant_id、phase，以及提醒前的 `reasoning_capture_mode`。
 
 > 如果你現在正在想，但還沒有說出來，可以把正在比較的理由講出來；不用講得完整，也不用說服其他人。如果不想出聲，也可以用文字把理由記下來，讓系統知道你正在考慮什麼。
 
