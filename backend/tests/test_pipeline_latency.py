@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 
 from app.schemas import StreamTranscript
-from app.services.streaming import _audio_sample_count
+from app.services.streaming import _audio_byte_count, _audio_sample_count
 from app.services.pipeline_latency import pipeline_decision
 from app.services.similarity_detection import _similarity_cue_latency_stage
 from app.services.similarity_notifications import SimilarityCueDeliverySummary
@@ -231,6 +231,12 @@ class PipelineLatencyTests(unittest.TestCase):
         )
         self.assertEqual(_audio_sample_count(started_at + timedelta(seconds=2), started_at, 16000), 0)
         self.assertIsNone(_audio_sample_count(None, started_at, 16000))
+
+    def test_audio_byte_count_uses_segment_encoding(self) -> None:
+        self.assertEqual(_audio_byte_count(16000, "float32_pcm"), 64000)
+        self.assertEqual(_audio_byte_count(16000, "int16_pcm"), 32000)
+        self.assertEqual(_audio_byte_count(-1, "int16_pcm"), 0)
+        self.assertIsNone(_audio_byte_count(None, "int16_pcm"))
 
     def test_similarity_cue_latency_stage_distinguishes_suppressed(self) -> None:
         self.assertEqual(
