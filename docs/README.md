@@ -26,7 +26,8 @@
 
 ## 正式版本核心決策
 
-- 一場正式實驗約 150 分鐘，包含 Lost-at-Sea、Enhance-the-Poster、兩次 task 後小訪談/小表單、三位真實參與者的個別訪談，以及最後 Debrief。
+- 一場正式實驗暫時保留約 150-152 分鐘，包含 Lost-at-Sea、Enhance-the-Poster、兩次 task 後小訪談/小表單、三位真實參與者的個別訪談、中間 5 分鐘正式休息，以及最後 Debrief。
+- 暫時不拆 session、不改 between-subject；保留完整 within-subject 資料量的代價是疲勞風險，因此 Procedure 和 checklist 需明確執行正式休息、非核心緩衝壓縮規則與 incident log。
 - 每場 4 人一組，其中 3 位真實參與者、1 位暗樁；Debrief 前不揭露暗樁。
 - 三位真實參與者的個別訪談必須在 Debrief 前完成；訪談中不得提到暗樁、研究團隊安排成員或任何暗示身分的說法。
 - Lost-at-Sea 與 Enhance-the-Poster 的順序可 counterbalance；近期兩組暫定都先 Lost 後 Poster，但不得寫死。
