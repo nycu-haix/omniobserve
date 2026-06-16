@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -24,6 +24,7 @@ import {
 	normalizeSessionPhaseOptions,
 	type SessionPhase
 } from "../lib/sessionPhase";
+import { getActionDetailHint, getActionReferenceDescription, getComponentReferenceDescription, getTaskReferenceLabel, type TaskReferenceOption } from "../lib/taskItemReference";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
@@ -832,6 +833,47 @@ function LostAtSeaRankingPanel({
 	);
 }
 
+function TaskReferenceList({
+	title,
+	items,
+	getDescription,
+	getMeta
+}: {
+	title: string;
+	items: TaskReferenceOption[];
+	getDescription: (item: TaskReferenceOption) => string;
+	getMeta?: (item: TaskReferenceOption) => string;
+}) {
+	return (
+		<div className="grid min-h-0 gap-2">
+			<div className="text-xs font-semibold text-muted-foreground">{title}</div>
+			<div className="grid min-h-0 gap-1.5 overflow-visible">
+				{items.map(item => {
+					const label = getTaskReferenceLabel(item);
+					const description = getDescription(item);
+					const meta = getMeta?.(item) ?? "";
+					return (
+						<div key={item.id} className="grid min-w-0 gap-0.5 rounded-md bg-background/70 px-2.5 py-2">
+							<div className="min-w-0 truncate text-xs font-semibold text-foreground">{label}</div>
+							<div className="text-xs leading-5 text-muted-foreground">{description}</div>
+							{meta && <div className="text-[11px] leading-4 text-muted-foreground/80">{meta}</div>}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+function TaskReferencePanel({ id, builder }: { id: string; builder: Phase1BuilderConfig }) {
+	return (
+		<section id={id} className="grid max-h-52 shrink-0 gap-3 overflow-y-auto rounded-md border bg-muted/35 p-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]" aria-label="海報元件與改善動作說明">
+			<TaskReferenceList title="海報元件" items={builder.components} getDescription={getComponentReferenceDescription} />
+			<TaskReferenceList title="改善動作" items={builder.actions} getDescription={getActionReferenceDescription} getMeta={getActionDetailHint} />
+		</section>
+	);
+}
+
 function TaskWorkspace({
 	currentPhase,
 	taskTitle,
@@ -862,7 +904,9 @@ function TaskWorkspace({
 	renderPublicRanking: () => React.ReactNode;
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
+	const taskReferencePanelId = "task-reference-panel";
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+	const [isTaskReferenceOpen, setIsTaskReferenceOpen] = useState(false);
 	const [referenceImageStatus, setReferenceImageStatus] = useState({ src: "", retryToken: 0, failed: false });
 	const normalizedReferenceImageSrc = referenceImageSrc || "";
 	const referenceImageRetryToken = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.retryToken : 0;
@@ -948,13 +992,36 @@ function TaskWorkspace({
 	};
 
 	return (
-		<section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Task workspace">
-			<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+		<section
+			className={cn("grid min-h-0 gap-3 overflow-hidden rounded-lg border p-3", isTaskReferenceOpen && phase1BuilderEnabled ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]")}
+			aria-label="Task workspace"
+		>
+			<header className="flex shrink-0 flex-wrap items-center justify-between gap-2">
 				<div className="grid min-w-0 flex-1 gap-1">
 					<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
 				</div>
-				{compactPhaseTimer}
+				<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+					{phase1BuilderEnabled && (
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-8 gap-1.5 px-2"
+							aria-expanded={isTaskReferenceOpen}
+							aria-controls={taskReferencePanelId}
+							data-local-space-shortcut="true"
+							title={isTaskReferenceOpen ? "收合元件說明" : "展開元件說明"}
+							onClick={() => setIsTaskReferenceOpen(current => !current)}
+						>
+							<Info className="h-3.5 w-3.5" aria-hidden="true" />
+							<span className="hidden sm:inline">元件說明</span>
+							{isTaskReferenceOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+						</Button>
+					)}
+					{compactPhaseTimer}
+				</div>
 			</header>
+			{phase1BuilderEnabled && phase1Builder && isTaskReferenceOpen && <TaskReferencePanel id={taskReferencePanelId} builder={phase1Builder} />}
 			<div className="min-h-0 overflow-hidden">
 				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>

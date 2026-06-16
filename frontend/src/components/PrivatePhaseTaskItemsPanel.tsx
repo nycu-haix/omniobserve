@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { getPrivatePhaseTaskItemActionLabel, reindexPrivatePhaseTaskItems, sortPrivatePhaseTaskItems } from "../lib/privatePhaseTaskItems";
+import { getActionReferenceDescription, getComponentReferenceDescription } from "../lib/taskItemReference";
 import { cn } from "../lib/utils";
 import {
 	createPrivatePhaseTaskItem,
@@ -139,6 +140,7 @@ function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: 
 }
 
 function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind; option: Phase1BuilderOption; isSelected: boolean; onSelect: () => void }) {
+	const description = kind === "component" ? getComponentReferenceDescription(option) : getActionReferenceDescription(option);
 	return (
 		<button
 			type="button"
@@ -148,7 +150,8 @@ function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind
 			)}
 			onClick={onSelect}
 			aria-pressed={isSelected}
-			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}`}
+			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}，${description}`}
+			title={description}
 		>
 			<span className="min-w-0 break-words">{option.label_zh}</span>
 		</button>
