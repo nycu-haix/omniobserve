@@ -10,12 +10,12 @@ export function getJitsiNoiseSuppressionCommandConfig() {
 	};
 }
 
-export function shouldDuckJitsiPublicAudio({ micMode, duckingEnabled }: { micMode: MicMode; duckingEnabled: boolean }) {
-	return duckingEnabled && micMode === "private";
+export function shouldDuckJitsiPublicAudio({ micMode, duckingEnabled, isLocalSpeaking }: { micMode: MicMode; duckingEnabled: boolean; isLocalSpeaking: boolean }) {
+	return duckingEnabled && micMode === "private" && isLocalSpeaking;
 }
 
-export function getJitsiPublicAudioVolume({ micMode, duckingEnabled }: { micMode: MicMode; duckingEnabled: boolean }) {
-	return shouldDuckJitsiPublicAudio({ micMode, duckingEnabled }) ? JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME : JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME;
+export function getJitsiPublicAudioVolume({ micMode, duckingEnabled, isLocalSpeaking }: { micMode: MicMode; duckingEnabled: boolean; isLocalSpeaking: boolean }) {
+	return shouldDuckJitsiPublicAudio({ micMode, duckingEnabled, isLocalSpeaking }) ? JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME : JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME;
 }
 
 export function getJitsiRemoteParticipantVolumeCommands(participants: Iterable<{ id: string; isLocal?: boolean }>, volume: number): { participantId: string; volume: number }[] {

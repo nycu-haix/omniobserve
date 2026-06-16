@@ -16,13 +16,15 @@ test("Jitsi noise suppression is enabled by default", () => {
 	assert.deepEqual(getJitsiNoiseSuppressionCommandConfig(), { enabled: true });
 });
 
-test("Jitsi public audio ducks only in private mode when enabled", () => {
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: true }), true);
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "public", duckingEnabled: true }), false);
-	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: false }), false);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: true }), JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "public", duckingEnabled: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
-	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: false }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
+test("Jitsi public audio ducks only while the local participant speaks in private mode", () => {
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: true, isLocalSpeaking: true }), true);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: true, isLocalSpeaking: false }), false);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "public", duckingEnabled: true, isLocalSpeaking: true }), false);
+	assert.equal(shouldDuckJitsiPublicAudio({ micMode: "private", duckingEnabled: false, isLocalSpeaking: true }), false);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: true, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_WHISPER_DUCK_VOLUME);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: true, isLocalSpeaking: false }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "public", duckingEnabled: true, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
+	assert.equal(getJitsiPublicAudioVolume({ micMode: "private", duckingEnabled: false, isLocalSpeaking: true }), JITSI_PUBLIC_AUDIO_DEFAULT_VOLUME);
 });
 
 test("Jitsi remote participant volume commands skip local and duplicate participants", () => {
