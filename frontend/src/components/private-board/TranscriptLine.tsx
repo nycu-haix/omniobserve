@@ -1,4 +1,4 @@
-import { CornerDownRight, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CornerDownRight, Loader2, Radio } from "lucide-react";
 import { formatParticipantDisplayName } from "../../lib/participantDefaults";
 import type { TranscriptIdeaBlockStatus } from "../../lib/transcriptIdeaBlockDisplay";
 import { cn } from "../../lib/utils";
@@ -19,7 +19,8 @@ export function TranscriptLine({ line, onJumpToBlock, ideaBlockStatus = "raw", i
 	const alignRight = isPrivate && isOwn;
 	const speakerName = formatParticipantDisplayName(line.userId, line.displayName);
 	const canJumpToIdeaBlock = isPrivate && ideaBlockStatus === "linked" && !!ideaBlockTargetId && !!onJumpToBlock;
-	const isPendingIdeaBlock = isPrivate && ideaBlockStatus === "pending";
+	const ideaBlockStateBadge = getIdeaBlockStateBadge(ideaBlockStatus);
+	const IdeaBlockStateIcon = ideaBlockStateBadge?.Icon;
 
 	return (
 		<div className={cn("flex min-w-0 items-start gap-3 border-b py-2 text-sm leading-6", alignRight ? "justify-end" : "justify-start")}>
@@ -43,13 +44,45 @@ export function TranscriptLine({ line, onJumpToBlock, ideaBlockStatus = "raw", i
 						跳至想法
 					</Button>
 				)}
-				{isPendingIdeaBlock && (
-					<span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground", alignRight ? "self-end" : "self-start")}>
-						<Loader2 className="h-3 w-3 animate-spin" />
-						正在整理想法
+				{isPrivate && ideaBlockStateBadge && IdeaBlockStateIcon && (
+					<span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium", ideaBlockStateBadge.className, alignRight ? "self-end" : "self-start")}>
+						<IdeaBlockStateIcon className={cn("h-3 w-3", ideaBlockStateBadge.animate && "animate-spin")} />
+						{ideaBlockStateBadge.label}
 					</span>
 				)}
 			</div>
 		</div>
 	);
+}
+
+function getIdeaBlockStateBadge(status: TranscriptIdeaBlockStatus) {
+	switch (status) {
+		case "captured":
+			return {
+				Icon: Radio,
+				label: "已收到語音",
+				className: "border-sky-200 bg-sky-50 text-sky-700"
+			};
+		case "pending":
+			return {
+				Icon: Loader2,
+				label: "正在整理想法",
+				className: "border bg-muted text-muted-foreground",
+				animate: true
+			};
+		case "no_idea":
+			return {
+				Icon: CheckCircle2,
+				label: "已收到，未產生新的想法",
+				className: "border-emerald-200 bg-emerald-50 text-emerald-700"
+			};
+		case "failed":
+			return {
+				Icon: AlertTriangle,
+				label: "整理失敗，請再試一次",
+				className: "border-destructive/30 bg-destructive/10 text-destructive"
+			};
+		default:
+			return null;
+	}
 }

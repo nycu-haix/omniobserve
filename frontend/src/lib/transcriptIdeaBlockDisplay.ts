@@ -1,6 +1,6 @@
 import type { IdeaBlock, TranscriptLine } from "../types";
 
-export type TranscriptIdeaBlockStatus = "raw" | "pending" | "linked";
+export type TranscriptIdeaBlockStatus = "raw" | "captured" | "pending" | "linked" | "no_idea" | "failed";
 
 function isReadyIdeaBlock(block: IdeaBlock): boolean {
 	return block.status !== "generating" && !block.isDeleted;
@@ -14,9 +14,17 @@ function blockTranscriptIds(block: IdeaBlock): string[] {
 	return [block.transcriptLineId, ...(block.sourceTranscriptIds ?? [])].filter((id): id is string => !!id);
 }
 
-function blockMatchesTranscriptLine(block: IdeaBlock, line: TranscriptLine): boolean {
+function isTerminalTranscriptIdeaBlockStatus(line: TranscriptLine): boolean {
+	return line.ideaBlockStatus === "no_idea" || line.ideaBlockStatus === "failed";
+}
+
+function blockMatchesTranscriptLine(block: IdeaBlock, line: TranscriptLine, options: { allowTextMatch?: boolean } = {}): boolean {
 	if (blockTranscriptIds(block).some(transcriptId => transcriptId === line.id)) {
 		return true;
+	}
+
+	if (options.allowTextMatch === false) {
+		return false;
 	}
 
 	const transcriptText = block.transcript?.trim();
@@ -28,6 +36,10 @@ export function getTranscriptIdeaBlockTargetId(line: TranscriptLine, blocks: Ide
 		return null;
 	}
 
+	if (isTerminalTranscriptIdeaBlockStatus(line)) {
+		return null;
+	}
+
 	if (line.linkedBlockId) {
 		const linkedBlock = blocks.find(block => block.id === line.linkedBlockId);
 		if (linkedBlock && isReadyIdeaBlock(linkedBlock)) {
@@ -35,7 +47,7 @@ export function getTranscriptIdeaBlockTargetId(line: TranscriptLine, blocks: Ide
 		}
 	}
 
-	const matchingReadyBlock = blocks.find(block => isReadyIdeaBlock(block) && blockMatchesTranscriptLine(block, line));
+	const matchingReadyBlock = blocks.find(block => isReadyIdeaBlock(block) && blockMatchesTranscriptLine(block, line, { allowTextMatch: !isTerminalTranscriptIdeaBlockStatus(line) }));
 	return matchingReadyBlock?.id ?? null;
 }
 
@@ -48,8 +60,12 @@ export function getTranscriptIdeaBlockStatus(line: TranscriptLine, blocks: IdeaB
 		return "linked";
 	}
 
-	const matchingPendingBlock = blocks.find(block => isPendingIdeaBlock(block) && blockMatchesTranscriptLine(block, line));
-	return matchingPendingBlock ? "pending" : "raw";
+	const matchingPendingBlock = blocks.find(block => isPendingIdeaBlock(block) && blockMatchesTranscriptLine(block, line, { allowTextMatch: !isTerminalTranscriptIdeaBlockStatus(line) }));
+	if (matchingPendingBlock) {
+		return "pending";
+	}
+
+	return line.ideaBlockStatus ?? "raw";
 }
 
 export function linkTranscriptLinesToReadyBlocks<T extends TranscriptLine>(lines: T[], blocks: IdeaBlock[]): T[] {
@@ -69,14 +85,15 @@ export function linkTranscriptLinesToReadyBlocks<T extends TranscriptLine>(lines
 			};
 		}
 
-		if (line.linkedBlockId === targetBlockId) {
+		if (line.linkedBlockId === targetBlockId && !line.ideaBlockStatus) {
 			return line;
 		}
 
 		didChange = true;
 		return {
 			...line,
-			linkedBlockId: targetBlockId
+			linkedBlockId: targetBlockId,
+			ideaBlockStatus: undefined
 		};
 	});
 

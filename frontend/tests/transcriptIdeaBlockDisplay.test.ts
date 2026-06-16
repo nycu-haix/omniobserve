@@ -42,14 +42,57 @@ test("marks generating idea blocks as pending instead of jump targets", () => {
 	assert.equal(linkedLines[0]?.linkedBlockId, undefined);
 });
 
+test("uses explicit transcript processing states before a generated block exists", () => {
+	const capturedLine = transcriptLine({ ideaBlockStatus: "captured" });
+	const pendingLine = transcriptLine({ ideaBlockStatus: "pending" });
+	const noIdeaLine = transcriptLine({ ideaBlockStatus: "no_idea" });
+	const failedLine = transcriptLine({ ideaBlockStatus: "failed" });
+
+	assert.equal(getTranscriptIdeaBlockStatus(capturedLine, []), "captured");
+	assert.equal(getTranscriptIdeaBlockStatus(pendingLine, []), "pending");
+	assert.equal(getTranscriptIdeaBlockStatus(noIdeaLine, []), "no_idea");
+	assert.equal(getTranscriptIdeaBlockStatus(failedLine, []), "failed");
+});
+
 test("links transcript lines only after a ready idea block exists", () => {
-	const line = transcriptLine();
+	const line = transcriptLine({ ideaBlockStatus: "pending" });
 	const blocks = [ideaBlock({ id: "ready-block" })];
 	const linkedLines = linkTranscriptLinesToReadyBlocks([line], blocks);
 
 	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "linked");
 	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), "ready-block");
 	assert.equal(linkedLines[0]?.linkedBlockId, "ready-block");
+	assert.equal(linkedLines[0]?.ideaBlockStatus, undefined);
+});
+
+test("preserves terminal transcript states when only duplicate text matches", () => {
+	const line = transcriptLine({ ideaBlockStatus: "no_idea" });
+	const blocks = [ideaBlock({ id: "duplicate-block", transcriptLineId: "original-t1" })];
+	const linkedLines = linkTranscriptLinesToReadyBlocks([line], blocks);
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "no_idea");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+	assert.equal(linkedLines[0]?.linkedBlockId, undefined);
+	assert.equal(linkedLines[0]?.ideaBlockStatus, "no_idea");
+});
+
+test("preserves terminal transcript states when only pending text matches", () => {
+	const line = transcriptLine({ ideaBlockStatus: "failed" });
+	const blocks = [ideaBlock({ id: "pending-block", status: "generating", transcriptLineId: "other-t1" })];
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "failed");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+});
+
+test("preserves terminal transcript states when a stale linked block remains", () => {
+	const line = transcriptLine({ linkedBlockId: "ready-block", ideaBlockStatus: "failed" });
+	const blocks = [ideaBlock({ id: "ready-block" })];
+	const linkedLines = linkTranscriptLinesToReadyBlocks([line], blocks);
+
+	assert.equal(getTranscriptIdeaBlockStatus(line, blocks), "failed");
+	assert.equal(getTranscriptIdeaBlockTargetId(line, blocks), null);
+	assert.equal(linkedLines[0]?.linkedBlockId, undefined);
+	assert.equal(linkedLines[0]?.ideaBlockStatus, "failed");
 });
 
 test("ignores deleted and public transcript matches", () => {

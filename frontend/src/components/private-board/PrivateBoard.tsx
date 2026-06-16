@@ -1,6 +1,14 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { UIEvent } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	activeCompletionTargetKey,
+	completionTargetKeys,
+	completionTargetSegmentIds,
+	completionTargetSource,
+	completionTargetUserId,
+	matchingDraftCompletionTargetKeys
+} from "../../lib/audioCompletionTargets";
 import { buildIdeaBlockChatMessage, MAX_PUBLIC_CHAT_MESSAGE_LENGTH, parseIdeaBlockChatMessage } from "../../lib/chatMessages";
 import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
@@ -8,6 +16,13 @@ import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
+import {
+	clearPendingTranscriptLinesIdeaBlockStatus,
+	getCompletionTranscriptLineIds,
+	getIdeaBlockTranscriptLineIdsForBlockIds,
+	hasReadyIdeaBlockForTranscriptLineIds,
+	markTranscriptLinesIdeaBlockStatus
+} from "../../lib/transcriptLineIdeaBlockStatus";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -845,7 +860,7 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 		}
 		return sortTranscriptLines([...lines, { ...line, text: normalizedText }]);
 	}
-	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId) {
+	if (existingLine.text.trim() === normalizedText && existingLine.time === line.time && existingLine.linkedBlockId === line.linkedBlockId && existingLine.ideaBlockStatus === line.ideaBlockStatus) {
 		return lines;
 	}
 	return sortTranscriptLines(
@@ -858,7 +873,8 @@ function appendTranscriptLine(lines: TranscriptLineType[], line: TranscriptLineT
 						origin: item.origin === "history" || line.origin === "history" ? "history" : line.origin,
 						text: normalizedText,
 						timestampMs: line.timestampMs ?? item.timestampMs,
-						linkedBlockId: line.linkedBlockId ?? item.linkedBlockId
+						linkedBlockId: line.linkedBlockId ?? item.linkedBlockId,
+						ideaBlockStatus: line.ideaBlockStatus ?? item.ideaBlockStatus
 					}
 				: item
 		)
@@ -881,53 +897,6 @@ function audioTranscriptDraftSegmentId(message: AudioDraftTargetMessage): string
 
 function transcriptDraftTargetKey(message: AudioDraftTargetMessage, line: TranscriptLineType, participantId: string): string {
 	return [line.source ?? "unknown", line.userId ?? participantId, audioTranscriptDraftSegmentId(message) ?? "active"].join("|");
-}
-
-function appendAudioCompletionSegmentIds(segmentIds: Set<string>, values: Array<string | number | null> | null | undefined): void {
-	if (!Array.isArray(values)) {
-		return;
-	}
-
-	values.forEach(value => {
-		if (value == null) {
-			return;
-		}
-		const segmentId = String(value).trim();
-		if (segmentId) {
-			segmentIds.add(segmentId);
-		}
-	});
-}
-
-function addAudioCompletionSegmentId(segmentIds: Set<string>, value: string | number | null | undefined): void {
-	if (value == null) {
-		return;
-	}
-	const segmentId = String(value).trim();
-	if (segmentId) {
-		segmentIds.add(segmentId);
-	}
-}
-
-function completionTargetKeys(message: IdeaBlockCompletionTargetFields, participantId: string): string[] {
-	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
-	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
-	const segmentIds = new Set<string>();
-	appendAudioCompletionSegmentIds(segmentIds, message.replace_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.client_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.transcript_segment_ids);
-	appendAudioCompletionSegmentIds(segmentIds, message.segment_ids);
-	addAudioCompletionSegmentId(segmentIds, message.replace_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.client_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.transcript_segment_id);
-	addAudioCompletionSegmentId(segmentIds, message.segment_id);
-	return Array.from(segmentIds, segmentId => [source, String(userId), segmentId].join("|"));
-}
-
-function activeCompletionTargetKey(message: IdeaBlockCompletionTargetFields, participantId: string): string {
-	const source = message.scope ?? message.mic_mode ?? message.local_mic_mode ?? "private";
-	const userId = message.participant_id ?? message.userId ?? message.user_id ?? participantId;
-	return [source, String(userId), "active"].join("|");
 }
 
 function isUnpersistedTranscriptDraftId(id: string): boolean {
@@ -1851,6 +1820,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		[clearVoiceGeneratingTimeoutsByIds]
 	);
 
+	const getVoiceGeneratingBlockIdsForSegmentKeys = useCallback((segmentKeys: string[]) => {
+		const blockIds = new Set<string>();
+		segmentKeys.forEach(segmentKey => {
+			voiceGeneratingBlocksRef.current.get(segmentKey)?.forEach(blockId => blockIds.add(blockId));
+		});
+		return blockIds;
+	}, []);
+
 	const registerVoiceGeneratingBlockIds = useCallback((segmentKeys: string[], blockIds: string[]) => {
 		if (segmentKeys.length === 0 || blockIds.length === 0) {
 			return;
@@ -1866,12 +1843,19 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const resolveActiveCompletionSegmentKeys = useCallback(
 		(message: IdeaBlockCompletionTargetFields) => {
 			const baseCompletionSegmentKeys = completionTargetKeys(message, participantId);
+			const draftCompletionSegmentKeys = matchingDraftCompletionTargetKeys({
+				drafts: activeTranscriptDraftsRef.current.entries(),
+				segmentIds: completionTargetSegmentIds(message),
+				source: completionTargetSource(message),
+				userId: completionTargetUserId(message, participantId)
+			});
+			const completionSegmentKeys = [...new Set([...baseCompletionSegmentKeys, ...draftCompletionSegmentKeys])];
 			const activeCompletionKey = activeCompletionTargetKey(message, participantId);
-			const hasMatchingCompletionKey = baseCompletionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
+			const hasMatchingCompletionKey = completionSegmentKeys.some(segmentKey => voiceGeneratingBlocksRef.current.has(segmentKey));
 			if (!hasMatchingCompletionKey && activeCompletionKey && voiceGeneratingBlocksRef.current.has(activeCompletionKey)) {
-				return [...baseCompletionSegmentKeys, activeCompletionKey];
+				return [...completionSegmentKeys, activeCompletionKey];
 			}
-			return baseCompletionSegmentKeys;
+			return completionSegmentKeys;
 		},
 		[participantId]
 	);
@@ -1882,6 +1866,17 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		}
 
 		return !!current.segmentKey && segmentKeys.includes(current.segmentKey);
+	}, []);
+
+	const getTranscriptLineIdsForDraftKeys = useCallback((segmentKeys: string[]) => {
+		const transcriptLineIds = new Set<string>();
+		segmentKeys.forEach(segmentKey => {
+			const draft = activeTranscriptDraftsRef.current.get(segmentKey);
+			if (draft?.id) {
+				transcriptLineIds.add(draft.id);
+			}
+		});
+		return transcriptLineIds;
 	}, []);
 
 	const removeVoiceGeneratingBlocksByIds = useCallback(
@@ -1906,19 +1901,38 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	);
 
 	const clearAllVoiceGeneratingBlocks = useCallback(() => {
+		const segmentKeys = Array.from(voiceGeneratingBlocksRef.current.keys());
 		const blockIds = new Set<string>();
 		for (const segmentBlockIds of voiceGeneratingBlocksRef.current.values()) {
 			segmentBlockIds.forEach(blockId => blockIds.add(blockId));
 		}
+		const transcriptLineIds = getIdeaBlockTranscriptLineIdsForBlockIds(ideaBlocksRef.current, blockIds);
+		getTranscriptLineIdsForDraftKeys(segmentKeys).forEach(transcriptLineId => transcriptLineIds.add(transcriptLineId));
+		if (transcriptLineIds.size > 0) {
+			setTranscriptLines(prev => clearPendingTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds));
+		}
 		voiceGeneratingBlocksRef.current.clear();
 		removeVoiceGeneratingBlocksByIds(blockIds);
 		setWhisperTransient({ status: "idle", text: "" });
-	}, [removeVoiceGeneratingBlocksByIds]);
+	}, [getTranscriptLineIdsForDraftKeys, removeVoiceGeneratingBlocksByIds]);
+
+	const markTranscriptIdeaBlockStatusByLineIds = useCallback((transcriptLineIds: Set<string>, ideaBlockStatus: TranscriptLineType["ideaBlockStatus"]) => {
+		setTranscriptLines(prev => markTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds, ideaBlockStatus));
+	}, []);
+
+	const markTranscriptIdeaBlockStatusByBlockIds = useCallback((blockIds: Set<string>, ideaBlockStatus: TranscriptLineType["ideaBlockStatus"]) => {
+		const transcriptLineIds = getIdeaBlockTranscriptLineIdsForBlockIds(ideaBlocksRef.current, blockIds);
+		if (transcriptLineIds.size === 0) {
+			return;
+		}
+		setTranscriptLines(prev => markTranscriptLinesIdeaBlockStatus(prev, transcriptLineIds, ideaBlockStatus));
+	}, []);
 
 	const scheduleVoiceGeneratingTimeout = useCallback(
 		(segmentKey: string, blockId: string) => {
 			clearVoiceGeneratingTimeoutsByIds(new Set([blockId]));
 			const timeoutId = window.setTimeout(() => {
+				markTranscriptIdeaBlockStatusByBlockIds(new Set([blockId]), "failed");
 				removeVoiceGeneratingBlockIdsFromRegistry(new Set([blockId]));
 				removeVoiceGeneratingBlocksByIds(new Set([blockId]));
 				setWhisperTransient(current => (current.segmentKey === segmentKey ? { status: "idle", text: "" } : current));
@@ -1926,7 +1940,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			}, VOICE_GENERATING_TIMEOUT_MS);
 			voiceGeneratingTimeoutsRef.current.set(blockId, timeoutId);
 		},
-		[clearVoiceGeneratingTimeoutsByIds, removeVoiceGeneratingBlockIdsFromRegistry, removeVoiceGeneratingBlocksByIds]
+		[clearVoiceGeneratingTimeoutsByIds, markTranscriptIdeaBlockStatusByBlockIds, removeVoiceGeneratingBlockIdsFromRegistry, removeVoiceGeneratingBlocksByIds]
 	);
 
 	const queueVoiceGeneratingIdeaBlock = useCallback(
@@ -1947,6 +1961,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				transcriptLineId,
 				createdAtMs: timestampMs
 			});
+			if (transcriptLineId) {
+				markTranscriptIdeaBlockStatusByLineIds(new Set([transcriptLineId]), "pending");
+			}
 
 			setIdeaBlocks(prev => {
 				const nextBlocks = sortIdeaBlocks(
@@ -1967,7 +1984,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				return nextBlocks;
 			});
 		},
-		[scheduleVoiceGeneratingTimeout]
+		[markTranscriptIdeaBlockStatusByLineIds, scheduleVoiceGeneratingTimeout]
 	);
 
 	useEffect(() => {
@@ -2539,7 +2556,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				return;
 			}
 			const finalDraftId = matchingDraft?.id ?? transcriptLine.id;
-			if (isPrivateAudioLineForParticipant(transcriptLine, participantId)) {
+			const isOwnPrivateBoundary = isPrivateAudioLineForParticipant(transcriptLine, participantId);
+			if (isOwnPrivateBoundary) {
 				setWhisperTransient({
 					status: "generating",
 					text: boundaryText,
@@ -2562,13 +2580,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				isFinal: true
 			});
 
-			const frozenLine = {
+			const frozenLine: TranscriptLineType = {
 				...transcriptLine,
 				id: finalDraftId,
 				text: boundaryText,
 				displayName: transcriptLine.displayName ?? displayName,
 				isOwn: transcriptLine.userId == null ? true : isOwnTranscriptUser(transcriptLine.userId, participantId),
-				isDraft: false
+				isDraft: false,
+				ideaBlockStatus: isOwnPrivateBoundary ? "pending" : undefined
 			};
 			setTranscriptLines(prev => linkTranscriptLinesToBlocks(matchingDraft ? replaceTranscriptLine(prev, matchingDraft.id, frozenLine) : appendTranscriptLine(prev, frozenLine), ideaBlocks));
 		}, 0);
@@ -2640,7 +2659,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 						...transcriptLine,
 						id: currentDraft.id,
 						text: draftText,
-						isDraft: true
+						isDraft: true,
+						ideaBlockStatus: isOwnPrivateAudioMessage ? "captured" : undefined
 					};
 				} else if (matchingFinalDraft) {
 					replaceDraftLineId = matchingFinalDraft.id;
@@ -2744,6 +2764,10 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				}
 
 				if (isOwnPrivateAudioMessage && (shouldQueueVoiceGeneratingBlock || isTranscriptFinal || isPersistedFinal) && displayLine.text.trim()) {
+					displayLine = {
+						...displayLine,
+						ideaBlockStatus: "pending"
+					};
 					if (!shouldQueueVoiceGeneratingBlock) {
 						setWhisperTransient({
 							status: "generating",
@@ -2826,6 +2850,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				createdAtMs: fallbackCreatedAtMs
 			});
 			const provisionalBlockIds = [block.id];
+			if (fallbackTranscriptLineId) {
+				markTranscriptIdeaBlockStatusByLineIds(new Set([fallbackTranscriptLineId]), "pending");
+			}
 
 			registerVoiceGeneratingBlockIds(segmentKeys, provisionalBlockIds);
 			scheduleVoiceGeneratingTimeout(primarySegmentKey, block.id);
@@ -2846,7 +2873,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [lastAudioMessage, registerVoiceGeneratingBlockIds, resolveActiveCompletionSegmentKeys, scheduleVoiceGeneratingTimeout]);
+	}, [lastAudioMessage, markTranscriptIdeaBlockStatusByLineIds, registerVoiceGeneratingBlockIds, resolveActiveCompletionSegmentKeys, scheduleVoiceGeneratingTimeout]);
 
 	useEffect(() => {
 		if (!isAudioIdeaBlocksUpdateMessage(lastAudioMessage)) {
@@ -2859,17 +2886,40 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			lastProcessedIdeaBlocksUpdateMessageRef.current = lastAudioMessage;
 			const ideaBlockResponses = Array.isArray(lastAudioMessage.idea_blocks) ? lastAudioMessage.idea_blocks : [];
 			const duplicateIdeaBlockResponses = Array.isArray(lastAudioMessage.duplicate_idea_blocks) ? lastAudioMessage.duplicate_idea_blocks : [];
-			const hasConfirmedIdeaBlockResult = ideaBlockResponses.length > 0 || duplicateIdeaBlockResponses.length > 0;
-			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasConfirmedIdeaBlockResult;
+			const hasNewIdeaBlockResult = ideaBlockResponses.length > 0;
+			const hasAnyIdeaBlockResult = hasNewIdeaBlockResult || duplicateIdeaBlockResponses.length > 0;
+			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasAnyIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
 			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? resolveActiveCompletionSegmentKeys(lastAudioMessage) : [];
+			const completionDraftTranscriptLineIds = completionSegmentKeys.length > 0 ? getTranscriptLineIdsForDraftKeys(completionSegmentKeys) : new Set<string>();
+			const pendingCompletionVoiceBlockIds = completionSegmentKeys.length > 0 ? getVoiceGeneratingBlockIdsForSegmentKeys(completionSegmentKeys) : new Set<string>();
+			const completionTranscriptLineIds = getCompletionTranscriptLineIds(ideaBlocksRef.current, completionDraftTranscriptLineIds, pendingCompletionVoiceBlockIds);
+			const hasExistingReadyBlockForCompletion = hasReadyIdeaBlockForTranscriptLineIds(ideaBlocksRef.current, completionTranscriptLineIds);
+			const shouldResolvePendingAsNoIdea = hasCompletedIdeaBlockGeneration && !hasNewIdeaBlockResult && !hasExistingReadyBlockForCompletion;
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length === 0) {
+				if (shouldResolvePendingAsNoIdea) {
+					const allPendingVoiceBlockIds = new Set<string>();
+					for (const segmentBlockIds of voiceGeneratingBlocksRef.current.values()) {
+						segmentBlockIds.forEach(blockId => allPendingVoiceBlockIds.add(blockId));
+					}
+					markTranscriptIdeaBlockStatusByBlockIds(allPendingVoiceBlockIds, "no_idea");
+				}
 				clearAllVoiceGeneratingBlocks();
 			}
 			const pendingVoiceBlockIds = completionSegmentKeys.length > 0 ? takeVoiceGeneratingBlockIds(completionSegmentKeys) : new Set<string>();
 			const removePendingVoiceBlocks = (blocks: IdeaBlock[]) => (pendingVoiceBlockIds.size === 0 ? blocks : blocks.filter(block => !pendingVoiceBlockIds.has(block.id)));
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length > 0) {
 				setWhisperTransient(current => (isCurrentWhisperSegmentComplete(current, completionSegmentKeys) ? { status: "idle", text: "" } : current));
+			}
+			if (pendingVoiceBlockIds.size > 0 && shouldResolvePendingAsNoIdea) {
+				markTranscriptIdeaBlockStatusByBlockIds(pendingVoiceBlockIds, "no_idea");
+			}
+			if (completionTranscriptLineIds.size > 0) {
+				if (shouldResolvePendingAsNoIdea) {
+					markTranscriptIdeaBlockStatusByLineIds(completionTranscriptLineIds, "no_idea");
+				} else {
+					setTranscriptLines(prev => clearPendingTranscriptLinesIdeaBlockStatus(prev, completionTranscriptLineIds));
+				}
 			}
 			let shouldRefreshIdeaBlocks = false;
 
@@ -2933,7 +2983,19 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [clearAllVoiceGeneratingBlocks, isCurrentWhisperSegmentComplete, jumpToBlock, lastAudioMessage, queueSimilarityCueFromBlock, resolveActiveCompletionSegmentKeys, takeVoiceGeneratingBlockIds]);
+	}, [
+		clearAllVoiceGeneratingBlocks,
+		getTranscriptLineIdsForDraftKeys,
+		getVoiceGeneratingBlockIdsForSegmentKeys,
+		isCurrentWhisperSegmentComplete,
+		jumpToBlock,
+		lastAudioMessage,
+		markTranscriptIdeaBlockStatusByBlockIds,
+		markTranscriptIdeaBlockStatusByLineIds,
+		queueSimilarityCueFromBlock,
+		resolveActiveCompletionSegmentKeys,
+		takeVoiceGeneratingBlockIds
+	]);
 
 	useEffect(() => {
 		if (!isAudioTerminalErrorMessage(lastAudioMessage) || !isPrivateAudioCompletionScope(lastAudioMessage)) {
@@ -2943,16 +3005,34 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		const timer = window.setTimeout(() => {
 			const completionSegmentKeys = resolveActiveCompletionSegmentKeys(lastAudioMessage);
 			if (completionSegmentKeys.length === 0) {
+				const allPendingVoiceBlockIds = new Set<string>();
+				for (const segmentBlockIds of voiceGeneratingBlocksRef.current.values()) {
+					segmentBlockIds.forEach(blockId => allPendingVoiceBlockIds.add(blockId));
+				}
+				markTranscriptIdeaBlockStatusByBlockIds(allPendingVoiceBlockIds, "failed");
 				clearAllVoiceGeneratingBlocks();
 				return;
 			}
 
-			removeVoiceGeneratingBlocksByIds(takeVoiceGeneratingBlockIds(completionSegmentKeys));
+			const pendingVoiceBlockIds = takeVoiceGeneratingBlockIds(completionSegmentKeys);
+			markTranscriptIdeaBlockStatusByBlockIds(pendingVoiceBlockIds, "failed");
+			markTranscriptIdeaBlockStatusByLineIds(getTranscriptLineIdsForDraftKeys(completionSegmentKeys), "failed");
+			removeVoiceGeneratingBlocksByIds(pendingVoiceBlockIds);
 			setWhisperTransient(current => (isCurrentWhisperSegmentComplete(current, completionSegmentKeys) ? { status: "idle", text: "" } : current));
 		}, 0);
 
 		return () => window.clearTimeout(timer);
-	}, [clearAllVoiceGeneratingBlocks, isCurrentWhisperSegmentComplete, lastAudioMessage, removeVoiceGeneratingBlocksByIds, resolveActiveCompletionSegmentKeys, takeVoiceGeneratingBlockIds]);
+	}, [
+		clearAllVoiceGeneratingBlocks,
+		getTranscriptLineIdsForDraftKeys,
+		isCurrentWhisperSegmentComplete,
+		lastAudioMessage,
+		markTranscriptIdeaBlockStatusByBlockIds,
+		markTranscriptIdeaBlockStatusByLineIds,
+		removeVoiceGeneratingBlocksByIds,
+		resolveActiveCompletionSegmentKeys,
+		takeVoiceGeneratingBlockIds
+	]);
 
 	useEffect(() => {
 		if (!highlightedBlockId) {
