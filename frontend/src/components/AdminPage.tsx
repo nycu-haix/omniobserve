@@ -27,7 +27,7 @@ import {
 	type LatestTranscriptIdeaBlockStatus
 } from "../lib/adminLatestTranscriptStatus";
 import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, computePublicNowAgeMs, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
-import { getAdminRankingDisplayItemIds, getAdminRankingRowCount } from "../lib/adminRankings";
+import { getAdminRankingDisplayItemIds, getAdminRankingPrivateOnlyItemId, getAdminRankingRowCount } from "../lib/adminRankings";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -1583,6 +1583,7 @@ export function AdminPage() {
 	const privateRankingColumns = privateRankingItemsByParticipant.map(({ participantId, ranking, items }) => ({
 		key: `private-${participantId}`,
 		label: getParticipantLabel(participantId),
+		items,
 		revision: ranking.revision,
 		rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
 	}));
@@ -2686,7 +2687,7 @@ export function AdminPage() {
 														</div>
 													</th>
 													{privateRankingColumns.map(column => (
-														<th key={column.key} className="w-14 px-2 py-2 text-center font-semibold">
+														<th key={column.key} className="min-w-32 px-2 py-2 text-center font-semibold">
 															<div className="flex min-w-0 items-center justify-between gap-2">
 																<span className="truncate">{column.label}</span>
 																<span className="shrink-0 rounded border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">r{column.revision}</span>
@@ -2703,45 +2704,54 @@ export function AdminPage() {
 															<span className="block truncate rounded-md bg-muted px-2 py-1 font-medium">{rankingLabels[publicRankingItems[rowIndex]] || publicRankingItems[rowIndex] || "-"}</span>
 														</td>
 														{privateRankingColumns.map(column => {
-															const conflict = getRankConflict(publicRankingItems[rowIndex], rowIndex + 1, column.rankIndexById);
+															const publicItemId = publicRankingItems[rowIndex];
+															const privateOnlyItemId = getAdminRankingPrivateOnlyItemId({ publicItemId, privateItems: column.items, rowIndex });
+															const conflict = getRankConflict(publicItemId, rowIndex + 1, column.rankIndexById);
+															const privateOnlyLabel = privateOnlyItemId ? (rankingLabels[privateOnlyItemId] ?? privateOnlyItemId) : null;
 															return (
-																<td key={column.key} className="px-2 py-2 text-center align-middle">
-																	<span
-																		className={cn(
-																			"inline-flex min-h-6 min-w-8 items-center justify-center rounded-md px-1.5 py-1 font-medium text-muted-foreground",
-																			!conflict?.isConflict && "bg-muted/60",
-																			conflict?.isConflict && "ring-1 ring-muted-foreground/30"
-																		)}
-																		title={conflict ? `與 Public 排序差 ${conflict.amount} 位` : undefined}
-																	>
-																		{conflict && conflict.amount > 0 ? (
-																			<span
-																				className={cn(
-																					"inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold",
-																					conflict.isConflict && conflict.direction === "up" && "text-emerald-700",
-																					conflict.isConflict && conflict.direction === "down" && "text-rose-700",
-																					!conflict.isConflict && "text-muted-foreground/60"
-																				)}
-																				aria-label={`與 Public 排序差 ${conflict.amount} 位，Private 排序${conflict.direction === "up" ? "較前" : "較後"}`}
-																			>
+																<td key={column.key} className="min-w-32 px-2 py-2 text-center align-middle">
+																	{privateOnlyLabel ? (
+																		<span className="block truncate rounded-md bg-muted px-2 py-1 text-left font-medium" title={privateOnlyLabel}>
+																			{privateOnlyLabel}
+																		</span>
+																	) : (
+																		<span
+																			className={cn(
+																				"inline-flex min-h-6 min-w-8 items-center justify-center rounded-md px-1.5 py-1 font-medium text-muted-foreground",
+																				!conflict?.isConflict && "bg-muted/60",
+																				conflict?.isConflict && "ring-1 ring-muted-foreground/30"
+																			)}
+																			title={conflict ? `與 Public 排序差 ${conflict.amount} 位` : undefined}
+																		>
+																			{conflict && conflict.amount > 0 ? (
 																				<span
 																					className={cn(
-																						"h-0 w-0 border-x-[4px] border-x-transparent",
-																						conflict.direction === "up" && conflict.isConflict && "border-b-[7px] border-b-emerald-600",
-																						conflict.direction === "down" && conflict.isConflict && "border-t-[7px] border-t-rose-600",
-																						conflict.direction === "up" && !conflict.isConflict && "border-b-[7px] border-b-muted-foreground/40",
-																						conflict.direction === "down" && !conflict.isConflict && "border-t-[7px] border-t-muted-foreground/40"
+																						"inline-flex shrink-0 items-center gap-0.5 text-[10px] font-semibold",
+																						conflict.isConflict && conflict.direction === "up" && "text-emerald-700",
+																						conflict.isConflict && conflict.direction === "down" && "text-rose-700",
+																						!conflict.isConflict && "text-muted-foreground/60"
 																					)}
-																					aria-hidden="true"
-																				/>
-																				{conflict.amount}
-																			</span>
-																		) : (
-																			<span className="text-muted-foreground/60" aria-hidden="true">
-																				-
-																			</span>
-																		)}
-																	</span>
+																					aria-label={`與 Public 排序差 ${conflict.amount} 位，Private 排序${conflict.direction === "up" ? "較前" : "較後"}`}
+																				>
+																					<span
+																						className={cn(
+																							"h-0 w-0 border-x-[4px] border-x-transparent",
+																							conflict.direction === "up" && conflict.isConflict && "border-b-[7px] border-b-emerald-600",
+																							conflict.direction === "down" && conflict.isConflict && "border-t-[7px] border-t-rose-600",
+																							conflict.direction === "up" && !conflict.isConflict && "border-b-[7px] border-b-muted-foreground/40",
+																							conflict.direction === "down" && !conflict.isConflict && "border-t-[7px] border-t-muted-foreground/40"
+																						)}
+																						aria-hidden="true"
+																					/>
+																					{conflict.amount}
+																				</span>
+																			) : (
+																				<span className="text-muted-foreground/60" aria-hidden="true">
+																					-
+																				</span>
+																			)}
+																		</span>
+																	)}
 																</td>
 															);
 														})}

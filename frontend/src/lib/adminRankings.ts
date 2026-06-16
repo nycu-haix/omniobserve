@@ -27,3 +27,7 @@ export function getAdminRankingDisplayItemIds(snapshot: AdminRankingSnapshotLike
 export function getAdminRankingRowCount(publicItems: string[], privateItemsByParticipant: string[][]) {
 	return Math.max(publicItems.length, ...privateItemsByParticipant.map(items => items.length));
 }
+
+export function getAdminRankingPrivateOnlyItemId({ publicItemId, privateItems, rowIndex }: { publicItemId: string | undefined; privateItems: string[]; rowIndex: number }) {
+	return publicItemId ? null : (privateItems[rowIndex] ?? null);
+}

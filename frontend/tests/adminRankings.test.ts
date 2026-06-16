@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getAdminRankingDisplayItemIds, getAdminRankingRowCount } from "../src/lib/adminRankings.ts";
+import { getAdminRankingDisplayItemIds, getAdminRankingPrivateOnlyItemId, getAdminRankingRowCount } from "../src/lib/adminRankings.ts";
 
 const defaultItemIds = Array.from({ length: 15 }, (_, index) => `item-${index + 1}`);
 
@@ -28,4 +28,10 @@ test("uses the longest cutoff-aware ranking length for admin table rows", () => 
 	assert.equal(getAdminRankingRowCount(defaultItemIds.slice(0, 8), [defaultItemIds.slice(0, 10)]), 10);
 	assert.equal(getAdminRankingRowCount(defaultItemIds.slice(0, 10), [defaultItemIds.slice(0, 6), defaultItemIds.slice(0, 9)]), 10);
 	assert.equal(getAdminRankingRowCount([], [[]]), 0);
+});
+
+test("returns private-only row items when public ranking is shorter", () => {
+	assert.equal(getAdminRankingPrivateOnlyItemId({ publicItemId: undefined, privateItems: defaultItemIds.slice(0, 10), rowIndex: 8 }), "item-9");
+	assert.equal(getAdminRankingPrivateOnlyItemId({ publicItemId: "item-9", privateItems: defaultItemIds.slice(0, 10), rowIndex: 8 }), null);
+	assert.equal(getAdminRankingPrivateOnlyItemId({ publicItemId: undefined, privateItems: defaultItemIds.slice(0, 8), rowIndex: 8 }), null);
 });
