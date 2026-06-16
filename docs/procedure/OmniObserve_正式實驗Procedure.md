@@ -218,8 +218,8 @@ Enhance-the-Poster 固定 34 分鐘。2026-06-12 pilot 後，Private phase 2 暫
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
 | Private phase 1 | 5 分鐘 | 看 Canva 海報、任務需求、圖床、文字 / slogan library 與 component library；若材料包含 reviewer feedback，將其作為參考；建立至少 4 個 component + action items，並以出聲或文字記錄建立理由，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
-| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；務必在進入 Public phase 前完成自己的前 15 項排序 | 鎖定 item 內容，產生可排序列表；切換 Public phase 前用 Admin ranking state 確認每位真實參與者的 private ranking revision 至少為 `r1`，或 participant 明確確認已完成；`r0` seeded ranking 不算完成 | initial personal ranking |
-| Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
+| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；務必在進入 Public phase 前完成自己的前 10 項排序 | 鎖定 item 內容，產生可排序列表；切換 Public phase 前用 Admin ranking state 確認每位真實參與者的 private ranking revision 至少為 `r1`，或 participant 明確確認已完成；`r0` seeded ranking 不算完成 | initial personal ranking |
+| Public phase | 20 分鐘 | 小組討論，最多選 10 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 10 items |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
 
 Host 說明：
@@ -230,9 +230,9 @@ Host 說明：
 >
 > Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、任務需求、圖床、文字 / slogan library、component library、你自己的設計判斷來建立；若本輪材料有 reviewer feedback，也可以把它納入考量。建立時請把你正在考慮的理由說出來；如果不想出聲，也可以用文字輸入理由。
 >
-> Private phase 2 有 7 分鐘，系統會整理大家建立的 items，請你先做自己的排序。這個階段一定要完成你的個人排序，Public phase 會以這份排序作為你的初始個人清單；如果時間快到，請先把你認為最重要的 items 排到最前面。
+> Private phase 2 有 7 分鐘，系統會整理大家建立的 items，請你先做自己的前 10 項排序。這個階段一定要完成你的個人排序，Public phase 會以這份排序作為你的初始個人清單；如果時間快到，請先把你認為最重要的 items 排到最前面。
 >
-> Public phase 有 20 分鐘，你們要一起討論，最多選 15 個 items，並從最重要到最不重要排序。這個階段可以開啟公開麥克風和其他人討論；每位參與者請至少公開發言兩次，口頭或聊天室都算公開發言。
+> Public phase 有 20 分鐘，你們要一起討論，最多選 10 個 items，並從最重要到最不重要排序。這個階段可以開啟公開麥克風和其他人討論；每位參與者請至少公開發言兩次，口頭或聊天室都算公開發言。
 >
 > Reflect phase 有 2 分鐘，請根據討論調整你自己的個人排序。
 

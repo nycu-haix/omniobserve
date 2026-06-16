@@ -116,7 +116,7 @@ Participants are improving an ugly poster. In Private Phase 1, each participant 
 - component_id: the poster element being changed
 - action_id: the specific edit action such as remove, move, enlarge, shrink, change_color, change_font, adjust_spacing, unify, replace, or transparency
 
-In Private Phase 2 and Public Phase, participants rank only the top 15 most important proposed poster task items. Items below the top 15 are treated as not changed.
+In Private Phase 2 and Public Phase, participants rank only the top 10 most important proposed poster task items. Items below the top 10 are treated as not changed.
 """.strip()
     return TaskPromptConfig(
         task_name=enhance_the_poster.TASK_ID,

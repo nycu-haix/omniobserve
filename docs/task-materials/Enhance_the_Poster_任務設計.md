@@ -8,7 +8,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 
 ## 1. 任務目標
 
-參與者要針對 Canva 中的海報與 component library 提出 component + action items，並在小組中排序最多 15 個最重要 items。任務不是讓參與者實際美編，也不是測試設計能力；重點是觀察：
+參與者要針對 Canva 中的海報與 component library 提出 component + action items，並在小組中排序最多 10 個最重要 items。任務不是讓參與者實際美編，也不是測試設計能力；重點是觀察：
 
 - 個人階段形成的修改意圖是否進入公開討論。
 - 多個合理設計方向如何競爭。
@@ -21,9 +21,13 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 | Phase | 時間 | 任務 |
 | --- | ---: | --- |
 | Private phase 1 | 5 分鐘 | 每人建立至少 4 個 component + action items，並用出聲或文字記錄建立理由，最多無上限 |
-| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；進入 Public phase 前務必先完成自己的前 15 項排序 |
-| Public phase | 20 分鐘 | 小組討論，最多選 15 個 items，從最重要到最不重要排序；每位參與者至少公開發言兩次 |
+| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；進入 Public phase 前務必先完成自己的前 10 項排序 |
+| Public phase | 20 分鐘 | 小組討論，最多選 10 個 items，從最重要到最不重要排序；每位參與者至少公開發言兩次 |
 | Reflect phase | 2 分鐘 | 不再公開討論，各自調整個人排序 |
+
+### 排序數量 rationale
+
+2026-06-13 下午 pilot 後，正式版將 Enhance-the-Poster 的個人與小組排序上限從 15 個降為 10 個。Pilot 觀察顯示，15 個改善項目會讓參與者難以區分優先順序，部分人也覺得很難湊滿 15 個真正需要修改的動作。10 個上限保留足夠的優先順序資料，同時降低 arbitrary ranking burden；在 Private phase 2 的 7 分鐘與 Public phase 的 20 分鐘內，也比較能讓參與者把時間用在解釋和協商前幾個真正重要的改善方向。
 
 ## 3. 任務材料結構
 
@@ -59,7 +63,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 >
 > 建立 task item 時，請用出聲或文字輸入記錄你正在考慮的理由。理由不需要完整，也不需要說服其他人；重點是讓系統能保存你形成想法的過程。
 >
-> Private Phase 2 有 7 分鐘，只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。這一階段請務必先完成自己的個人排序，Public Phase 會以這份排序作為初始個人清單。
+> Private Phase 2 有 7 分鐘，只需要排序前 10 個最重要的改善項目；第 11 個之後代表不會改動。這一階段請務必先完成自己的個人排序，Public Phase 會以這份排序作為初始個人清單。
 >
 > Public Phase 的排序動作與 Private Phase 2 相同，但在此階段可以開啟公開麥克風和其他人進行公開討論，並且請每位參與者在此階段進行至少兩次公開發言。
 
@@ -230,7 +234,7 @@ Action item 應使用下列 action 語彙；若系統可支援選單，優先使
 - initial personal ranking。
 - public discussion transcript。
 - public chat messages。
-- group ranking：最多 15 items。
+- group ranking：最多 10 items。
 - final personal ranking。
 - cue logs：僅 with-cue 條件；no-cue 條件標記 `cue_enabled=false`。
 - screen recording workaround：個別 Google Meet 錄影，不是 OmniObserve 系統功能。

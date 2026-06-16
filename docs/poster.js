@@ -1,6 +1,6 @@
 (async () => {
   // Staff-only confederate seed ideas for Enhance the Poster.
-  // Aligned with docs/confederate-poster.md version 2026-06-16 and the current
+  // Aligned with docs/confederate-poster.md version 2026-06-17 and the current
   // backend/app/task_config/enhance_the_poster.py component/action config.
   const ideas = [
     "我覺得可以先不要大改海洋背景，因為至少跟淨灘主題有關，先把資訊層級整理好可能比較重要。",
@@ -13,16 +13,6 @@
     "QR Code 說明的『報名連結』可以再大一點，不然它現在比較像附屬文字，不像主要 CTA。",
     "參與資訊跟 QR Code 應該靠近一點，因為看完對象、贈品、抽獎資格，下一步就是掃 QR Code 報名。",
     "底部主辦單位和 logo 覺得可以保留，但現在佔的視覺重量有點太重，應該退到比較次要的位置。",
-    "人物圖示和活動圖示都能說明淨灘，但風格和位置有點散，感覺可以至少對齊或整理成同一套圖像語言。",
-    "現在圖像素材和資訊卡的關係不太明確，這種小地方會讓海報看起來比較像拼貼。",
-    "我不確定所有圖像是不是都需要，也許保留一個最清楚的主視覺，另一邊拿來放資訊會更乾淨。",
-    "獎品資訊可以保留，因為它有吸引力，但不要讓它變成跟活動本身搶重點的東西。",
-    "我覺得現在最大的問題不是醜，而是資訊太分散；眼睛不知道要先看標題、圖像、色塊還是 QR Code。",
-    "如果時間有限，我會先改標題大小、兩個場次資訊卡、QR Code 位置，這三個應該最有感。",
-    "字型有點太手寫感，主題可以活潑，但活動資訊最好用更穩定、正式、易讀的字體。",
-    "我覺得可以保留藍色海洋感，但黃色和橘色太跳，可以改成比較接近海岸、沙灘或救援背心的色系。",
-    "海報下半部有點空跟擠同時存在，左下資訊很多、右下 QR 很孤立，中間又有一塊空間沒有被好好利用。",
-    "我會比較支持保守整理，不一定要換成全新的插畫風，因為這張海報的活動辨識度其實已經有了。",
   ];
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
