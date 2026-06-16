@@ -58,7 +58,7 @@ Host 可照讀：
 必須記錄：
 
 - initial personal ranking：每位參與者 private phase 完成的 15 items 排序。
-- private think-aloud transcript and typed reasoning when available。
+- private reasoning capture：speech transcript and/or typed reasoning；若參與者以文字替代出聲，文字理由即為 required capture，不要求 private transcript 必然存在。
 - idea blocks。
 - public discussion transcript。
 - public chat messages。

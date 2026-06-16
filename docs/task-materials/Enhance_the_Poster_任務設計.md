@@ -225,7 +225,7 @@ Action item 應使用下列 action 語彙；若系統可支援選單，優先使
 必須記錄：
 
 - participant-created component + action items。
-- private phase 1 think-aloud transcript and typed reasoning when available。
+- private phase 1 reasoning capture：speech transcript and/or typed reasoning；若參與者以文字替代出聲，文字理由即為 required capture，不要求 private transcript 必然存在。
 - idea blocks。
 - initial personal ranking。
 - public discussion transcript。
