@@ -135,6 +135,10 @@ class PhaseTaskItemSnapshotServiceTests(unittest.TestCase):
         self.assertEqual(ranking_item["label"], "「主標題」：改成更有活動邀請感的語氣")
         self.assertEqual(ranking_item["label_zh"], "「主標題」：改成更有活動邀請感的語氣")
         self.assertEqual(ranking_item["description_zh"], "主標題 / 自訂動作")
+        self.assertEqual(ranking_item["component_id"], "headline")
+        self.assertEqual(ranking_item["component_label"], "主標題")
+        self.assertEqual(ranking_item["action_id"], "custom_detail")
+        self.assertEqual(ranking_item["action_label"], "自訂動作")
         self.assertEqual(ranking_item["source_user_ids"], [1, 2])
 
 

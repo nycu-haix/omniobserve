@@ -1,7 +1,13 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { getPrivatePhaseTaskItemActionLabel, reindexPrivatePhaseTaskItems, sortPrivatePhaseTaskItems } from "../lib/privatePhaseTaskItems";
-import { getActionReferenceDescription, getComponentReferenceCategoryLabel, getComponentReferenceDescription, isBackgroundReferenceOption } from "../lib/taskItemReference";
+import {
+	getActionReferenceDescription,
+	getComponentReferenceCategoryLabel,
+	getComponentReferenceDescription,
+	groupComponentReferenceOptions,
+	isBackgroundReferenceOption
+} from "../lib/taskItemReference";
 import { cn } from "../lib/utils";
 import {
 	createPrivatePhaseTaskItem,
@@ -139,7 +145,19 @@ function KeywordDropSlot({ label, selectedOption, isActive, onClear }: { label: 
 	);
 }
 
-function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind; option: Phase1BuilderOption; isSelected: boolean; onSelect: () => void }) {
+function KeywordChip({
+	kind,
+	option,
+	isSelected,
+	showCategoryLabel = true,
+	onSelect
+}: {
+	kind: KeywordKind;
+	option: Phase1BuilderOption;
+	isSelected: boolean;
+	showCategoryLabel?: boolean;
+	onSelect: () => void;
+}) {
 	const description = kind === "component" ? getComponentReferenceDescription(option) : getActionReferenceDescription(option);
 	const categoryLabel = kind === "component" ? getComponentReferenceCategoryLabel(option) : "";
 	const isBackgroundComponent = kind === "component" && isBackgroundReferenceOption(option);
@@ -157,7 +175,7 @@ function KeywordChip({ kind, option, isSelected, onSelect }: { kind: KeywordKind
 			aria-label={`選擇${kind === "component" ? "海報元件" : "改善動作"}：${option.label_zh}，${categoryLabel ? `${categoryLabel}，` : ""}${description}`}
 			title={description}
 		>
-			{categoryLabel && (
+			{showCategoryLabel && categoryLabel && (
 				<span className="shrink-0 rounded border border-cyan-600/30 bg-white/60 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-cyan-800 dark:border-cyan-200/30 dark:bg-cyan-950/40 dark:text-cyan-100">
 					{categoryLabel}
 				</span>
@@ -239,8 +257,7 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 	const hasDetailValue = form.detail.trim().length > 0;
 	const isLibraryNumberInvalid = selectedActionUsesLibraryNumber && hasDetailValue && normalizedDetail.length === 0;
 	const previewStatement = buildPhaseTaskStatement(selectedComponent, selectedAction, selectedActionRequiresDetail ? normalizedDetail : "");
-	const backgroundComponents = builder.components.filter(isBackgroundReferenceOption);
-	const foregroundComponents = builder.components.filter(component => !isBackgroundReferenceOption(component));
+	const componentGroups = groupComponentReferenceOptions(builder.components);
 	const isDeletingTaskItem = deletingItemId !== null;
 	const canSave = !!selectedComponent && !!selectedAction && (!selectedActionRequiresDetail || normalizedDetail.length > 0) && !isSaving && !isDeletingTaskItem;
 	const requiredItemCount = minimumItemCount(builder);
@@ -510,23 +527,25 @@ export function PrivatePhaseTaskItemsPanel({ sessionId, participantId, taskId, b
 					<div className="text-xs font-semibold text-muted-foreground">可選項目</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">海報元件</div>
-						{foregroundComponents.length > 0 && (
-							<div className="flex flex-wrap gap-2">
-								{foregroundComponents.map(component => (
-									<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
-								))}
-							</div>
-						)}
-						{backgroundComponents.length > 0 && (
-							<div className="grid gap-1.5">
-								<div className="text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">背景與底色</div>
-								<div className="flex flex-wrap gap-2">
-									{backgroundComponents.map(component => (
-										<KeywordChip key={component.id} kind="component" option={component} isSelected={component.id === form.componentId} onSelect={() => selectKeyword("component", component.id)} />
-									))}
-								</div>
-							</div>
-						)}
+						<div className="grid gap-2">
+							{componentGroups.map(group => (
+								<section key={group.id} className="grid gap-1.5" aria-label={`海報元件：${group.label}`}>
+									<div className="text-[11px] font-semibold text-muted-foreground">{group.label}</div>
+									<div className="flex flex-wrap gap-2">
+										{group.items.map(component => (
+											<KeywordChip
+												key={component.id}
+												kind="component"
+												option={component}
+												isSelected={component.id === form.componentId}
+												showCategoryLabel={false}
+												onSelect={() => selectKeyword("component", component.id)}
+											/>
+										))}
+									</div>
+								</section>
+							))}
+						</div>
 					</div>
 					<div className="grid gap-2">
 						<div className="text-xs font-medium text-muted-foreground">改善動作</div>

@@ -13,6 +13,7 @@ import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperi
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
+import { getRankingComponentGroups } from "../lib/rankingComponentGroups";
 import { getRankingOwnerLabel, isOwnedRankingItem } from "../lib/rankingOwnership";
 import { getRankingInteractionState, type RankingScope } from "../lib/rankingPhasePermissions";
 import {
@@ -61,6 +62,10 @@ interface LostAtSeaItem {
 	imageBg: string;
 	imageFg: string;
 	imageMark: string;
+	componentId: string;
+	componentLabel: string;
+	actionId: string;
+	actionLabel: string;
 	sourceUserIds: number[];
 }
 
@@ -160,6 +165,10 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 		imageBg: item.image_bg || "#f8fafc",
 		imageFg: item.image_fg || "#334155",
 		imageMark: item.image_mark || "ITEM",
+		componentId: item.component_id || "",
+		componentLabel: item.component_label || "",
+		actionId: item.action_id || "",
+		actionLabel: item.action_label || "",
 		sourceUserIds: Array.isArray(item.source_user_ids) ? item.source_user_ids : []
 	};
 }
@@ -685,7 +694,7 @@ function SortableLostAtSeaItem({
 			: hasRankDelta
 				? `與 Public 排序差 ${rankDeltaAmount} 位`
 				: undefined;
-	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${isOwnItem ? `，此項目由 ${ownerLabel} 提出` : ""}`;
+	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${item.componentLabel ? `，元件 ${item.componentLabel}` : ""}${item.actionLabel ? `，動作 ${item.actionLabel}` : ""}${isOwnItem ? `，此項目由 ${ownerLabel} 提出` : ""}`;
 
 	return (
 		<div
@@ -732,7 +741,13 @@ function SortableLostAtSeaItem({
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
 			<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 leading-5">
+				{item.componentLabel && (
+					<span className="inline-flex shrink-0 rounded-full border border-muted-foreground/20 bg-muted/60 px-2 py-0.5 text-[11px] font-semibold leading-4 text-muted-foreground">
+						{item.componentLabel}
+					</span>
+				)}
 				<span className="min-w-0 whitespace-normal break-words">{item.label}</span>
+				{item.actionLabel && <span className="shrink-0 text-[11px] font-medium leading-4 text-muted-foreground">{item.actionLabel}</span>}
 				{isOwnItem && (
 					<span
 						className="inline-flex shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold leading-4 text-primary"
@@ -808,12 +823,30 @@ function LostAtSeaRankingPanel({
 	readOnly?: boolean;
 }) {
 	const ownerLabel = getRankingOwnerLabel(participantDisplayName, participantId);
+	const componentGroups = getRankingComponentGroups(
+		items.map(item => ({
+			id: item.id,
+			componentId: item.componentId,
+			componentLabel: item.componentLabel
+		}))
+	);
 	const itemList = (
 		<div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
 			{readOnly && (
 				<div className="flex items-center gap-2 rounded-md border bg-muted/35 px-3 py-2 text-xs font-medium text-muted-foreground">
 					<Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 					<span>Public 排序僅供參考，Reflect Phase 只能調整 Private 排序。</span>
+				</div>
+			)}
+			{componentGroups.length > 1 && (
+				<div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/30 px-2.5 py-2 text-xs" aria-label={`${title} 元件分布`}>
+					<span className="shrink-0 font-semibold text-muted-foreground">元件</span>
+					{componentGroups.map(group => (
+						<span key={group.id} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-muted-foreground" title={`${group.label}：${group.count} 個`}>
+							<span className="font-medium text-foreground">{group.label}</span>
+							<span className="tabular-nums">{group.count}</span>
+						</span>
+					))}
 				</div>
 			)}
 			{items.map((item, index) => (

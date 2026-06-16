@@ -17,7 +17,9 @@ export interface TaskConfigItem {
 	image_fg: string;
 	image_mark: string;
 	component_id?: string;
+	component_label?: string;
 	action_id?: string;
+	action_label?: string;
 	source_user_ids?: number[];
 }
 
