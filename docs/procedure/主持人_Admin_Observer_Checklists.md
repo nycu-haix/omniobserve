@@ -104,7 +104,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 完成 familiarity screener，確認三位真實參與者彼此是否認識、是否同 lab / 同專案 / 固定合作。
 - [ ] 若本場目標是測量 private expression，優先安排不熟或較少固定合作的參與者。
 - [ ] 若三位真實參與者過度熟悉，已決定改排、排除，或在 session summary 標記 `over_familiar_use_with_caveat`。
-- [ ] 確認通知信預留約 150 分鐘，且提醒筆電、耳機、充電器、HDMI/轉接頭與麥克風測試。
+- [ ] 確認通知信預留約 150-152 分鐘，並說明包含兩個 task、中間正式休息、後段個別訪談與最後 Debrief；同時提醒筆電、耳機、充電器、HDMI/轉接頭與麥克風測試。
 - [ ] 確認通知信沒有透露 task order、cue/no-cue 條件、暗樁安排或研究假設。
 - [ ] 確認每位使用者的遠距會議室都有第二螢幕；可使用會議室大電視或研究團隊自備螢幕。
 - [ ] 確認每位使用者筆電可連接第二螢幕，必要 HDMI/USB-C/其他轉接頭已備妥。
@@ -138,8 +138,8 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 
 ## 3. Host 開場與教學
 
-- [ ] 說明總長約 150 分鐘。
-- [ ] 說明會完成兩個 task，中間休息 5 分鐘。
+- [ ] 說明總長約 150 分鐘多一點。
+- [ ] 說明會完成兩個 task，中間有 5 分鐘正式休息，後段有個別訪談與最後 Debrief。
 - [ ] 說明 Google Meet 錄影與系統資料保存。
 - [ ] 說明 private / public / reflect phase。
 - [ ] 說明 think-aloud 不是只講最後答案，而是把正在比較、排序、建立 item 的理由說出來。
@@ -157,10 +157,11 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 報到、設備、第二螢幕、Google Meet 錄影與研究說明：8 分鐘。
 - [ ] 系統教學與 Task 1 說明：10 分鐘。
 - [ ] Task 2 說明與系統確認：5 分鐘。
-- [ ] 中間正式休息：5 分鐘。
+- [ ] 中間正式休息：5 分鐘；不得被系統切換完全吃掉。
 - [ ] 個別訪談：30 分鐘。
 - [ ] 最後 Debrief：5 分鐘。
 - [ ] 收尾資料確認：5 分鐘。
+- [ ] 記錄各大區段實際開始 / 結束時間，至少包含 Task 1、Task 1 後小訪談 / 小表單、正式休息、Task 2、Task 2 後小訪談 / 小表單、個別訪談、Debrief。
 
 ### Lost-at-Sea
 
@@ -185,12 +186,15 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 兩次小訪談 / 小表單共 20 分鐘。
 - [ ] Debrief 前個別訪談 30 分鐘。
 - [ ] 最後 Debrief 5 分鐘。
-- [ ] 全場合計暫定 152 分鐘；若需要壓回 150 分鐘，由 #103 統一調整，不在現場臨時刪減 ranking 時間。
+- [ ] 全場合計暫定 152 分鐘；保留單次 within-subject 兩個 task 設計，不在現場臨時刪減 ranking、task 後小訪談、個別訪談、Debrief 或正式休息時間。
+- [ ] 若現場延誤，先壓縮報到 / 設備、重複性系統說明、Task 2 連結切換、收尾資料確認等非核心緩衝。
+- [ ] 若因場地或排程限制必須縮短核心區段，Host 已在 incident log 記錄原因、實際區段、實際開始 / 結束時間與資料品質影響。
 
 ### 中間休息與 Task 2 連結切換
 
 - [ ] 確認 Task 1 ranking、private reasoning capture、public transcript、idea blocks、cue logs、public chat、個別 Meet 錄影都有記錄。
 - [ ] 確認所有參與者不要自行提前開啟或操作 Task 2。
+- [ ] 確認參與者實際有 5 分鐘正式休息，不討論剛才任務內容，也不提前開始 Task 2。
 - [ ] 三位 Observer 協助各自負責的真實參與者開啟 Task 2 系統連結。
 - [ ] Host/Admin 依 mapping table 確認每位參與者進入正確 system id。
 - [ ] 確認 Task 2 condition 正確：with cue 或 no cue。
