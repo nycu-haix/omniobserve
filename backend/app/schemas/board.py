@@ -124,6 +124,11 @@ class TaskConfigItemResponse(BaseModel):
     image_bg: str
     image_fg: str
     image_mark: str
+    component_id: str | None = None
+    component_label: str | None = None
+    action_id: str | None = None
+    action_label: str | None = None
+    source_user_ids: list[int] | None = None
 
 
 class Phase1BuilderDetailInputResponse(BaseModel):

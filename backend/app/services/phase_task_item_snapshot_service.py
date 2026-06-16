@@ -400,7 +400,9 @@ def serialize_snapshot_ranking_items(items: list[PhaseTaskItemSnapshotItem]) -> 
             "image_fg": "#334155",
             "image_mark": item.component_id[:8].upper(),
             "component_id": item.component_id,
+            "component_label": item.component_label,
             "action_id": item.action_id,
+            "action_label": item.action_label,
             "source_user_ids": list(item.source_user_ids or []),
         }
         for item in sorted(items, key=lambda value: (value.position, value.id))

@@ -8,6 +8,7 @@ import {
 	getComponentReferenceDescription,
 	getComponentReferenceMeta,
 	getTaskReferenceLabel,
+	groupComponentReferenceOptions,
 	isBackgroundReferenceOption
 } from "../src/lib/taskItemReference.ts";
 
@@ -23,7 +24,31 @@ test("marks poster background options with participant-facing category metadata"
 	assert.equal(isBackgroundReferenceOption(background), true);
 	assert.equal(getComponentReferenceCategoryLabel(background), "背景/底色");
 	assert.equal(getComponentReferenceMeta(background), "背景類元件，只提供改顏色與透明度。");
-	assert.equal(getComponentReferenceCategoryLabel({ id: "main_title", label_zh: "主標題" }), "");
+	assert.equal(getComponentReferenceCategoryLabel({ id: "main_title", label_zh: "主標題" }), "標題與說明");
+	assert.equal(getComponentReferenceMeta({ id: "qr_code", label_zh: "QR 碼" }), "分類：報名資訊");
+});
+
+test("groups poster component options into participant-facing sections", () => {
+	const groups = groupComponentReferenceOptions([
+		{ id: "main_title", label_zh: "主標題" },
+		{ id: "qr_code", label_zh: "QR 碼" },
+		{ id: "activity_icon1", label_zh: "活動圖示1" },
+		{ id: "organizer_list", label_zh: "主辦單位" },
+		{ id: "background", label_zh: "背景圖／底色", category: "background" },
+		{ id: "custom_component", label_zh: "自訂元件" }
+	]);
+
+	assert.deepEqual(
+		groups.map(group => [group.id, group.label, group.items.map(item => item.id)]),
+		[
+			["title-copy", "標題與說明", ["main_title"]],
+			["signup", "報名資訊", ["qr_code"]],
+			["visuals", "圖像與圖示", ["activity_icon1"]],
+			["footer", "下方資訊", ["organizer_list"]],
+			["background", "背景/底色", ["background"]],
+			["other", "其他元件", ["custom_component"]]
+		]
+	);
 });
 
 test("uses action descriptions, templates, and detail hints", () => {
