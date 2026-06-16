@@ -27,6 +27,7 @@ import {
 	type LatestTranscriptIdeaBlockStatus
 } from "../lib/adminLatestTranscriptStatus";
 import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, computePublicNowAgeMs, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
+import { getAdminRankingDisplayItemIds } from "../lib/adminRankings";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -380,14 +381,6 @@ function formatDurationLabel(value: string) {
 	const minutes = Math.floor(seconds / 60);
 	const remainder = seconds % 60;
 	return remainder === 0 ? `${minutes} Min` : `${minutes}:${remainder.toString().padStart(2, "0")}`;
-}
-
-function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]) {
-	const validIds = new Set(defaultItemIds);
-	const rankedValidIds = itemIds.filter((id, index) => validIds.has(id) && itemIds.indexOf(id) === index);
-	const missingIds = defaultItemIds.filter(id => !rankedValidIds.includes(id));
-
-	return [...rankedValidIds, ...missingIds];
 }
 
 function getRoomName() {
@@ -1577,13 +1570,13 @@ export function AdminPage() {
 	};
 	const publicRankingSnapshot =
 		adminRankingState?.public_ranking ?? boardState?.public_ranking ?? (boardState?.ranking?.items ? { revision: boardState.revision, items: boardState.ranking.items } : null);
-	const publicRankingItems = publicRankingSnapshot ? normalizeRankingItemIds(publicRankingSnapshot.items, defaultRankingItemIds) : [];
+	const publicRankingItems = publicRankingSnapshot ? getAdminRankingDisplayItemIds(publicRankingSnapshot, defaultRankingItemIds) : [];
 	const privateRankingMap: Record<string, RankingSnapshot> = adminRankingState?.private_rankings ?? boardState?.private_rankings ?? {};
 	const privateRankingEntries = Object.entries(privateRankingMap)
 		.filter(([participantId]) => !isAdminParticipantId(participantId) && isAdminRankingParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
 	const privateRankingColumns = privateRankingEntries.map(([participantId, ranking]) => {
-		const items = normalizeRankingItemIds(ranking.items, defaultRankingItemIds);
+		const items = getAdminRankingDisplayItemIds(ranking, defaultRankingItemIds);
 		return {
 			key: `private-${participantId}`,
 			label: getParticipantLabel(participantId),
@@ -1593,10 +1586,9 @@ export function AdminPage() {
 	});
 
 	const generateRankingsExport = () => {
-		const maxLength = Math.max(publicRankingItems.length, ...privateRankingEntries.map(([, r]) => normalizeRankingItemIds(r.items, defaultRankingItemIds).length));
+		const privateOrderedItemsByUser = privateRankingEntries.map(([, ranking]) => getAdminRankingDisplayItemIds(ranking, defaultRankingItemIds));
+		const maxLength = Math.max(publicRankingItems.length, ...privateOrderedItemsByUser.map(items => items.length));
 		if (maxLength === 0) return null;
-
-		const privateOrderedItemsByUser = privateRankingEntries.map(([, ranking]) => normalizeRankingItemIds(ranking.items, defaultRankingItemIds));
 
 		const headers = ["排名", "公共排序", ...privateRankingEntries.map(([participantId]) => getParticipantLabel(participantId))];
 
