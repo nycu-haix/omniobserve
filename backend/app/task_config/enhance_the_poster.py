@@ -624,9 +624,15 @@ PRIVATE_PHASE_2_WITH_INSTRUCTIONS_LAYOUT = {
 PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "type": "split",
     "direction": "horizontal",
-    "ratio": 50,
-    "first": {"type": "leaf", "content": "public-ranking"},
-    "second": {"type": "leaf", "content": "private-ranking"},
+    "ratio": 62,
+    "first": {
+        "type": "split",
+        "direction": "vertical",
+        "ratio": 58,
+        "first": {"type": "leaf", "content": "public-ranking"},
+        "second": {"type": "leaf", "content": "private-ranking"},
+    },
+    "second": TASK_INSTRUCTIONS_LAYOUT,
 }
 
 TASK_PHASES = [
