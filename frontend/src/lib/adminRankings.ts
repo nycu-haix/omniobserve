@@ -23,3 +23,7 @@ export function getAdminRankingDisplayItemIds(snapshot: AdminRankingSnapshotLike
 	const changeCount = normalizeAdminRankingChangeCount(snapshot.change_count, normalizedItems.length);
 	return changeCount === null ? normalizedItems : normalizedItems.slice(0, changeCount);
 }
+
+export function getAdminRankingRowCount(publicItems: string[], privateItemsByParticipant: string[][]) {
+	return Math.max(publicItems.length, ...privateItemsByParticipant.map(items => items.length));
+}

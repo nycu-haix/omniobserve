@@ -27,7 +27,7 @@ import {
 	type LatestTranscriptIdeaBlockStatus
 } from "../lib/adminLatestTranscriptStatus";
 import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, computePublicNowAgeMs, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
-import { getAdminRankingDisplayItemIds } from "../lib/adminRankings";
+import { getAdminRankingDisplayItemIds, getAdminRankingRowCount } from "../lib/adminRankings";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -1575,19 +1575,21 @@ export function AdminPage() {
 	const privateRankingEntries = Object.entries(privateRankingMap)
 		.filter(([participantId]) => !isAdminParticipantId(participantId) && isAdminRankingParticipantId(participantId))
 		.sort(([a], [b]) => Number(a) - Number(b));
-	const privateRankingColumns = privateRankingEntries.map(([participantId, ranking]) => {
-		const items = getAdminRankingDisplayItemIds(ranking, defaultRankingItemIds);
-		return {
-			key: `private-${participantId}`,
-			label: getParticipantLabel(participantId),
-			revision: ranking.revision,
-			rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
-		};
-	});
+	const privateRankingItemsByParticipant = privateRankingEntries.map(([participantId, ranking]) => ({
+		participantId,
+		ranking,
+		items: getAdminRankingDisplayItemIds(ranking, defaultRankingItemIds)
+	}));
+	const privateRankingColumns = privateRankingItemsByParticipant.map(({ participantId, ranking, items }) => ({
+		key: `private-${participantId}`,
+		label: getParticipantLabel(participantId),
+		revision: ranking.revision,
+		rankIndexById: new Map(items.map((item, index) => [item, index + 1]))
+	}));
 
 	const generateRankingsExport = () => {
-		const privateOrderedItemsByUser = privateRankingEntries.map(([, ranking]) => getAdminRankingDisplayItemIds(ranking, defaultRankingItemIds));
-		const maxLength = Math.max(publicRankingItems.length, ...privateOrderedItemsByUser.map(items => items.length));
+		const privateOrderedItemsByUser = privateRankingItemsByParticipant.map(({ items }) => items);
+		const maxLength = getAdminRankingRowCount(publicRankingItems, privateOrderedItemsByUser);
 		if (maxLength === 0) return null;
 
 		const headers = ["排名", "公共排序", ...privateRankingEntries.map(([participantId]) => getParticipantLabel(participantId))];
@@ -1729,7 +1731,15 @@ export function AdminPage() {
 					publicNowDiagnostics.textChars !== null ? `${publicNowDiagnostics.textChars} chars` : null,
 					publicNowDiagnostics.contextChars !== null ? `${publicNowDiagnostics.contextChars} context chars` : null
 				].filter(Boolean);
-	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
+	const rankingRowIndexes = Array.from(
+		{
+			length: getAdminRankingRowCount(
+				publicRankingItems,
+				privateRankingItemsByParticipant.map(({ items }) => items)
+			)
+		},
+		(_, index) => index
+	);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
 		const ids = new Set<number>();
