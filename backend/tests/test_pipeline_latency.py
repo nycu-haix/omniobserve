@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import unittest
 
 from app.schemas import StreamTranscript
+from app.services.streaming import _audio_sample_count
 from app.services.pipeline_latency import pipeline_decision
 from app.services.similarity_detection import _similarity_cue_latency_stage
 from app.services.similarity_notifications import SimilarityCueDeliverySummary
@@ -159,6 +160,49 @@ class PipelineLatencyTests(unittest.TestCase):
         self.assertIn("gpt-test", export_file.content)
         self.assertNotIn("transcript_text", export_file.content)
 
+    def test_stage_export_includes_audio_frontend_latency_metadata(self) -> None:
+        timestamp = datetime(2026, 6, 13, 3, 2, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            pipeline_run_id="audio-run-1",
+            session_name="lost-at-sea-G1-with-cue",
+            condition="with_cue",
+            phase="private",
+            participant_id="5",
+            scope="private",
+            transcript_id=7569,
+            stage="audio_segment_to_transcript_save",
+            duration_ms=12840,
+            meeting_elapsed_ms=3512000,
+            phase_elapsed_ms=None,
+            transcript_chars=128,
+            session_transcript_count_before=388,
+            session_idea_block_count_before=217,
+            participant_idea_block_count_before=42,
+            candidate_count=None,
+            llm_model=None,
+            llm_input_tokens=None,
+            llm_output_tokens=None,
+            retry_count=0,
+            event_metadata={
+                "stage_kind": "audio_segment_to_transcript_save",
+                "audio_duration_ms": 4200,
+                "sample_rate": 16000,
+                "audio_samples": 67200,
+                "audio_bytes": 268800,
+                "source": "audio_stream",
+            },
+            created_at=timestamp,
+        )
+
+        export_file = _pipeline_latency_events_file(_context(), {"5": "participant"}, [event], [])
+        row = next(csv.DictReader(io.StringIO(export_file.content)))
+
+        self.assertEqual(row["stage"], "audio_segment_to_transcript_save")
+        self.assertEqual(row["duration_ms"], "12840")
+        self.assertIn("audio_duration_ms", row["metadata"])
+        self.assertIn("audio_samples", row["metadata"])
+        self.assertNotIn("transcript_text", export_file.content)
+
     def test_pipeline_latency_checklist_status(self) -> None:
         self.assertEqual(_pipeline_latency_status([object()], [object()]), "present")
         self.assertEqual(_pipeline_latency_status([object()], []), "partial")
@@ -177,6 +221,16 @@ class PipelineLatencyTests(unittest.TestCase):
             ),
             ended_at,
         )
+
+    def test_audio_sample_count_uses_non_negative_duration(self) -> None:
+        started_at = datetime(2026, 6, 13, 3, 3, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            _audio_sample_count(started_at, started_at + timedelta(seconds=2), 16000),
+            32000,
+        )
+        self.assertEqual(_audio_sample_count(started_at + timedelta(seconds=2), started_at, 16000), 0)
+        self.assertIsNone(_audio_sample_count(None, started_at, 16000))
 
     def test_similarity_cue_latency_stage_distinguishes_suppressed(self) -> None:
         self.assertEqual(

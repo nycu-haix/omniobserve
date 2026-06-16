@@ -332,6 +332,113 @@ async def record_public_now_latency_events(
         )
 
 
+async def record_audio_transcript_latency_events(
+    db: AsyncSession,
+    *,
+    session_name: str,
+    participant_id: str | int,
+    scope: str,
+    transcript_id: int | str | None,
+    transcript_chars: int,
+    audio_started_at: datetime | None,
+    audio_ended_at: datetime | None,
+    task_name: str | None = None,
+    sample_rate: int | None = None,
+    channels: int | None = None,
+    audio_samples: int | None = None,
+    audio_bytes: int | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+    client_segment_ids: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    pipeline_run_id = uuid4().hex
+    normalized_transcript_id = _optional_int(transcript_id)
+    try:
+        transcript_saved_at = await _transcript_saved_at(db, normalized_transcript_id)
+        observed_at = transcript_saved_at or utc_now()
+        raw_stage_durations = [
+            ("audio_segment_to_transcript_save", _datetime_delta_ms(audio_started_at, observed_at)),
+            ("audio_end_to_transcript_save", _datetime_delta_ms(audio_ended_at, observed_at)),
+        ]
+        stage_durations: list[tuple[str, int]] = []
+        for stage, duration in raw_stage_durations:
+            normalized_duration = _normalize_duration_ms(duration)
+            if normalized_duration is not None:
+                stage_durations.append((stage, normalized_duration))
+        if not stage_durations:
+            return
+
+        resolved_task_name = resolve_task_id(session_name=session_name, task_id=task_name)
+        size_context = await _load_pipeline_size_context(
+            db,
+            session_name=session_name,
+            task_name=resolved_task_name,
+            participant_id=str(participant_id),
+            transcript_id=normalized_transcript_id,
+            transcript_count_in_batch=1,
+            segment_cut_at=audio_ended_at,
+        )
+        audio_duration_ms = _datetime_delta_ms(audio_started_at, audio_ended_at)
+        event_metadata: dict[str, Any] = {
+            "source": source,
+            "reason": reason,
+            "audio_started_at": audio_started_at.isoformat() if audio_started_at else None,
+            "audio_ended_at": audio_ended_at.isoformat() if audio_ended_at else None,
+            "transcript_saved_at": transcript_saved_at.isoformat() if transcript_saved_at else None,
+            "audio_duration_ms": audio_duration_ms,
+            "sample_rate": sample_rate,
+            "channels": channels,
+            "audio_samples": audio_samples,
+            "audio_bytes": audio_bytes,
+            "client_segment_ids": client_segment_ids or [],
+        }
+        event_metadata.update(metadata or {})
+
+        for stage, duration_ms in stage_durations:
+            stage_metadata = dict(event_metadata)
+            stage_metadata["stage_kind"] = stage
+            db.add(
+                PipelineLatencyEvent(
+                    pipeline_run_id=pipeline_run_id,
+                    session_name=session_name,
+                    task_name=resolved_task_name,
+                    condition=_infer_condition_token(session_name),
+                    phase="unknown",
+                    participant_id=str(participant_id),
+                    scope=scope,
+                    transcript_id=normalized_transcript_id,
+                    stage=stage,
+                    duration_ms=duration_ms,
+                    meeting_elapsed_ms=size_context.meeting_elapsed_ms,
+                    phase_elapsed_ms=size_context.phase_elapsed_ms,
+                    transcript_chars=max(0, transcript_chars),
+                    session_transcript_count_before=size_context.session_transcript_count_before,
+                    session_idea_block_count_before=size_context.session_idea_block_count_before,
+                    participant_idea_block_count_before=size_context.participant_idea_block_count_before,
+                    candidate_count=None,
+                    llm_model=None,
+                    llm_input_tokens=None,
+                    llm_output_tokens=None,
+                    retry_count=0,
+                    event_metadata=stage_metadata,
+                )
+            )
+        await db.commit()
+    except Exception as exc:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            await rollback()
+        logger.exception(
+            "audio_transcript_latency_persist_failed pipeline_run_id=%s session_name=%s transcript_id=%s error_type=%s error=%s",
+            pipeline_run_id,
+            session_name,
+            normalized_transcript_id,
+            exc.__class__.__name__,
+            exc,
+        )
+
+
 def pipeline_decision(generated_count: int, duplicate_count: int, *, raw_generated_count: int = 0) -> str:
     if generated_count > 0:
         return "generated"
@@ -438,10 +545,24 @@ def _normalize_duration_ms(value: int | None) -> int | None:
     return max(0, int(value))
 
 
+async def _transcript_saved_at(db: AsyncSession, transcript_id: int | None) -> datetime | None:
+    if transcript_id is None:
+        return None
+    transcript = await db.get(Transcript, transcript_id)
+    return transcript.time_stamp if transcript else None
+
+
 def _datetime_delta_ms(started_at: datetime | None, ended_at: datetime | None) -> int | None:
     if started_at is None or ended_at is None:
         return None
     return max(0, round((ended_at - started_at).total_seconds() * 1000))
+
+
+def _optional_int(value: int | str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _participant_id_to_int(participant_id: str) -> int:
