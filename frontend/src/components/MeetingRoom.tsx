@@ -2040,7 +2040,6 @@ export default function MeetingRoom() {
 							displayName={displayName}
 							micMode={micMode}
 							isLocalSpeaking={isLocalSpeaking}
-							publicAudioDuckingEnabled
 							allowInteraction={isJitsiFocused}
 							onStatusChange={handleJitsiStatusChange}
 							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
