@@ -189,7 +189,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 
 ### 中間休息與 Task 2 連結切換
 
-- [ ] 確認 Task 1 ranking、transcript、idea blocks、cue logs、public chat、個別 Meet 錄影都有記錄。
+- [ ] 確認 Task 1 ranking、private reasoning capture、public transcript、idea blocks、cue logs、public chat、個別 Meet 錄影都有記錄。
 - [ ] 確認所有參與者不要自行提前開啟或操作 Task 2。
 - [ ] 三位 Observer 協助各自負責的真實參與者開啟 Task 2 系統連結。
 - [ ] Host/Admin 依 mapping table 確認每位參與者進入正確 system id。
@@ -201,7 +201,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 切到 Lost private phase。
 - [ ] 確認每人可做 15 items 個人排序。
 - [ ] 開始 8 分鐘 timer。
-- [ ] 確認 think-aloud transcript / idea blocks 有產生。
+- [ ] 確認 private reasoning capture / idea blocks 有產生。
 - [ ] 確認文字輸入理由也被記錄並可對應到 participant。
 - [ ] 若同一真實參與者連續 2 分鐘沒有出聲 reasoning、悄悄話 transcript、手動 idea block 或文字輸入理由，且該 participant 本 private phase 尚未被提醒，Host 使用標準 quiet fallback prompt，不提供排序建議，並在 Observer note 記錄 prompt use。
 - [ ] 切到 public phase。
@@ -327,7 +327,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 確認 Google Meet 錄影檔案保存。
 - [ ] 匯出 Lost rankings。
 - [ ] 匯出 Poster rankings。
-- [ ] 匯出 transcripts。
+- [ ] 匯出 public/interview transcripts 與 private reasoning capture。
 - [ ] 匯出 idea blocks。
 - [ ] 匯出 cue logs；no-cue task 標記 cue disabled。
 - [ ] 匯出 public chat logs。
