@@ -32,6 +32,8 @@ test("groups poster component options into participant-facing sections", () => {
 	const groups = groupComponentReferenceOptions([
 		{ id: "main_title", label_zh: "主標題" },
 		{ id: "qr_code", label_zh: "QR 碼" },
+		{ id: "qr_caption", label_zh: "QR 碼說明" },
+		{ id: "contact_info", label_zh: "參與資訊" },
 		{ id: "activity_icon1", label_zh: "活動圖示1" },
 		{ id: "organizer_list", label_zh: "主辦單位" },
 		{ id: "background", label_zh: "背景圖／底色", category: "background" },
@@ -42,7 +44,7 @@ test("groups poster component options into participant-facing sections", () => {
 		groups.map(group => [group.id, group.label, group.items.map(item => item.id)]),
 		[
 			["title-copy", "標題與說明", ["main_title"]],
-			["signup", "報名資訊", ["qr_code"]],
+			["signup", "報名資訊", ["qr_code", "qr_caption", "contact_info"]],
 			["visuals", "圖像與圖示", ["activity_icon1"]],
 			["footer", "下方資訊", ["organizer_list"]],
 			["background", "背景/底色", ["background"]],

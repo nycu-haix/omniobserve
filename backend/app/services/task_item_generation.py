@@ -381,7 +381,14 @@ async def build_poster_component_action_mappings_with_llm(
         logger.info("poster_component_mapping_skipped_no_openai_key text_chars=%s", len(text))
         return []
 
-    component_lines = "\n".join(_format_builder_option_line(item) for item in components)
+    allowed_action_ids_by_component = _build_component_allowed_action_ids_by_component(components, actions)
+    component_lines = "\n".join(
+        _format_builder_option_line(
+            item,
+            allowed_action_ids=allowed_action_ids_by_component.get(str(item["id"]), []),
+        )
+        for item in components
+    )
     action_lines = "\n".join(_format_builder_option_line(item) for item in actions)
     system_prompt = (
         "You classify user text for the Enhance the Poster task.\n"
@@ -395,6 +402,7 @@ async def build_poster_component_action_mappings_with_llm(
         "Participant wording may be imprecise, such as 左上角那張圖, 右下角報名區, "
         "下面那個單位資訊, or 那段時間地點說明. "
         "Match actions against ids, Chinese labels, English labels, descriptions, and obvious synonyms. "
+        "Only return component/action pairs where the action id appears in that component's allowed_actions. "
         "Do not invent components or actions. Deduplicate exact pairs. "
         'Return JSON only in this exact shape: {"poster_task_items":[{"component_id":"main_title","action_id":"enlarge"}]} . '
         'If unrelated, return {"poster_task_items":[]}.'
@@ -414,14 +422,48 @@ async def build_poster_component_action_mappings_with_llm(
         parsed["poster_task_items"],
         valid_component_ids={str(item["id"]) for item in components},
         valid_action_ids={str(item["id"]) for item in actions},
+        allowed_action_ids_by_component=allowed_action_ids_by_component,
     )
 
 
-def _format_builder_option_line(item: dict[str, Any]) -> str:
+def _format_builder_option_line(
+    item: dict[str, Any],
+    *,
+    allowed_action_ids: list[str] | None = None,
+) -> str:
     label_parts = _join_option_terms(item.get("label_zh"), item.get("label_en"))
     description = str(item.get("description_zh") or "")
     aliases = _join_option_terms(*(item.get("aliases") or []))
-    return f'- id="{item["id"]}"; labels="{label_parts}"; description="{description}"; aliases="{aliases}"'
+    parts = [
+        f'id="{item["id"]}"',
+        f'labels="{label_parts}"',
+        f'description="{description}"',
+        f'aliases="{aliases}"',
+    ]
+    if allowed_action_ids is not None:
+        parts.append(f'allowed_actions="{_join_option_terms(*allowed_action_ids)}"')
+    return f'- {"; ".join(parts)}'
+
+
+def _build_component_allowed_action_ids_by_component(
+    components: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    action_ids = [str(action["id"]) for action in actions if action.get("id")]
+    valid_action_ids = set(action_ids)
+    allowed_action_ids_by_component: dict[str, list[str]] = {}
+    for component in components:
+        component_id = str(component["id"])
+        raw_allowed_action_ids = component.get("allowed_action_ids")
+        if isinstance(raw_allowed_action_ids, list):
+            allowed_action_ids_by_component[component_id] = [
+                str(action_id)
+                for action_id in raw_allowed_action_ids
+                if str(action_id) in valid_action_ids
+            ]
+            continue
+        allowed_action_ids_by_component[component_id] = action_ids.copy()
+    return allowed_action_ids_by_component
 
 
 def _join_option_terms(*values: Any) -> str:
@@ -433,6 +475,7 @@ def _normalize_poster_component_action_mappings(
     *,
     valid_component_ids: set[str],
     valid_action_ids: set[str],
+    allowed_action_ids_by_component: dict[str, list[str]] | None = None,
 ) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -443,6 +486,13 @@ def _normalize_poster_component_action_mappings(
         action_id = str(value.get("action_id") or value.get("action") or "").strip()
         if component_id not in valid_component_ids or action_id not in valid_action_ids:
             continue
+        if allowed_action_ids_by_component is not None:
+            allowed_action_ids = {
+                str(allowed_action_id)
+                for allowed_action_id in allowed_action_ids_by_component.get(component_id, [])
+            }
+            if action_id not in allowed_action_ids:
+                continue
         key = (component_id, action_id)
         if key in seen:
             continue

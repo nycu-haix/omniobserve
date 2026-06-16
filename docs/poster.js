@@ -1,6 +1,6 @@
 (async () => {
   // Staff-only confederate seed ideas for Enhance the Poster.
-  // Aligned with docs/confederate-poster.md version 2026-06-15 and the current
+  // Aligned with docs/confederate-poster.md version 2026-06-16 and the current
   // backend/app/task_config/enhance_the_poster.py component/action config.
   const ideas = [
     "我覺得可以先不要大改海洋背景，因為至少跟淨灘主題有關，先把資訊層級整理好可能比較重要。",
