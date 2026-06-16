@@ -33,6 +33,14 @@ import {
 	getTaskReferenceLabel,
 	type TaskReferenceOption
 } from "../lib/taskItemReference";
+import {
+	clampVisibleTaskPaneSplitRatio,
+	getTaskPaneSplitRatioFromKeyboard,
+	getTaskPaneSplitRatioFromPointerDelta,
+	getTaskPaneSplitTracks,
+	TASK_PANE_SEPARATOR_TRACK,
+	type TaskPaneCollapsedSide
+} from "../lib/taskPaneSplit";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
@@ -113,7 +121,6 @@ const MIC_CONTROLS_HEIGHT = 40;
 const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
-const MIN_TASK_PANE_RATIO = 24;
 const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
@@ -495,7 +502,7 @@ function createTaskPaneLayoutFromConfig(config: TaskPaneLayoutConfig | undefined
 		type: "split",
 		id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		direction: config.direction === "vertical" ? "vertical" : "horizontal",
-		ratio: Math.min(Math.max(Number(config.ratio) || 50, MIN_TASK_PANE_RATIO), 100 - MIN_TASK_PANE_RATIO),
+		ratio: clampVisibleTaskPaneSplitRatio(Number(config.ratio) || 50),
 		first,
 		second
 	};
@@ -1037,34 +1044,232 @@ function TaskWorkspace({
 	);
 }
 
-function TaskPaneRenderer({ node, isNarrowLayout, renderPaneContent }: { node: TaskPaneNode; isNarrowLayout: boolean; renderPaneContent: (content: TaskPaneContent) => React.ReactNode }) {
+function getTaskPaneNodeLabel(node: TaskPaneNode): string {
 	if (node.type === "leaf") {
-		return <TaskPane pane={node}>{renderPaneContent(node.content)}</TaskPane>;
+		return TASK_PANE_CONTENT_LABELS[node.content];
 	}
 
+	return `${getTaskPaneNodeLabel(node.first)} / ${getTaskPaneNodeLabel(node.second)}`;
+}
+
+function TaskPaneRenderer({
+	node,
+	isNarrowLayout,
+	renderPaneContent,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
+}: {
+	node: TaskPaneNode;
+	isNarrowLayout: boolean;
+	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
+}) {
+	if (node.type === "leaf") {
+		return (
+			<TaskPane pane={node} isCollapsed={isCollapsed} collapsedDirection={collapsedDirection}>
+				{renderPaneContent(node.content)}
+			</TaskPane>
+		);
+	}
+
+	return <TaskPaneSplitRenderer node={node} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} isCollapsed={isCollapsed} collapsedDirection={collapsedDirection} />;
+}
+
+function TaskPaneSplitRenderer({
+	node,
+	isNarrowLayout,
+	renderPaneContent,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
+}: {
+	node: TaskPaneSplit;
+	isNarrowLayout: boolean;
+	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
+}) {
+	const [ratioState, setRatioState] = useState(() => ({ nodeId: node.id, ratio: node.ratio }));
+	const containerRef = useRef<HTMLDivElement | null>(null);
 	const effectiveDirection = isNarrowLayout ? "vertical" : node.direction;
+	const ratio = ratioState.nodeId === node.id ? ratioState.ratio : node.ratio;
+	const tracks = getTaskPaneSplitTracks(effectiveDirection, ratio);
+	const firstLabel = getTaskPaneNodeLabel(node.first);
+	const secondLabel = getTaskPaneNodeLabel(node.second);
+	const separatorLabel = `調整 ${firstLabel} 與 ${secondLabel} 大小`;
+	const splitLabel = `${firstLabel} / ${secondLabel}`;
+
+	const setSplitRatio = (value: number | ((currentRatio: number) => number)) => {
+		setRatioState(current => {
+			const currentRatio = current.nodeId === node.id ? current.ratio : node.ratio;
+			const nextRatio = typeof value === "function" ? value(currentRatio) : value;
+			return { nodeId: node.id, ratio: nextRatio };
+		});
+	};
+
+	const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+		event.preventDefault();
+		const resizeHandle = event.currentTarget;
+		const containerRect = containerRef.current?.getBoundingClientRect();
+		const containerPixels = effectiveDirection === "horizontal" ? (containerRect?.width ?? 0) : (containerRect?.height ?? 0);
+		const startPointer = effectiveDirection === "horizontal" ? event.clientX : event.clientY;
+		const startRatio = ratio;
+
+		resizeHandle.setPointerCapture(event.pointerId);
+
+		const handlePointerMove = (moveEvent: PointerEvent) => {
+			const currentPointer = effectiveDirection === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
+			setSplitRatio(getTaskPaneSplitRatioFromPointerDelta(startRatio, currentPointer - startPointer, containerPixels));
+		};
+
+		const handlePointerUp = () => {
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
+			}
+			document.body.style.cursor = "";
+			document.body.style.userSelect = "";
+			window.removeEventListener("pointermove", handlePointerMove);
+			window.removeEventListener("pointerup", handlePointerUp);
+			window.removeEventListener("pointercancel", handlePointerUp);
+		};
+
+		document.body.style.cursor = effectiveDirection === "horizontal" ? "col-resize" : "row-resize";
+		document.body.style.userSelect = "none";
+		window.addEventListener("pointermove", handlePointerMove);
+		window.addEventListener("pointerup", handlePointerUp);
+		window.addEventListener("pointercancel", handlePointerUp);
+	};
+
+	const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+			return;
+		}
+
+		event.preventDefault();
+		setSplitRatio(current => getTaskPaneSplitRatioFromKeyboard(current, event.key, effectiveDirection));
+	};
+
 	const gridStyle =
 		effectiveDirection === "horizontal"
-			? ({ gridTemplateColumns: `minmax(280px, ${node.ratio}fr) minmax(280px, ${100 - node.ratio}fr)` } as CSSProperties)
-			: ({ gridTemplateRows: `minmax(180px, ${node.ratio}fr) minmax(180px, ${100 - node.ratio}fr)` } as CSSProperties);
+			? ({ gridTemplateColumns: `${tracks.firstTrack} ${TASK_PANE_SEPARATOR_TRACK} ${tracks.secondTrack}` } as CSSProperties)
+			: ({ gridTemplateRows: `${tracks.firstTrack} ${TASK_PANE_SEPARATOR_TRACK} ${tracks.secondTrack}` } as CSSProperties);
+
+	const splitChildren = (
+		<>
+			<TaskPaneRenderer
+				node={node.first}
+				isNarrowLayout={isNarrowLayout}
+				renderPaneContent={renderPaneContent}
+				isCollapsed={tracks.collapsedSide === "first"}
+				collapsedDirection={effectiveDirection}
+			/>
+			<TaskPaneSeparator direction={effectiveDirection} label={separatorLabel} ratio={ratio} collapsedSide={tracks.collapsedSide} onPointerDown={handlePointerDown} onKeyDown={handleKeyDown} />
+			<TaskPaneRenderer
+				node={node.second}
+				isNarrowLayout={isNarrowLayout}
+				renderPaneContent={renderPaneContent}
+				isCollapsed={tracks.collapsedSide === "second"}
+				collapsedDirection={effectiveDirection}
+			/>
+		</>
+	);
+
+	if (isCollapsed) {
+		return (
+			<CollapsedTaskPaneSummary label={splitLabel} collapsedDirection={collapsedDirection}>
+				<div className="hidden">{splitChildren}</div>
+			</CollapsedTaskPaneSummary>
+		);
+	}
 
 	return (
-		<div className="grid h-full min-h-0 min-w-0 gap-3" style={gridStyle}>
-			<TaskPaneRenderer node={node.first} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
-			<TaskPaneRenderer node={node.second} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
+		<div ref={containerRef} className="grid h-full min-h-0 min-w-0" style={gridStyle}>
+			{splitChildren}
 		</div>
 	);
 }
 
-function TaskPane({ pane, children }: { pane: TaskPaneLeaf; children: React.ReactNode }) {
+function TaskPaneSeparator({
+	direction,
+	label,
+	ratio,
+	collapsedSide,
+	onPointerDown,
+	onKeyDown
+}: {
+	direction: TaskSplitDirection;
+	label: string;
+	ratio: number;
+	collapsedSide: TaskPaneCollapsedSide;
+	onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+	onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+	const isHorizontalSplit = direction === "horizontal";
+	const firstCollapsedLabel = isHorizontalSplit ? "左側" : "上方";
+	const secondCollapsedLabel = isHorizontalSplit ? "右側" : "下方";
+	const collapsedHint = collapsedSide === "first" ? `，${firstCollapsedLabel}區塊已收合` : collapsedSide === "second" ? `，${secondCollapsedLabel}區塊已收合` : "";
+
 	return (
-		<section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border bg-card" aria-label={TASK_PANE_CONTENT_LABELS[pane.content]}>
-			<header className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5">
+		<button
+			type="button"
+			className={cn(
+				"group grid shrink-0 place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				isHorizontalSplit ? "h-full min-h-20 w-4 cursor-col-resize" : "h-4 min-w-20 cursor-row-resize"
+			)}
+			aria-label={`${label}${collapsedHint}`}
+			aria-orientation={isHorizontalSplit ? "vertical" : "horizontal"}
+			aria-valuemin={0}
+			aria-valuemax={100}
+			aria-valuenow={Math.round(ratio)}
+			data-local-space-shortcut="true"
+			role="separator"
+			onPointerDown={onPointerDown}
+			onKeyDown={onKeyDown}
+		>
+			<span className={cn("rounded-full bg-border transition-colors group-hover:bg-primary/30", isHorizontalSplit ? "h-20 w-0.5" : "h-0.5 w-20")} aria-hidden="true" />
+		</button>
+	);
+}
+
+function CollapsedTaskPaneSummary({ label, collapsedDirection, children }: { label: string; collapsedDirection: TaskSplitDirection; children: React.ReactNode }) {
+	return (
+		<section className="relative grid h-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-lg border bg-card text-card-foreground" aria-label={`${label} 已收合`}>
+			<div className={cn("max-w-full truncate px-1 text-xs font-medium text-muted-foreground", collapsedDirection === "horizontal" && "max-h-full [writing-mode:vertical-rl]")}>{label}</div>
+			{children}
+		</section>
+	);
+}
+
+function TaskPane({
+	pane,
+	children,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
+}: {
+	pane: TaskPaneLeaf;
+	children: React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
+}) {
+	return (
+		<section
+			className={cn("grid h-full min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card", isCollapsed ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]")}
+			aria-label={isCollapsed ? `${TASK_PANE_CONTENT_LABELS[pane.content]} 已收合` : TASK_PANE_CONTENT_LABELS[pane.content]}
+		>
+			<header className={cn("flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5", isCollapsed && "min-h-0 justify-center border-b-0 p-1")}>
 				<div className="flex min-w-0 items-center gap-2">
-					<div className="truncate text-sm font-medium">{TASK_PANE_CONTENT_LABELS[pane.content]}</div>
+					<div
+						className={cn(
+							"truncate text-sm font-medium",
+							isCollapsed && "text-xs text-muted-foreground",
+							isCollapsed && collapsedDirection === "horizontal" && "max-h-full [writing-mode:vertical-rl]"
+						)}
+					>
+						{TASK_PANE_CONTENT_LABELS[pane.content]}
+					</div>
 				</div>
 			</header>
-			<div className="min-h-0 overflow-hidden p-2">{children}</div>
+			<div className={cn("min-h-0 overflow-hidden p-2", isCollapsed && "hidden")}>{children}</div>
 		</section>
 	);
 }
