@@ -33,7 +33,7 @@ const COMPONENT_GROUPS = [
 	{
 		id: "signup",
 		label: "報名資訊",
-		componentIds: new Set(["qr_code", "qr_caption", "qr_code_group", "contact_info"])
+		componentIds: new Set(["qr_code", "qr_caption", "contact_info"])
 	},
 	{
 		id: "footer",

@@ -130,37 +130,75 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
                 self.assertIsInstance(component.get("aliases"), list)
                 self.assertTrue(component["aliases"])
 
-        self.assertIn("右下角報名區", components_by_id["qr_code_group"]["aliases"])
+        self.assertNotIn("qr_code_group", components_by_id)
+        self.assertIn("右下角報名區", components_by_id["qr_code"]["aliases"])
+        self.assertIn("右下角報名區", components_by_id["qr_caption"]["aliases"])
         self.assertIn("左上角那張圖", components_by_id["activity_icon1"]["aliases"])
         self.assertIn("底部資訊", components_by_id["info_group2"]["aliases"])
 
     def test_poster_component_keyword_matching_uses_aliases_and_descriptions(self) -> None:
         cases = [
-            ("右下角報名區應該靠近參與資訊", "qr_code_group"),
+            ("右下角報名區應該靠近參與資訊", ["qr_code", "qr_caption"]),
             ("左上角那張圖可以換成更像淨灘的圖", "activity_icon1"),
             ("下面那個單位資訊不要太搶眼", "info_group2"),
             ("第一個場次的時間地點說明需要更好讀", "description1"),
             ("整張海報底色可以改成更有海洋感的藍色", "background"),
         ]
 
-        for text, expected_component_id in cases:
+        for text, expected_component_id_or_ids in cases:
             with self.subTest(text=text):
-                self.assertIn(
-                    expected_component_id,
-                    build_poster_component_ids_by_keyword(
-                        text,
-                        task_name="enhance-the-poster",
-                    ),
+                matched_ids = build_poster_component_ids_by_keyword(
+                    text,
+                    task_name="enhance-the-poster",
                 )
+                expected_component_ids = (
+                    expected_component_id_or_ids
+                    if isinstance(expected_component_id_or_ids, list)
+                    else [expected_component_id_or_ids]
+                )
+                for expected_component_id in expected_component_ids:
+                    self.assertIn(expected_component_id, matched_ids)
 
-    def test_builder_prompt_lines_include_component_descriptions_and_aliases(self) -> None:
-        qr_group = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_code_group")
+    def test_qr_area_aliases_resolve_to_components_with_available_layout_actions(self) -> None:
+        cases = [
+            ("調整 QR 碼區間距", "adjust_spacing"),
+            ("集合右下角報名區", "assemble"),
+            ("右下角報名區向左對齊", "align_left"),
+        ]
 
-        line = _format_builder_option_line(qr_group)
+        for text, action_id in cases:
+            with self.subTest(text=text, action_id=action_id):
+                matched_ids = build_poster_component_ids_by_keyword(
+                    text,
+                    task_name="enhance-the-poster",
+                )
+                self.assertIn("qr_code", matched_ids)
+                self.assertIn("qr_caption", matched_ids)
 
-        self.assertIn('id="qr_code_group"', line)
-        self.assertIn('description="QR code 與其說明文字形成的報名區塊。"', line)
-        self.assertIn('aliases="報名區, QR 區塊, QR 碼區, 右下角報名區, 掃碼區, QR 和文字"', line)
+                for component_id in ("qr_code", "qr_caption"):
+                    _, component, action = _resolve_component_action(
+                        session_name="enhance-the-poster-issue99",
+                        task_id="enhance-the-poster",
+                        component_id=component_id,
+                        action_id=action_id,
+                    )
+                    self.assertEqual(component["id"], component_id)
+                    self.assertEqual(action["id"], action_id)
+
+    def test_builder_prompt_lines_keep_qr_code_and_caption_separate(self) -> None:
+        qr_code = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_code")
+        qr_caption = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_caption")
+
+        qr_code_line = _format_builder_option_line(qr_code)
+        qr_caption_line = _format_builder_option_line(qr_caption)
+
+        self.assertIn('id="qr_code"', qr_code_line)
+        self.assertIn('description="報名 QR code 圖像本身，觀眾掃描後進入報名或了解更多資訊。"', qr_code_line)
+        self.assertIn("右下角報名區", qr_code_line)
+        self.assertIn('id="qr_caption"', qr_caption_line)
+        self.assertIn('description="QR code 附近的說明文字或行動呼籲，例如報名連結、掃描報名。"', qr_caption_line)
+        self.assertIn("QR 下方文字", qr_caption_line)
+        self.assertNotIn("qr_code_group", "\n".join(_format_builder_option_line(component) for component in PHASE1_POSTER_COMPONENTS))
 
 
 if __name__ == "__main__":

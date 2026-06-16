@@ -22,6 +22,15 @@ PHASE1_MIN_TASK_ITEMS = 4
 RANKING_IMPORTANCE_LIMIT = 15
 CUSTOM_DETAIL_ACTION_ID = "custom_detail"
 REPLACE_IMAGE_LIBRARY_ACTION_ID = "replace_image_library"
+QR_AREA_LAYOUT_ACTION_IDS = [
+    "adjust_spacing",
+    "unify_color",
+    "align_left",
+    "align_center",
+    "align_right",
+    "spread_out",
+    "assemble",
+]
 IMAGE_LIBRARY_COMPONENT_IDS = {
     "people_icon1",
     "people_icon2",
@@ -119,15 +128,15 @@ TASK_ITEMS: list[TaskItemConfig] = [
         "image_mark": "DESC",
     },
     {
-        "id": "mock_qr_code_group_shrink",
-        "label_zh": "縮小「QR 碼+說明」",
-        "label_en": "Shrink the QR code group",
-        "description_zh": "QR 碼+說明 / 縮小",
-        "aliases": ["QR 碼+說明", "QR code", "QR", "縮小", "qr code group", "shrink"],
-        "image_title": "QR 碼+說明",
+        "id": "mock_qr_caption_enlarge",
+        "label_zh": "放大「QR 碼說明」",
+        "label_en": "Enlarge the QR code caption",
+        "description_zh": "QR 碼說明 / 放大",
+        "aliases": ["QR 碼說明", "QR 說明", "報名連結", "掃描說明", "放大", "qr caption", "enlarge"],
+        "image_title": "QR 碼說明",
         "image_bg": "#f8fafc",
         "image_fg": "#334155",
-        "image_mark": "QR",
+        "image_mark": "QR TXT",
     },
     {
         "id": "mock_info_group_adjust_spacing",
@@ -249,13 +258,32 @@ PHASE1_POSTER_COMPONENTS = [
         "id": "qr_code",
         "label_zh": "QR 碼",
         "label_en": "QR code",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "transparency", CUSTOM_DETAIL_ACTION_ID],
+        "allowed_action_ids": [
+            "remove",
+            "move",
+            "enlarge",
+            "shrink",
+            "change_color",
+            "transparency",
+            *QR_AREA_LAYOUT_ACTION_IDS,
+            CUSTOM_DETAIL_ACTION_ID,
+        ],
     },
     {
         "id": "qr_caption",
         "label_zh": "QR 碼說明",
         "label_en": "QR caption",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "change_color", "change_font", "transparency", CUSTOM_DETAIL_ACTION_ID],
+        "allowed_action_ids": [
+            "remove",
+            "move",
+            "enlarge",
+            "shrink",
+            "change_color",
+            "change_font",
+            "transparency",
+            *QR_AREA_LAYOUT_ACTION_IDS,
+            CUSTOM_DETAIL_ACTION_ID,
+        ],
     },
     {
         "id": "contact_info",
@@ -292,12 +320,6 @@ PHASE1_POSTER_COMPONENTS = [
         "label_zh": "活動圖示2",
         "label_en": "Activity Icon 2",
         "allowed_action_ids": ["remove", "move", "enlarge", "shrink", REPLACE_IMAGE_LIBRARY_ACTION_ID, "transparency", CUSTOM_DETAIL_ACTION_ID],
-    },
-    {
-        "id": "qr_code_group",
-        "label_zh": "QR 碼+說明",
-        "label_en": "QR code group",
-        "allowed_action_ids": ["remove", "move", "enlarge", "shrink", "adjust_spacing", "unify_color", "align_left", "align_center", "align_right", "spread_out", "assemble", CUSTOM_DETAIL_ACTION_ID],
     },
     {
         "id": "title_group",
@@ -347,11 +369,11 @@ PHASE1_COMPONENT_DETECTION_METADATA = {
     },
     "qr_code": {
         "description_zh": "報名 QR code 圖像本身，觀眾掃描後進入報名或了解更多資訊。",
-        "aliases": ["QR", "QR code", "掃碼", "報名碼", "右下角 QR", "報名 QR"],
+        "aliases": ["QR", "QR code", "掃碼", "報名碼", "右下角 QR", "報名 QR", "QR 碼區", "右下角報名區", "掃碼區"],
     },
     "qr_caption": {
         "description_zh": "QR code 附近的說明文字或行動呼籲，例如報名連結、掃描報名。",
-        "aliases": ["QR 說明", "QR 文字", "報名連結", "掃描說明", "QR 下方文字", "CTA 文字"],
+        "aliases": ["QR 說明", "QR 文字", "報名連結", "掃描說明", "QR 下方文字", "CTA 文字", "QR 碼區", "右下角報名區", "掃碼區", "QR 附近文字"],
     },
     "contact_info": {
         "description_zh": "參與資訊、參與對象、贈品、抽獎資格或聯絡資訊等報名誘因內容。",
@@ -376,10 +398,6 @@ PHASE1_COMPONENT_DETECTION_METADATA = {
     "activity_icon2": {
         "description_zh": "第二個活動圖示或淨灘相關插圖，用來表現海岸、垃圾清理或活動情境。",
         "aliases": ["第二個活動圖", "淨灘圖示2", "活動插圖2", "左下角那張圖", "垃圾清理圖"],
-    },
-    "qr_code_group": {
-        "description_zh": "QR code 與其說明文字形成的報名區塊。",
-        "aliases": ["報名區", "QR 區塊", "QR 碼區", "右下角報名區", "掃碼區", "QR 和文字"],
     },
     "title_group": {
         "description_zh": "主標題與副標題形成的上方標題群組。",
