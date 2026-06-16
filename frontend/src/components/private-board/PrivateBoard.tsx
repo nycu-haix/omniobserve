@@ -16,7 +16,12 @@ import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
 import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
-import { clearPendingTranscriptLinesIdeaBlockStatus, getIdeaBlockTranscriptLineIdsForBlockIds, markTranscriptLinesIdeaBlockStatus } from "../../lib/transcriptLineIdeaBlockStatus";
+import {
+	clearPendingTranscriptLinesIdeaBlockStatus,
+	getIdeaBlockTranscriptLineIdsForBlockIds,
+	hasReadyIdeaBlockForTranscriptLineIds,
+	markTranscriptLinesIdeaBlockStatus
+} from "../../lib/transcriptLineIdeaBlockStatus";
 import { cn } from "../../lib/utils";
 import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
@@ -2875,9 +2880,11 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			const hasNewIdeaBlockResult = ideaBlockResponses.length > 0;
 			const hasAnyIdeaBlockResult = hasNewIdeaBlockResult || duplicateIdeaBlockResponses.length > 0;
 			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasAnyIdeaBlockResult;
-			const shouldResolvePendingAsNoIdea = hasCompletedIdeaBlockGeneration && !hasNewIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
 			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? resolveActiveCompletionSegmentKeys(lastAudioMessage) : [];
+			const completionTranscriptLineIds = completionSegmentKeys.length > 0 ? getTranscriptLineIdsForDraftKeys(completionSegmentKeys) : new Set<string>();
+			const hasExistingReadyBlockForCompletion = hasReadyIdeaBlockForTranscriptLineIds(ideaBlocksRef.current, completionTranscriptLineIds);
+			const shouldResolvePendingAsNoIdea = hasCompletedIdeaBlockGeneration && !hasNewIdeaBlockResult && !hasExistingReadyBlockForCompletion;
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length === 0) {
 				if (shouldResolvePendingAsNoIdea) {
 					const allPendingVoiceBlockIds = new Set<string>();
@@ -2896,8 +2903,12 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			if (pendingVoiceBlockIds.size > 0 && shouldResolvePendingAsNoIdea) {
 				markTranscriptIdeaBlockStatusByBlockIds(pendingVoiceBlockIds, "no_idea");
 			}
-			if (completionSegmentKeys.length > 0) {
-				markTranscriptIdeaBlockStatusByLineIds(getTranscriptLineIdsForDraftKeys(completionSegmentKeys), shouldResolvePendingAsNoIdea ? "no_idea" : undefined);
+			if (completionTranscriptLineIds.size > 0) {
+				if (shouldResolvePendingAsNoIdea) {
+					markTranscriptIdeaBlockStatusByLineIds(completionTranscriptLineIds, "no_idea");
+				} else {
+					setTranscriptLines(prev => clearPendingTranscriptLinesIdeaBlockStatus(prev, completionTranscriptLineIds));
+				}
 			}
 			let shouldRefreshIdeaBlocks = false;
 

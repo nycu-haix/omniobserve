@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clearPendingTranscriptLinesIdeaBlockStatus, getIdeaBlockTranscriptLineIdsForBlockIds, markTranscriptLinesIdeaBlockStatus } from "../src/lib/transcriptLineIdeaBlockStatus.ts";
+import {
+	clearPendingTranscriptLinesIdeaBlockStatus,
+	getIdeaBlockTranscriptLineIdsForBlockIds,
+	hasReadyIdeaBlockForTranscriptLineIds,
+	markTranscriptLinesIdeaBlockStatus
+} from "../src/lib/transcriptLineIdeaBlockStatus.ts";
 import type { IdeaBlock, TranscriptLine } from "../src/types/index.ts";
 
 function transcriptLine(overrides: Partial<TranscriptLine> = {}): TranscriptLine {
@@ -31,6 +36,19 @@ test("finds transcript lines referenced by pending voice blocks", () => {
 	);
 
 	assert.deepEqual([...lineIds].sort(), ["t1", "t2"]);
+});
+
+test("detects existing ready idea blocks for transcript completions", () => {
+	const blocks = [
+		ideaBlock({ id: "pending-block", status: "generating", transcriptLineId: "t1" }),
+		ideaBlock({ id: "ready-block", status: "ready", transcriptLineId: "t2", sourceTranscriptIds: ["t3"] }),
+		ideaBlock({ id: "deleted-ready-block", status: "ready", transcriptLineId: "t4", isDeleted: true })
+	];
+
+	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t1"])), false);
+	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t2"])), true);
+	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t3"])), true);
+	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t4"])), false);
 });
 
 test("marks private transcript lines with explicit processing status", () => {

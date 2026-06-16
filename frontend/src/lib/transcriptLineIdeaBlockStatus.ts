@@ -15,6 +15,19 @@ export function getIdeaBlockTranscriptLineIdsForBlockIds(blocks: IdeaBlock[], bl
 	return transcriptLineIds;
 }
 
+export function hasReadyIdeaBlockForTranscriptLineIds(blocks: IdeaBlock[], transcriptLineIds: Set<string>): boolean {
+	if (transcriptLineIds.size === 0) {
+		return false;
+	}
+
+	return blocks.some(block => {
+		if (block.status !== "ready" || block.isDeleted) {
+			return false;
+		}
+		return ideaBlockTranscriptLineIds(block).some(transcriptLineId => transcriptLineIds.has(transcriptLineId));
+	});
+}
+
 export function markTranscriptLinesIdeaBlockStatus<T extends TranscriptLine>(lines: T[], transcriptLineIds: Set<string>, ideaBlockStatus: TranscriptLine["ideaBlockStatus"]): T[] {
 	if (transcriptLineIds.size === 0) {
 		return lines;
