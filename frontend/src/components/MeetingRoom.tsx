@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, Volume2, VolumeX } from "lucide-react";
+import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, VolumeX } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -1336,7 +1336,6 @@ export default function MeetingRoom() {
 	const [privateBoardPublicChatUnreadCount, setPrivateBoardPublicChatUnreadCount] = useState(0);
 	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
 	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
-	const [isPublicAudioDuckingEnabled, setIsPublicAudioDuckingEnabled] = useState(true);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
@@ -1388,8 +1387,7 @@ export default function MeetingRoom() {
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
 	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
-	const isPublicAudioDucked = shouldDuckJitsiPublicAudio({ micMode, duckingEnabled: isPublicAudioDuckingEnabled });
-	const publicAudioDuckingToggleLabel = isPublicAudioDuckingEnabled ? "關閉悄悄話公開頻道降音" : "開啟悄悄話公開頻道降音";
+	const isPublicAudioDucked = shouldDuckJitsiPublicAudio({ micMode, duckingEnabled: true });
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -2043,7 +2041,7 @@ export default function MeetingRoom() {
 							roomName={roomName}
 							displayName={displayName}
 							micMode={micMode}
-							publicAudioDuckingEnabled={isPublicAudioDuckingEnabled}
+							publicAudioDuckingEnabled
 							allowInteraction={isJitsiFocused}
 							onStatusChange={handleJitsiStatusChange}
 							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
@@ -2153,18 +2151,17 @@ export default function MeetingRoom() {
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
-						<Button
-							type="button"
-							variant={isPublicAudioDuckingEnabled ? "secondary" : "outline"}
-							size="icon"
-							className="h-9 w-9"
-							aria-pressed={isPublicAudioDuckingEnabled}
-							aria-label={publicAudioDuckingToggleLabel}
-							title={publicAudioDuckingToggleLabel}
-							onClick={() => setIsPublicAudioDuckingEnabled(enabled => !enabled)}
-						>
-							{isPublicAudioDucked ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-						</Button>
+						{isPublicAudioDucked && (
+							<span
+								className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2.5 text-xs font-semibold text-primary"
+								role="status"
+								aria-live="polite"
+								title="悄悄話模式會自動降低公開頻道音量"
+							>
+								<VolumeX className="h-3.5 w-3.5" aria-hidden="true" />
+								公開頻道已降音
+							</span>
+						)}
 					</div>
 					{hasAudioConnectionError && (
 						<div
