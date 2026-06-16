@@ -1,5 +1,6 @@
 import hashlib
 import random
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,7 @@ PRIVATE_PHASE_1 = "private_phase_1"
 PRIVATE_PHASE_2 = "private_phase_2"
 GROUP_PHASE = "group"
 SNAPSHOT_ITEM_ID_PREFIX = "snapshot-item:"
+CUSTOM_DETAIL_ACTION_ID = "custom_detail"
 
 
 @dataclass(frozen=True)
@@ -35,8 +37,32 @@ def snapshot_item_id(item_id: int) -> str:
     return f"{SNAPSHOT_ITEM_ID_PREFIX}{item_id}"
 
 
+def _canonicalize_custom_detail(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    canonical = "".join(
+        character
+        for character in normalized
+        if not character.isspace() and not unicodedata.category(character).startswith("P")
+    )
+    return canonical or " ".join(normalized.strip().split())
+
+
 def _snapshot_dedupe_key(item: PrivatePhaseTaskItem) -> tuple[str, str, str]:
-    return (item.component_id, item.action_id, item.detail or "")
+    detail = item.detail or ""
+    if item.action_id == CUSTOM_DETAIL_ACTION_ID:
+        detail = _canonicalize_custom_detail(detail)
+    return (item.component_id, item.action_id, detail)
+
+
+def _source_priorities_for_dedupe_key(
+    source_items: list[PrivatePhaseTaskItem],
+    item_dedupe_key: tuple[str, str, str],
+) -> list[dict[str, int]]:
+    return [
+        {"user_id": source.user_id, "priority": source.priority, "private_phase_task_item_id": source.id}
+        for source in source_items
+        if _snapshot_dedupe_key(source) == item_dedupe_key
+    ]
 
 
 async def initialize_phase_rankings(
@@ -181,11 +207,7 @@ async def get_or_create_phase_snapshot(
     )
     for position, item in enumerate(deduplicated_items, start=1):
         item_dedupe_key = _snapshot_dedupe_key(item)
-        source_priorities = [
-            {"user_id": source.user_id, "priority": source.priority, "private_phase_task_item_id": source.id}
-            for source in source_items
-            if _snapshot_dedupe_key(source) == item_dedupe_key
-        ]
+        source_priorities = _source_priorities_for_dedupe_key(source_items, item_dedupe_key)
         source_user_ids = sorted({int(source["user_id"]) for source in source_priorities})
         db.add(
             PhaseTaskItemSnapshotItem(
