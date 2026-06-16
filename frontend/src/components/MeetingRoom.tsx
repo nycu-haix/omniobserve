@@ -12,6 +12,7 @@ import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperi
 import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
 import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
+import { getRankingOwnerLabel, isOwnedRankingItem } from "../lib/rankingOwnership";
 import { getRankingInteractionState, type RankingScope } from "../lib/rankingPhasePermissions";
 import {
 	DEFAULT_SESSION_PHASE,
@@ -43,6 +44,7 @@ interface LostAtSeaItem {
 	imageBg: string;
 	imageFg: string;
 	imageMark: string;
+	sourceUserIds: number[];
 }
 
 type TaskPaneContent = "task-instructions" | "phase-task-items" | "private-ranking" | "public-ranking";
@@ -141,7 +143,8 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 		imageTitle: item.image_title || item.label_en || item.label,
 		imageBg: item.image_bg || "#f8fafc",
 		imageFg: item.image_fg || "#334155",
-		imageMark: item.image_mark || "ITEM"
+		imageMark: item.image_mark || "ITEM",
+		sourceUserIds: Array.isArray(item.source_user_ids) ? item.source_user_ids : []
 	};
 }
 
@@ -635,6 +638,8 @@ function SortableLostAtSeaItem({
 	rankingLimit,
 	changeCount,
 	onPreview,
+	isOwnItem = false,
+	ownerLabel,
 	readOnly = false
 }: {
 	item: LostAtSeaItem;
@@ -643,6 +648,8 @@ function SortableLostAtSeaItem({
 	rankingLimit?: number;
 	changeCount?: number;
 	onPreview: (item: LostAtSeaItem) => void;
+	isOwnItem?: boolean;
+	ownerLabel: string;
 	readOnly?: boolean;
 }) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -662,6 +669,7 @@ function SortableLostAtSeaItem({
 			: hasRankDelta
 				? `與 Public 排序差 ${rankDeltaAmount} 位`
 				: undefined;
+	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${isOwnItem ? `，此項目由 ${ownerLabel} 提出` : ""}`;
 
 	return (
 		<div
@@ -679,6 +687,7 @@ function SortableLostAtSeaItem({
 				transition
 			}}
 			data-local-space-shortcut="true"
+			aria-label={itemAriaLabel}
 			aria-readonly={readOnly}
 			title={itemTitle}
 			{...(readOnly ? {} : attributes)}
@@ -706,7 +715,17 @@ function SortableLostAtSeaItem({
 			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
 				{isBeyondRankingLimit ? "不改" : item.rank}
 			</span>
-			<span className="min-w-0 whitespace-normal break-words py-0.5 leading-5">{item.label}</span>
+			<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 leading-5">
+				<span className="min-w-0 whitespace-normal break-words">{item.label}</span>
+				{isOwnItem && (
+					<span
+						className="inline-flex shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold leading-4 text-primary"
+						aria-label={`此項目由 ${ownerLabel} 提出`}
+					>
+						{ownerLabel}
+					</span>
+				)}
+			</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
@@ -750,6 +769,8 @@ function LostAtSeaRankingPanel({
 	rankingLimit,
 	changeCount,
 	scrollContainerRef,
+	participantId,
+	participantDisplayName,
 	readOnly = false
 }: {
 	scope: RankingScope;
@@ -766,8 +787,11 @@ function LostAtSeaRankingPanel({
 	rankingLimit?: number;
 	changeCount?: number;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
+	participantId: string;
+	participantDisplayName: string;
 	readOnly?: boolean;
 }) {
+	const ownerLabel = getRankingOwnerLabel(participantDisplayName, participantId);
 	const itemList = (
 		<div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
 			{readOnly && (
@@ -786,6 +810,8 @@ function LostAtSeaRankingPanel({
 						rankingLimit={rankingLimit}
 						changeCount={changeCount}
 						onPreview={onPreviewItem}
+						isOwnItem={isOwnedRankingItem(item.sourceUserIds, participantId)}
+						ownerLabel={ownerLabel}
 						readOnly={readOnly}
 					/>
 				</Fragment>
@@ -1629,6 +1655,8 @@ export default function MeetingRoom() {
 							rankingLimit={publicRankingLimit}
 							changeCount={publicChangeCount}
 							scrollContainerRef={publicRankingScrollRef}
+							participantId={participantId}
+							participantDisplayName={displayName}
 							readOnly={publicRankingInteractionState === "readonly"}
 						/>
 					)}
@@ -1649,6 +1677,8 @@ export default function MeetingRoom() {
 							rankingLimit={privateRankingLimit}
 							changeCount={privateChangeCount}
 							scrollContainerRef={privateRankingScrollRef}
+							participantId={participantId}
+							participantDisplayName={displayName}
 							getRankDelta={item => {
 								if (!shouldHighlightRankConflict) {
 									return undefined;
