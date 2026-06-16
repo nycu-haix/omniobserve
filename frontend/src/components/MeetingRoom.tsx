@@ -24,7 +24,14 @@ import {
 	normalizeSessionPhaseOptions,
 	type SessionPhase
 } from "../lib/sessionPhase";
-import { getActionDetailHint, getActionReferenceDescription, getComponentReferenceDescription, getTaskReferenceLabel, type TaskReferenceOption } from "../lib/taskItemReference";
+import {
+	getActionDetailHint,
+	getActionReferenceDescription,
+	getComponentReferenceDescription,
+	getComponentReferenceMeta,
+	getTaskReferenceLabel,
+	type TaskReferenceOption
+} from "../lib/taskItemReference";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
 import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
@@ -868,7 +875,7 @@ function TaskReferenceList({
 function TaskReferencePanel({ id, builder }: { id: string; builder: Phase1BuilderConfig }) {
 	return (
 		<section id={id} className="grid max-h-52 shrink-0 gap-3 overflow-y-auto rounded-md border bg-muted/35 p-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]" aria-label="海報元件與改善動作說明">
-			<TaskReferenceList title="海報元件" items={builder.components} getDescription={getComponentReferenceDescription} />
+			<TaskReferenceList title="海報元件" items={builder.components} getDescription={getComponentReferenceDescription} getMeta={getComponentReferenceMeta} />
 			<TaskReferenceList title="改善動作" items={builder.actions} getDescription={getActionReferenceDescription} getMeta={getActionDetailHint} />
 		</section>
 	);

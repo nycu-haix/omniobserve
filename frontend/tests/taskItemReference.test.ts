@@ -1,12 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getActionDetailHint, getActionReferenceDescription, getComponentReferenceDescription, getTaskReferenceLabel } from "../src/lib/taskItemReference.ts";
+import {
+	getActionDetailHint,
+	getActionReferenceDescription,
+	getComponentReferenceCategoryLabel,
+	getComponentReferenceDescription,
+	getComponentReferenceMeta,
+	getTaskReferenceLabel,
+	isBackgroundReferenceOption
+} from "../src/lib/taskItemReference.ts";
 
 test("builds compact reference labels and descriptions from task metadata", () => {
 	assert.equal(getTaskReferenceLabel({ id: "qr_code", label_zh: "QR 碼", label_en: "QR code" }), "QR 碼");
 	assert.equal(getComponentReferenceDescription({ id: "qr_code", label_zh: "QR 碼", label_en: "QR code", description_zh: "報名 QR code 圖像本身。" }), "報名 QR code 圖像本身。");
 	assert.equal(getComponentReferenceDescription({ id: "unknown", label_zh: "未知", label_en: "Unknown" }), "Unknown");
+});
+
+test("marks poster background options with participant-facing category metadata", () => {
+	const background = { id: "background", label_zh: "背景圖／底色", label_en: "Background image/color", category: "background" };
+
+	assert.equal(isBackgroundReferenceOption(background), true);
+	assert.equal(getComponentReferenceCategoryLabel(background), "背景/底色");
+	assert.equal(getComponentReferenceMeta(background), "背景類元件，只提供改顏色與透明度。");
+	assert.equal(getComponentReferenceCategoryLabel({ id: "main_title", label_zh: "主標題" }), "");
 });
 
 test("uses action descriptions, templates, and detail hints", () => {
