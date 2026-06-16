@@ -61,6 +61,7 @@ Link、permission、staff-only room、condition assignment、hidden setup 與 ex
 
 - [ ] 每位參與者筆電、充電器、耳機、麥克風、HDMI/USB-C 轉接頭已確認可用。
 - [ ] 每間個別 Google Meet 已開啟錄影，錄影畫面能看清 OmniObserve/Canva，音訊能收到參與者聲音。
+- [ ] OmniObserve 內嵌 Jitsi room 預期會自動開啟 noise suppression；若會議 UI 顯示相關設定，確認為開啟，若無法確認則在 incident log 記錄。
 - [ ] 參與者 screen share 時，確認沒有勾選分享系統音訊或 share-tab audio，除非 Host 明確要求。
 - [ ] Host/Observer 的麥克風預設關閉；需要說明時才短暫開啟，說完立即關閉。
 - [ ] Staff-only fallback room 的麥克風狀態已確認；不得讓 staff 麥克風進入 participant ASR/cue pipeline。
