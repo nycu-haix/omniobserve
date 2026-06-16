@@ -123,7 +123,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 確認 no-cue 條件不顯示 same/different reason cue。
 - [ ] 確認兩個條件都會產生 idea blocks。
 - [ ] 確認 speech 與 text 來源都會寫入 idea blocks 或相關 logs。
-- [ ] 確認 Public channel audio ducking：participant 在悄悄話模式時公開 Jitsi 遠端聲音會降低；切回公開發言或關閉降音 toggle 後，公開 Jitsi 遠端聲音會恢復；本機麥克風與 ASR capture 不受影響。
+- [ ] 確認 Public channel audio ducking：participant 在悄悄話模式時公開 Jitsi 遠端聲音會降低，底部只顯示「公開頻道已降音」狀態 tag；切回公開發言後公開 Jitsi 遠端聲音會恢復；本機麥克風與 ASR capture 不受影響。
 - [ ] 確認 chat 只能作為公開發言管道。
 - [ ] 確認不使用 private chat 或其他參與者間私人文字管道。
 - [ ] 為每位參與者建立不同的個別 Google Meet 連結。
