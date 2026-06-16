@@ -15,6 +15,7 @@ from app.task_config.enhance_the_poster import (
     REFERENCE_IMAGE_SRC,
     TASK_PHASES,
     TASK_TOPIC_DETAIL,
+    TOPIC_DESCRIPTION,
 )
 from app.task_config import serialize_task_config
 
@@ -114,6 +115,10 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
         self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
         self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
+        self.assertIn("Private Phase 2 有 7 分鐘", TOPIC_DESCRIPTION)
+        self.assertIn("請務必先完成自己的前 15 項排序", TOPIC_DESCRIPTION)
+        self.assertIn("Private Phase 2 有 7 分鐘", TASK_TOPIC_DETAIL)
+        self.assertIn("請務必在進入 Public Phase 前完成自己的前 15 項排序", TASK_TOPIC_DETAIL)
 
     def test_poster_components_include_detection_metadata(self) -> None:
         components_by_id = {component["id"]: component for component in PHASE1_POSTER_COMPONENTS}

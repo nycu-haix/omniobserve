@@ -21,7 +21,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 | Phase | 時間 | 任務 |
 | --- | ---: | --- |
 | Private phase 1 | 5 分鐘 | 每人建立至少 4 個 component + action items，最多無上限 |
-| Private phase 2 | 5 分鐘 | 對整理後的 items 做個人排序 |
+| Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；進入 Public phase 前務必先完成自己的前 15 項排序 |
 | Public phase | 20 分鐘 | 小組討論，最多選 15 個 items，從最重要到最不重要排序；每位參與者至少公開發言兩次 |
 | Reflect phase | 2 分鐘 | 不再公開討論，各自調整個人排序 |
 
@@ -57,7 +57,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 >
 > Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將你認為最應該優先改善的項目排在前面。建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。
 >
-> Private Phase 2 只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。
+> Private Phase 2 有 7 分鐘，只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。這一階段請務必先完成自己的個人排序，Public Phase 會以這份排序作為初始個人清單。
 >
 > Public Phase 的排序動作與 Private Phase 2 相同，但在此階段可以開啟公開麥克風和其他人進行公開討論，並且請每位參與者在此階段進行至少兩次公開發言。
 
