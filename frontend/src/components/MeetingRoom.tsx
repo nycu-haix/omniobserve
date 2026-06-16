@@ -677,7 +677,6 @@ function SortableLostAtSeaItem({
 			className={cn(
 				"grid min-h-10 w-full shrink-0 cursor-grab select-none items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors",
 				showImage ? "grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]",
-				isOwnItem && "border-primary/40 bg-primary/5 shadow-[inset_3px_0_0_hsl(var(--primary))]",
 				readOnly && "cursor-default bg-muted/20",
 				isRankConflict && "border-muted-foreground/30",
 				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
