@@ -229,7 +229,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 在 Admin dashboard 的 ranking state / private ranking 欄位確認每位真實參與者都有完成訊號：private ranking revision 至少為 `r1`，或 participant 明確口頭 / 聊天確認已完成排序；系統剛產生的 `r0` seeded ranking 不算完成。
 - [ ] 若有真實參與者尚未出現完成訊號，先口頭提醒並延後切 phase；若仍未完成，記錄 participant ID、原因與當下時間，再切 public phase。
 - [ ] 切到 public phase。
-- [ ] 確認 group ranking 最多選 15 items，且由最重要排到最不重要。
+- [ ] 確認 group ranking 最多選 10 items，且由最重要排到最不重要。
 - [ ] 開始 20 分鐘 timer。
 - [ ] 若 Poster 是 with cue，監控 same/different reason cue。
 - [ ] 若 Poster 是 no cue，確認 cue disabled。
@@ -275,7 +275,7 @@ Observer 只確認自己負責的真實參與者和個別 Meet；不要提 cue/n
 - [ ] 參與者是否能理解 Canva / component library。
 - [ ] phase 1 是否至少建立 4 個 items。
 - [ ] items 是否包含 component + action。
-- [ ] public phase 是否討論最多 15 個 items 的排序。
+- [ ] public phase 是否討論最多 10 個 items 的排序。
 - [ ] 是否出現不同設計方向。
 - [ ] 若材料包含 reviewer feedback，記錄參與者是否引用；若沒有包含，訪談與表單標記 `N/A_not_available`。
 - [ ] cue 條件下是否因 same/different reason cue 發言或補充理由。

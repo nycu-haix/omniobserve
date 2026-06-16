@@ -4,11 +4,11 @@
 
 ## 1. 版本與對齊狀態
 
-- 腳本版本：2026-06-16。
+- 腳本版本：2026-06-17。
 - 對齊依據：`backend/app/task_config/enhance_the_poster.py`，`task_id=enhance-the-poster`，`reference_image_src=/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main`。
 - 流程依據：`docs/procedure/OmniObserve_正式實驗Procedure.md` 與 `docs/procedure/主持人_Admin_Observer_Checklists.md` 的 Enhance-the-Poster 流程。
-- 現行流程：Private Phase 1 5 分鐘建立至少 4 個 component + action items；Private Phase 2 7 分鐘做個人排序；Public Phase 20 分鐘做 group ranking，最多選前 15 個 items；Reflect Phase 2 分鐘只調整個人排序。
-- 現行維護狀態：#90、#91、#101 尚未落地前，本稿仍以目前 backend config 和正式 procedure 為準。若任一 issue 改變 Public/Reflect 版面或排序數量，需同步更新本文件與 [`poster.js`](poster.js)，並在 session summary 記錄實際使用版本。
+- 現行流程：Private Phase 1 5 分鐘建立至少 4 個 component + action items；Private Phase 2 7 分鐘做個人排序；Public Phase 20 分鐘做 group ranking，最多選前 10 個 items；Reflect Phase 2 分鐘只調整個人排序。
+- 現行維護狀態：#90、#91 尚未落地前，本稿仍以目前 backend config 和正式 procedure 為準。若任一 issue 改變 Public/Reflect 版面或排序數量，需同步更新本文件與 [`poster.js`](poster.js)，並在 session summary 記錄實際使用版本。
 
 ### 目前可用的 Private Phase 1 元件與動作
 
@@ -23,7 +23,7 @@
 
 - #90：Public Phase 若新增 task instruction/reference image affordance，暗樁可在討論中更自然地引用海報對照圖；目前不要假設 Public Phase 一定看得到側欄或按鈕。
 - #91：目前 Reflect Phase 仍照正式 procedure，只調整個人排序；若之後顯示 read-only public ranking，Reflect 相關提醒再更新。
-- #101：目前排序上限仍是 15。若研究設計決定改成 10、12 或其他數量，需同步更新本稿中的「前 15 個 items」、Public Phase 收斂話術與 `poster.js` 數量。
+- #101：排序上限已調整為 10。若研究設計之後再改成其他數量，需同步更新本稿中的「前 10 個 items」、Public Phase 收斂話術與 `poster.js` 數量。
 
 ## 2. 角色設定
 
@@ -64,13 +64,7 @@
 | 8   | `description1` 活動說明1                 | `change_color` 改顏色        | 改「活動說明1」顏色，黃色太亮，和海洋背景有點突兀，可以改成比較柔和但仍醒目的色塊。                                   |
 | 9   | `description2` 活動說明2                 | `change_color` 改顏色        | 改「活動說明2」顏色，橘色和上午場差異太大，可以和上午場統一成同一套活動資訊色系。                                     |
 | 10  | `qr_code` QR 碼                          | `move` 移動                  | 移動「QR 碼」，讓它更靠近參與資訊，觀眾看完參與對象、贈品和抽獎資格後，可以直接掃描報名。                              |
-| 11  | `qr_code` QR 碼                          | `enlarge` 放大               | 放大「QR 碼」，讓報名入口比周邊資訊更容易被注意，但仍保留足夠掃描留白。                                                |
-| 12  | `qr_caption` QR 碼說明                   | `change_font` 調整字型       | 調整「QR 碼說明」字型，讓「報名連結」看起來像行動呼籲，而不是 QR Code 下方的小註解。                                  |
-| 13  | `contact_info` 參與資訊                  | `move` 移動                  | 移動「參與資訊」，把對象、贈品、抽獎資格放到 QR Code 附近，形成完整的報名誘因區。                                     |
-| 14  | `info_group2` 主辦單位+指導單位+響應活動 | `shrink` 縮小                | 縮小「主辦單位+指導單位+響應活動」，底部單位資訊可以保留，但不應該搶走兩個場次資訊和 QR Code 的視覺重量。             |
-| 15  | `activity_icon1` 或 `activity_icon2`      | `replace_image_library` 替換 | 若現場 image library 有更清楚的淨灘圖像，可替換活動圖示；這項排在後面，避免一開始就把討論帶成大改風格。               |
-
-排序時可以主推前 3 個方向：**標題群整理、兩場活動資訊統一、QR 報名區強化**。
+排序時可以主推前 3 個方向：**標題群整理、兩場活動資訊統一、QR 報名區強化**。本版將暗樁 seed items 收斂到 10 個，避免 confederate 自己先把排序池推向高負擔。
 
 自然說法範例：
 

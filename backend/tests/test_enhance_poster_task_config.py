@@ -14,6 +14,7 @@ from app.task_config.enhance_the_poster import (
     PHASE1_ACTION_ITEMS,
     PHASE1_POSTER_COMPONENTS,
     QR_AREA_LAYOUT_ACTION_IDS,
+    RANKING_IMPORTANCE_LIMIT,
     REFERENCE_IMAGE_SRC,
     TASK_PHASES,
     TASK_TOPIC_DETAIL,
@@ -54,9 +55,11 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
 
     def test_task_config_response_preserves_component_category(self) -> None:
         payload = serialize_task_config(task_id="enhance-the-poster")
+        self.assertEqual(payload["ranking_limit"], 10)
         response_payload = TaskConfigResponse.model_validate(payload).model_dump()
         background = _option_by_id(response_payload["phase1_builder"]["components"], "background")
 
+        self.assertEqual(response_payload["ranking_limit"], 10)
         self.assertEqual(background["category"], "background")
 
     def test_background_component_rejects_fixed_context_actions(self) -> None:
@@ -115,12 +118,13 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
 
     def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
         self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
+        self.assertEqual(RANKING_IMPORTANCE_LIMIT, 10)
         self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
         self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
         self.assertIn("Private Phase 2 有 7 分鐘", TOPIC_DESCRIPTION)
-        self.assertIn("請務必先完成自己的前 15 項排序", TOPIC_DESCRIPTION)
+        self.assertIn("請務必先完成自己的前 10 項排序", TOPIC_DESCRIPTION)
         self.assertIn("Private Phase 2 有 7 分鐘", TASK_TOPIC_DETAIL)
-        self.assertIn("請務必在進入 Public Phase 前完成自己的前 15 項排序", TASK_TOPIC_DETAIL)
+        self.assertIn("請務必在進入 Public Phase 前完成自己的前 10 項排序", TASK_TOPIC_DETAIL)
 
     def test_poster_components_include_detection_metadata(self) -> None:
         components_by_id = {component["id"]: component for component in PHASE1_POSTER_COMPONENTS}

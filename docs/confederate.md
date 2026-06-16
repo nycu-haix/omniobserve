@@ -50,7 +50,7 @@
 
 使用文件：[confederate-poster.md](confederate-poster.md)
 
-目前腳本版本：2026-06-15。此版本已和 `backend/app/task_config/enhance_the_poster.py` 的現行 component/action config、Private Phase 1 最少 4 items、Private/Public 前 15 items 排序流程對齊。
+目前腳本版本：2026-06-17。此版本已和 `backend/app/task_config/enhance_the_poster.py` 的現行 component/action config、Private Phase 1 最少 4 items、Private/Public 前 10 items 排序流程對齊。
 
 ## 維護規則
 
