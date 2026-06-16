@@ -19,8 +19,8 @@ import {
 	Users,
 	X
 } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildPublicNowLabel } from "../lib/adminPublicNow";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { PUBLIC_NOW_STALE_BUDGET_MS, buildPublicNowLabel, computePublicNowAgeMs, formatPublicNowLatency, isPublicNowStale } from "../lib/adminPublicNow";
 import { getDefaultRoomName } from "../lib/defaultRoomName";
 import { getValidIdeaBlockJumpTargetIds, isValidIdeaBlockJumpTarget } from "../lib/ideaBlockJumpTargets";
 import { formatParticipantDisplayName } from "../lib/participantDefaults";
@@ -142,6 +142,35 @@ interface PublicContextComponentStateMessage extends RealtimeMessage {
 	match_count?: unknown;
 	deliveredCount?: unknown;
 	delivered_count?: unknown;
+	timestamp_ms?: unknown;
+	stateUpdatedAtMs?: unknown;
+	state_updated_at_ms?: unknown;
+	adminBroadcastAtMs?: unknown;
+	admin_broadcast_at_ms?: unknown;
+	eventTimestampMs?: unknown;
+	event_timestamp_ms?: unknown;
+	eventToAdminBroadcastMs?: unknown;
+	event_to_admin_broadcast_ms?: unknown;
+	eventToStateMs?: unknown;
+	event_to_state_ms?: unknown;
+	matchingDurationMs?: unknown;
+	matching_duration_ms?: unknown;
+	queueDelayMs?: unknown;
+	queue_delay_ms?: unknown;
+	debounceMs?: unknown;
+	debounce_ms?: unknown;
+	textChars?: unknown;
+	text_chars?: unknown;
+	contextChars?: unknown;
+	context_chars?: unknown;
+	targetParticipantCount?: unknown;
+	target_participant_count?: unknown;
+	boardConnectionCount?: unknown;
+	board_connection_count?: unknown;
+	adminConnectionCount?: unknown;
+	admin_connection_count?: unknown;
+	transcriptSegmentId?: unknown;
+	transcript_segment_id?: unknown;
 }
 
 type PublicNowTarget =
@@ -165,6 +194,25 @@ interface LatestParticipantTranscript {
 	isFinal: boolean;
 	persisted: boolean;
 	receivedAt: string;
+}
+
+interface PublicNowDiagnostics {
+	stateUpdatedAtMs: number | null;
+	adminBroadcastAtMs: number | null;
+	receivedAtMs: number | null;
+	eventTimestampMs: number | null;
+	eventToAdminBroadcastMs: number | null;
+	eventToStateMs: number | null;
+	displayLatencyMs: number | null;
+	matchingDurationMs: number | null;
+	queueDelayMs: number | null;
+	debounceMs: number | null;
+	textChars: number | null;
+	contextChars: number | null;
+	targetParticipantCount: number | null;
+	boardConnectionCount: number | null;
+	adminConnectionCount: number | null;
+	transcriptSegmentId: string | null;
 }
 
 interface ChatMessageResponse {
@@ -244,6 +292,24 @@ const PARTICIPANT_ROLE_SEGMENT_CLASSES: Record<ParticipantRole, string> = {
 	test: "bg-neutral-100 text-neutral-900 shadow-sm ring-1 ring-neutral-700/20"
 };
 const PARTICIPANT_ROLE_OPTIONS: ParticipantRole[] = ["participant", "confederate", "observer", "facilitator", "test"];
+const EMPTY_PUBLIC_NOW_DIAGNOSTICS: PublicNowDiagnostics = {
+	stateUpdatedAtMs: null,
+	adminBroadcastAtMs: null,
+	receivedAtMs: null,
+	eventTimestampMs: null,
+	eventToAdminBroadcastMs: null,
+	eventToStateMs: null,
+	displayLatencyMs: null,
+	matchingDurationMs: null,
+	queueDelayMs: null,
+	debounceMs: null,
+	textChars: null,
+	contextChars: null,
+	targetParticipantCount: null,
+	boardConnectionCount: null,
+	adminConnectionCount: null,
+	transcriptSegmentId: null
+};
 
 function getAdminAvailableLayoutWidth() {
 	return window.innerWidth - 32 - 32;
@@ -441,6 +507,15 @@ function normalizeNumberList(value: unknown): number[] {
 
 function normalizeNumberValue(value: unknown, fallback: number) {
 	return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeOptionalNumberValue(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeOptionalStringValue(value: unknown): string | null {
+	const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+	return text || null;
 }
 
 function isAdminRankingStateMessage(message: RealtimeMessage | null): message is AdminRankingStateMessage {
@@ -863,8 +938,10 @@ export function AdminPage() {
 	const [publicNowSource, setPublicNowSource] = useState<PublicNowSource | null>(null);
 	const [publicNowMatchCount, setPublicNowMatchCount] = useState(0);
 	const [publicNowDeliveredCount, setPublicNowDeliveredCount] = useState(0);
+	const [publicNowDiagnostics, setPublicNowDiagnostics] = useState<PublicNowDiagnostics>(EMPTY_PUBLIC_NOW_DIAGNOSTICS);
 	const [isSettingPublicNow, setIsSettingPublicNow] = useState(false);
 	const [publicNowError, setPublicNowError] = useState<string | null>(null);
+	const [clockNowMs, setClockNowMs] = useState(() => Date.now());
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [taskPhases, setTaskPhases] = useState<SessionPhaseOption[]>(DEFAULT_SESSION_PHASE_OPTIONS);
 	const [cueCondition, setCueCondition] = useState<CueCondition>("experimental");
@@ -1014,13 +1091,19 @@ export function AdminPage() {
 		publicChatMessagesRef.current = publicChatMessages;
 	}, [publicChatMessages]);
 
+	useEffect(() => {
+		const timer = window.setInterval(() => setClockNowMs(Date.now()), 1000);
+		return () => window.clearInterval(timer);
+	}, []);
+
 	const recordEvent = (message: RealtimeMessage) => {
+		const receivedAtMs = Date.now();
 		const receivedAt = new Intl.DateTimeFormat("zh-TW", {
 			hour: "2-digit",
 			minute: "2-digit",
 			second: "2-digit",
 			hour12: false
-		}).format(new Date());
+		}).format(new Date(receivedAtMs));
 
 		const nextPhase = normalizeSessionPhase(message.phase) ?? normalizeSessionPhase(message.current_phase);
 		if (nextPhase) {
@@ -1036,11 +1119,33 @@ export function AdminPage() {
 			setCueCondition(nextCueCondition);
 		}
 		if (isPublicContextComponentStateMessage(message)) {
+			const stateUpdatedAtMs = normalizeOptionalNumberValue(message.stateUpdatedAtMs ?? message.state_updated_at_ms ?? message.timestamp_ms);
+			const eventTimestampMs = normalizeOptionalNumberValue(message.eventTimestampMs ?? message.event_timestamp_ms);
+			const adminBroadcastAtMs = normalizeOptionalNumberValue(message.adminBroadcastAtMs ?? message.admin_broadcast_at_ms);
+			const eventToAdminBroadcastMs = normalizeOptionalNumberValue(message.eventToAdminBroadcastMs ?? message.event_to_admin_broadcast_ms);
 			setPublicNowComponentIds(normalizeStringList(message.componentIds ?? message.component_ids));
 			setPublicNowTaskItemIds(normalizeNumberList(message.taskItemIds ?? message.task_item_ids));
 			setPublicNowSource(typeof message.source === "string" ? message.source : null);
 			setPublicNowMatchCount(normalizeNumberValue(message.matchCount ?? message.match_count, 0));
 			setPublicNowDeliveredCount(normalizeNumberValue(message.deliveredCount ?? message.delivered_count, 0));
+			setPublicNowDiagnostics({
+				stateUpdatedAtMs,
+				adminBroadcastAtMs,
+				receivedAtMs,
+				eventTimestampMs,
+				eventToAdminBroadcastMs,
+				eventToStateMs: normalizeOptionalNumberValue(message.eventToStateMs ?? message.event_to_state_ms),
+				displayLatencyMs: eventToAdminBroadcastMs ?? (eventTimestampMs === null ? null : Math.max(0, receivedAtMs - eventTimestampMs)),
+				matchingDurationMs: normalizeOptionalNumberValue(message.matchingDurationMs ?? message.matching_duration_ms),
+				queueDelayMs: normalizeOptionalNumberValue(message.queueDelayMs ?? message.queue_delay_ms),
+				debounceMs: normalizeOptionalNumberValue(message.debounceMs ?? message.debounce_ms),
+				textChars: normalizeOptionalNumberValue(message.textChars ?? message.text_chars),
+				contextChars: normalizeOptionalNumberValue(message.contextChars ?? message.context_chars),
+				targetParticipantCount: normalizeOptionalNumberValue(message.targetParticipantCount ?? message.target_participant_count),
+				boardConnectionCount: normalizeOptionalNumberValue(message.boardConnectionCount ?? message.board_connection_count),
+				adminConnectionCount: normalizeOptionalNumberValue(message.adminConnectionCount ?? message.admin_connection_count),
+				transcriptSegmentId: normalizeOptionalStringValue(message.transcriptSegmentId ?? message.transcript_segment_id)
+			});
 			setIsSettingPublicNow(false);
 			setPublicNowError(null);
 		}
@@ -1487,6 +1592,32 @@ export function AdminPage() {
 		targetCount: publicNowTargetCount
 	});
 	const publicNowSourceLabel = publicNowSource === "manual" ? "manual" : publicNowSource === "auto" ? "auto" : publicNowSource === "manual_clear" ? "cleared" : "idle";
+	const publicNowAgeMs = computePublicNowAgeMs({
+		stateUpdatedAtMs: publicNowDiagnostics.stateUpdatedAtMs,
+		adminBroadcastAtMs: publicNowDiagnostics.adminBroadcastAtMs,
+		receivedAtMs: publicNowDiagnostics.receivedAtMs,
+		nowMs: clockNowMs
+	});
+	const isPublicNowStateStale = isPublicNowStale({
+		targetCount: publicNowTargetCount,
+		ageMs: publicNowAgeMs,
+		staleBudgetMs: PUBLIC_NOW_STALE_BUDGET_MS
+	});
+	const publicNowStatusLabel = publicNowTargetCount === 0 ? "none" : isPublicNowStateStale ? "STALE" : "fresh";
+	const publicNowLatencyParts = [
+		`age ${formatPublicNowLatency(publicNowAgeMs)}`,
+		publicNowDiagnostics.displayLatencyMs !== null ? `display ${formatPublicNowLatency(publicNowDiagnostics.displayLatencyMs)}` : null,
+		publicNowDiagnostics.eventToStateMs !== null ? `backend ${formatPublicNowLatency(publicNowDiagnostics.eventToStateMs)}` : null,
+		publicNowDiagnostics.matchingDurationMs !== null ? `match ${formatPublicNowLatency(publicNowDiagnostics.matchingDurationMs)}` : null
+	].filter(Boolean);
+	const publicNowScaleParts =
+		publicNowDiagnostics.eventTimestampMs === null
+			? []
+			: [
+					publicNowDiagnostics.targetParticipantCount !== null ? `${publicNowDiagnostics.targetParticipantCount} participant targets` : null,
+					publicNowDiagnostics.textChars !== null ? `${publicNowDiagnostics.textChars} chars` : null,
+					publicNowDiagnostics.contextChars !== null ? `${publicNowDiagnostics.contextChars} context chars` : null
+				].filter(Boolean);
 	const rankingRowIndexes = Array.from({ length: publicRankingItems.length }, (_, index) => index);
 	const normalizedQuery = query.trim().toLowerCase();
 	const participantFilterOptions = useMemo(() => {
@@ -1913,9 +2044,17 @@ export function AdminPage() {
 									<div className="text-xs leading-5 text-muted-foreground">
 										{publicNowSourceLabel} · {publicNowMatchCount} blocks · {publicNowDeliveredCount} boards
 									</div>
+									<div className={cn("text-xs leading-5", isPublicNowStateStale ? "text-amber-700" : "text-muted-foreground")}>
+										{publicNowLatencyParts.join(" · ")}
+										{publicNowScaleParts.length > 0 && <> · {publicNowScaleParts.join(" · ")}</>}
+									</div>
 								</div>
-								<Badge variant={publicNowTargetCount > 0 ? "secondary" : "outline"} className="shrink-0">
-									{publicNowTargetCount > 0 ? "NOW" : "none"}
+								<Badge
+									variant={publicNowTargetCount > 0 ? "secondary" : "outline"}
+									className={cn("shrink-0", isPublicNowStateStale ? "border-amber-300 bg-amber-50 text-amber-900" : undefined)}
+									title={`Stale after ${formatPublicNowLatency(PUBLIC_NOW_STALE_BUDGET_MS)}`}
+								>
+									{publicNowStatusLabel}
 								</Badge>
 							</div>
 							{publicNowTargets.length > 0 ? (
