@@ -294,11 +294,18 @@ PUBLIC_RANKING_COMPARISON_LAYOUT = {
     "first": {"type": "leaf", "content": "public-ranking"},
     "second": {"type": "leaf", "content": "private-ranking"},
 }
+REFLECT_RANKING_COMPARISON_LAYOUT = {
+    "type": "split",
+    "direction": "horizontal",
+    "ratio": 58,
+    "first": PRIVATE_RANKING_LAYOUT,
+    "second": {"type": "leaf", "content": "public-ranking"},
+}
 
 TASK_PHASES = [
     {"id": "private", "label": "Private Phase", "default_layout": PRIVATE_RANKING_WITH_INSTRUCTIONS_LAYOUT},
     {"id": "group", "label": "Public Phase", "default_layout": PUBLIC_RANKING_COMPARISON_LAYOUT},
-    {"id": "reflect", "label": "Reflect Phase", "default_layout": PRIVATE_RANKING_LAYOUT},
+    {"id": "reflect", "label": "Reflect Phase", "default_layout": REFLECT_RANKING_COMPARISON_LAYOUT},
 ]
 
 TASK_CONFIG = {
