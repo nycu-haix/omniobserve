@@ -3624,18 +3624,19 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	return (
 		<>
 			<section className="flex h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg border bg-card text-card-foreground">
-				<header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b p-3">
-					<div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+				<header className="private-board-header border-b p-3">
+					<div className="private-board-toolbar">
 						{onCollapse && (
 							<Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" aria-label="收合 Private Board" title="收合 Private Board" onClick={onCollapse}>
 								<ChevronRight className="h-4 w-4" />
 							</Button>
 						)}
-						<div className="flex min-w-0 max-w-full flex-wrap rounded-lg bg-muted p-1">
+						<div className="grid min-w-0 grid-cols-3 rounded-lg bg-muted p-1">
 							<Button
 								aria-pressed={visibleActiveTab === "transcript"}
+								size="sm"
 								className={cn(
-									"transition-all active:translate-y-px active:scale-[0.98]",
+									"min-w-0 px-2 text-xs transition-all active:translate-y-px active:scale-[0.98]",
 									visibleActiveTab === "transcript" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "transcript" ? "default" : "ghost"}
@@ -3645,8 +3646,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 							</Button>
 							<Button
 								aria-pressed={visibleActiveTab === "ideablock"}
+								size="sm"
 								className={cn(
-									"relative transition-all active:translate-y-px active:scale-[0.98]",
+									"relative min-w-0 px-2 text-xs transition-all active:translate-y-px active:scale-[0.98]",
 									visibleActiveTab === "ideablock" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "ideablock" ? "default" : "ghost"}
@@ -3670,8 +3672,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 							</Button>
 							<Button
 								aria-pressed={visibleActiveTab === "public-chat"}
+								size="sm"
 								className={cn(
-									"relative transition-all active:translate-y-px active:scale-[0.98]",
+									"relative min-w-0 px-2 text-xs transition-all active:translate-y-px active:scale-[0.98]",
 									visibleActiveTab === "public-chat" && "translate-y-px bg-primary text-primary-foreground shadow-inner ring-2 ring-primary/20 hover:bg-primary/90"
 								)}
 								variant={visibleActiveTab === "public-chat" ? "default" : "ghost"}
@@ -3688,11 +3691,11 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 								)}
 							</Button>
 						</div>
-					</div>
-					<div className="ml-auto flex shrink-0 items-center gap-2">
-						<PhaseBadge phase={visiblePhase} />
-						{visibleTimerEndTime > 0 && <PhaseTimer endTimeMs={visibleTimerEndTime} />}
-						<span className={`hidden h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
+						<div className="private-board-status flex shrink-0 items-center gap-2">
+							<PhaseBadge phase={visiblePhase} />
+							{visibleTimerEndTime > 0 && <PhaseTimer endTimeMs={visibleTimerEndTime} />}
+							<span className={`hidden h-2 w-2 rounded-full ${isConnected ? "bg-primary" : "bg-muted-foreground"}`} />
+						</div>
 					</div>
 				</header>
 
