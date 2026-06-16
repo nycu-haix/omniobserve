@@ -18,6 +18,7 @@ import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSi
 import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
 import {
 	clearPendingTranscriptLinesIdeaBlockStatus,
+	getCompletionTranscriptLineIds,
 	getIdeaBlockTranscriptLineIdsForBlockIds,
 	hasReadyIdeaBlockForTranscriptLineIds,
 	markTranscriptLinesIdeaBlockStatus
@@ -1819,6 +1820,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		[clearVoiceGeneratingTimeoutsByIds]
 	);
 
+	const getVoiceGeneratingBlockIdsForSegmentKeys = useCallback((segmentKeys: string[]) => {
+		const blockIds = new Set<string>();
+		segmentKeys.forEach(segmentKey => {
+			voiceGeneratingBlocksRef.current.get(segmentKey)?.forEach(blockId => blockIds.add(blockId));
+		});
+		return blockIds;
+	}, []);
+
 	const registerVoiceGeneratingBlockIds = useCallback((segmentKeys: string[], blockIds: string[]) => {
 		if (segmentKeys.length === 0 || blockIds.length === 0) {
 			return;
@@ -2882,7 +2891,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			const hasCompletedIdeaBlockGeneration = lastAudioMessage.generation_complete === true || hasAnyIdeaBlockResult;
 			const shouldClearVoiceGeneratingBlocks = isPrivateAudioCompletionScope(lastAudioMessage) && hasCompletedIdeaBlockGeneration;
 			const completionSegmentKeys = shouldClearVoiceGeneratingBlocks ? resolveActiveCompletionSegmentKeys(lastAudioMessage) : [];
-			const completionTranscriptLineIds = completionSegmentKeys.length > 0 ? getTranscriptLineIdsForDraftKeys(completionSegmentKeys) : new Set<string>();
+			const completionDraftTranscriptLineIds = completionSegmentKeys.length > 0 ? getTranscriptLineIdsForDraftKeys(completionSegmentKeys) : new Set<string>();
+			const pendingCompletionVoiceBlockIds = completionSegmentKeys.length > 0 ? getVoiceGeneratingBlockIdsForSegmentKeys(completionSegmentKeys) : new Set<string>();
+			const completionTranscriptLineIds = getCompletionTranscriptLineIds(ideaBlocksRef.current, completionDraftTranscriptLineIds, pendingCompletionVoiceBlockIds);
 			const hasExistingReadyBlockForCompletion = hasReadyIdeaBlockForTranscriptLineIds(ideaBlocksRef.current, completionTranscriptLineIds);
 			const shouldResolvePendingAsNoIdea = hasCompletedIdeaBlockGeneration && !hasNewIdeaBlockResult && !hasExistingReadyBlockForCompletion;
 			if (shouldClearVoiceGeneratingBlocks && completionSegmentKeys.length === 0) {
@@ -2975,6 +2986,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	}, [
 		clearAllVoiceGeneratingBlocks,
 		getTranscriptLineIdsForDraftKeys,
+		getVoiceGeneratingBlockIdsForSegmentKeys,
 		isCurrentWhisperSegmentComplete,
 		jumpToBlock,
 		lastAudioMessage,

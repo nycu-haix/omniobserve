@@ -15,6 +15,12 @@ export function getIdeaBlockTranscriptLineIdsForBlockIds(blocks: IdeaBlock[], bl
 	return transcriptLineIds;
 }
 
+export function getCompletionTranscriptLineIds(blocks: IdeaBlock[], draftTranscriptLineIds: Set<string>, pendingBlockIds: Set<string>): Set<string> {
+	const transcriptLineIds = new Set(draftTranscriptLineIds);
+	getIdeaBlockTranscriptLineIdsForBlockIds(blocks, pendingBlockIds).forEach(transcriptLineId => transcriptLineIds.add(transcriptLineId));
+	return transcriptLineIds;
+}
+
 export function hasReadyIdeaBlockForTranscriptLineIds(blocks: IdeaBlock[], transcriptLineIds: Set<string>): boolean {
 	if (transcriptLineIds.size === 0) {
 		return false;

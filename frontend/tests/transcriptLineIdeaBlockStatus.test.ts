@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
 	clearPendingTranscriptLinesIdeaBlockStatus,
+	getCompletionTranscriptLineIds,
 	getIdeaBlockTranscriptLineIdsForBlockIds,
 	hasReadyIdeaBlockForTranscriptLineIds,
 	markTranscriptLinesIdeaBlockStatus
@@ -49,6 +50,15 @@ test("detects existing ready idea blocks for transcript completions", () => {
 	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t2"])), true);
 	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t3"])), true);
 	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, new Set(["t4"])), false);
+});
+
+test("includes pending voice block transcript ids when checking completion targets", () => {
+	const blocks = [ideaBlock({ id: "pending-block", status: "generating", transcriptLineId: "t1" }), ideaBlock({ id: "ready-block", status: "ready", transcriptLineId: "t1" })];
+
+	const lineIds = getCompletionTranscriptLineIds(blocks, new Set(), new Set(["pending-block"]));
+
+	assert.deepEqual([...lineIds], ["t1"]);
+	assert.equal(hasReadyIdeaBlockForTranscriptLineIds(blocks, lineIds), true);
 });
 
 test("marks private transcript lines with explicit processing status", () => {
