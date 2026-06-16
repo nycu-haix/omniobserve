@@ -4,7 +4,7 @@
 
 ## 1. 任務目標
 
-參與者在 private phase 先各自排序 15 項海上求生物品並 think aloud 說出理由，public phase 再共同討論並完成 15 項物品的完整 group ranking，reflect phase 則調整自己的個人排序。
+參與者在 private phase 先各自排序 15 項海上求生物品，並用 think aloud 說出正在比較與排序的理由；若不想出聲，也可以用文字輸入理由。public phase 再共同討論並完成 15 項物品的完整 group ranking，reflect phase 則調整自己的個人排序。
 
 Lost-at-Sea 可被分配為 no cue 或 with cue：
 
@@ -29,7 +29,7 @@ Host 可照讀：
 
 | Phase | 時間 | 任務 |
 | --- | ---: | --- |
-| Private phase | 8 分鐘 | 每人各自排序 15 items，並 think aloud 說出理由 |
+| Private phase | 8 分鐘 | 每人各自排序 15 items，並 think aloud 說出理由；若不想出聲，可用文字輸入理由 |
 | Public phase | 20 分鐘 | 小組共同討論並完成 15 items 完整 group ranking |
 | Reflect phase | 2 分鐘 | 不再公開討論，各自調整個人排序 |
 
@@ -58,7 +58,7 @@ Host 可照讀：
 必須記錄：
 
 - initial personal ranking：每位參與者 private phase 完成的 15 items 排序。
-- private think-aloud transcript。
+- private think-aloud transcript and typed reasoning when available。
 - idea blocks。
 - public discussion transcript。
 - public chat messages。

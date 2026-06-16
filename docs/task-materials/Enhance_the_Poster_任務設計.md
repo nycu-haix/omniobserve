@@ -20,7 +20,7 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 
 | Phase | 時間 | 任務 |
 | --- | ---: | --- |
-| Private phase 1 | 5 分鐘 | 每人建立至少 4 個 component + action items，最多無上限 |
+| Private phase 1 | 5 分鐘 | 每人建立至少 4 個 component + action items，並用出聲或文字記錄建立理由，最多無上限 |
 | Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；進入 Public phase 前務必先完成自己的前 15 項排序 |
 | Public phase | 20 分鐘 | 小組討論，最多選 15 個 items，從最重要到最不重要排序；每位參與者至少公開發言兩次 |
 | Reflect phase | 2 分鐘 | 不再公開討論，各自調整個人排序 |
@@ -56,6 +56,8 @@ Component/action taxonomy 目前採用本文件版本作為正式草案。正式
 > 你們已完成一張淨灘活動招募海報的初稿。為了進一步提升海報品質，請綜合目前的海報內容、任務需求與提供的素材，討論哪些部分需要調整，讓整體視覺呈現更加完整以及和諧。若這一輪 Canva 材料有提供 reviewer feedback，請把它當作其中一項參考；若沒有提供，請直接以海報內容、任務需求、圖床、文字 / slogan library 與自己的設計判斷建立改善項目。
 >
 > Private Phase 1 請從預設的海報元件與改善動作中建立至少 4 個具體 task items，沒有數量上限，並將你認為最應該優先改善的項目排在前面。建立 task item 時請考慮觀眾能否快速理解活動內容、是否願意報名、時間地點是否清楚、QR Code 是否容易掃描、視覺層次是否有效，以及資訊是否足以讓人安心參與。
+>
+> 建立 task item 時，請用出聲或文字輸入記錄你正在考慮的理由。理由不需要完整，也不需要說服其他人；重點是讓系統能保存你形成想法的過程。
 >
 > Private Phase 2 有 7 分鐘，只需要排序前 15 個最重要的改善項目；第 16 個之後代表不會改動。這一階段請務必先完成自己的個人排序，Public Phase 會以這份排序作為初始個人清單。
 >
@@ -223,7 +225,7 @@ Action item 應使用下列 action 語彙；若系統可支援選單，優先使
 必須記錄：
 
 - participant-created component + action items。
-- private phase 1 think-aloud transcript。
+- private phase 1 think-aloud transcript and typed reasoning when available。
 - idea blocks。
 - initial personal ranking。
 - public discussion transcript。

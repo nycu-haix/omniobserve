@@ -159,7 +159,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 >
 > 今天不是能力測驗，也沒有個人分數。我們關心的是小組討論時，大家如何先形成自己的想法，如何公開討論，以及系統是否能幫助你回顧自己的想法或找到適合提出的時機。
 >
-> 你們會使用 OmniObserve 系統。系統會在 private phase 中協助建立個人排序，也會在你 think aloud 的時候持續聽你的講話內容，產生 idea blocks，幫你回顧剛剛說過的重點。public phase 中你們會一起操作全體排序。聊天室也是正式公開發言管道，如果你不想用口頭說，也可以用聊天室公開分享。
+> 你們會使用 OmniObserve 系統。系統會在 private phase 中協助建立個人排序，也會在你 think aloud 的時候持續聽你的講話內容，產生 idea blocks，幫你回顧剛剛說過的重點。Think aloud 的意思不是只說最後答案，而是在自己思考時把「我正在比較什麼」「我為什麼暫時這樣排」這類理由說出來。如果講出來不自然，也可以用文字輸入把理由記下來。public phase 中你們會一起操作全體排序。聊天室也是正式公開發言管道，如果你不想用口頭說，也可以用聊天室公開分享。
 >
 > 有些場次或任務中，系統可能會出現 similarity cue，例如提醒你有人的想法和你相近，或相同結論但理由不同。提示不是命令，你可以選擇採納、忽略或稍後再說。
 >
@@ -173,7 +173,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 > 系統會有不同 phase。private phase 是你先自己想、自己排序或建立項目的時間；public phase 是小組一起討論和排序的時間；reflect phase 是討論後你自己再調整個人排序的時間。
 >
-> 在 private phase，請盡量 think aloud，把你排序或選擇的理由講出來。系統會根據你說的內容生成 idea blocks；你在系統中輸入的文字也會被記錄並可用來形成 idea blocks。這些 idea blocks 是幫你回顧想法，不代表你一定要公開講出來。
+> 在 private phase，請盡量 think aloud，把你正在形成排序或選擇的理由講出來。你不需要說得完整，也不需要說服其他人；可以說「我現在在比較這兩個」「我暫時把這個排前面，因為...」這類正在思考中的理由。系統會根據你說的內容生成 idea blocks；如果你不想出聲，也可以用系統中的文字輸入記錄理由，文字也會被記錄並可用來形成 idea blocks。這些 idea blocks 是幫你回顧想法，不代表你一定要公開講出來。
 >
 > 在 public phase，你們要完成小組共同排序。可以用口頭發言，也可以用聊天室。聊天室內容視為正式公開分享；系統沒有提供參與者之間的 private chat，實驗中也不使用私人文字訊息管道。
 >
@@ -185,6 +185,12 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 > 這一輪系統可能會出現 similarity cue。Same reason cue 表示系統偵測到相近方向或相近理由；different reason cue 表示可能有人有相近結論但理由不同。你可以把它當作提醒，不需要照著提示做，也不需要因為看到提示就一定發言。
 
+### 4.5 Quiet participant fallback
+
+若 private phase 中真實參與者長時間沒有出聲或輸入文字，Host 可用同一段中性提醒，不要補任務答案或引導排序方向：
+
+> 如果你現在正在想，但還沒有說出來，可以把正在比較的理由講出來；不用講得完整，也不用說服其他人。如果不想出聲，也可以用文字把理由記下來，讓系統知道你正在考慮什麼。
+
 ## 5. Task Procedure
 
 ### 5.1 Lost-at-Sea
@@ -193,13 +199,13 @@ Lost-at-Sea 固定 30 分鐘。
 
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
-| Private phase | 8 分鐘 | 個人排序 15 項物品，think aloud 說出理由，產生 private ideas / idea blocks | 開始 timer，確認每人可操作個人排序與錄音 | initial personal ranking、transcript、idea blocks |
+| Private phase | 8 分鐘 | 個人排序 15 項物品，think aloud 說出正在形成排序的理由；若不想出聲，可用文字輸入理由；產生 private ideas / idea blocks | 開始 timer，確認每人可操作個人排序與錄音 | initial personal ranking、transcript、idea blocks |
 | Public phase | 20 分鐘 | 小組討論並完成 15 項物品完整 group ranking | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking、chat、public transcript、cue logs if any |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
 
 Host 說明：
 
-> 接下來是 Lost-at-Sea 任務。請先各自閱讀情境，根據你認為對海上求生的重要性排序 15 項物品。private phase 有 8 分鐘，請先不要討論，但可以把你的理由講出來，讓系統幫你記錄 idea blocks。
+> 接下來是 Lost-at-Sea 任務。請先各自閱讀情境，根據你認為對海上求生的重要性排序 15 項物品。private phase 有 8 分鐘，請先不要討論，但可以把你正在比較和排序的理由講出來，讓系統幫你記錄 idea blocks；如果不想出聲，也可以用文字輸入理由。
 >
 > public phase 有 20 分鐘，你們需要一起完成 15 項物品的完整小組排序。請不要上網查答案。重點不是考你知不知道標準答案，而是觀察你們如何討論、提出理由、形成共識。
 >
@@ -211,7 +217,7 @@ Enhance-the-Poster 固定 34 分鐘。2026-06-12 pilot 後，Private phase 2 暫
 
 | Phase | 時間 | 參與者任務 | 系統 / Host 任務 | 產出 |
 | --- | ---: | --- | --- | --- |
-| Private phase 1 | 5 分鐘 | 看 Canva 海報、任務需求、圖床、文字 / slogan library 與 component library；若材料包含 reviewer feedback，將其作為參考；建立至少 4 個 component + action items，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
+| Private phase 1 | 5 分鐘 | 看 Canva 海報、任務需求、圖床、文字 / slogan library 與 component library；若材料包含 reviewer feedback，將其作為參考；建立至少 4 個 component + action items，並以出聲或文字記錄建立理由，最多不限 | 開始 timer，確認 Canva 與系統可用 | participant-created items |
 | Private phase 2 | 7 分鐘 | 對整理後的 items 做個人排序；務必在進入 Public phase 前完成自己的前 15 項排序 | 鎖定 item 內容，產生可排序列表；切換 Public phase 前用 Admin ranking state 確認每位真實參與者的 private ranking revision 至少為 `r1`，或 participant 明確確認已完成；`r0` seeded ranking 不算完成 | initial personal ranking |
 | Public phase | 20 分鐘 | 小組討論，最多選 15 個 component + action items，依重要到不重要排序；每位參與者至少公開發言兩次 | 切換 public ranking；with-cue 條件監控 cue；no-cue 條件不顯示 cue | group ranking up to 15 items |
 | Reflect phase | 2 分鐘 | 不再公開討論，只調整個人排序 | 鎖定 public discussion，切回個人排序 | final personal ranking |
@@ -222,7 +228,7 @@ Host 說明：
 >
 > 請不要直接修改 Canva 海報。你的任務是用文字建立 component + action item，也就是「對哪個 component 做什麼修改」。
 >
-> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、任務需求、圖床、文字 / slogan library、component library、你自己的設計判斷來建立；若本輪材料有 reviewer feedback，也可以把它納入考量。
+> Private phase 1 有 5 分鐘，請每人至少建立 4 個 items，最多不限。可以根據你看到的海報問題、任務需求、圖床、文字 / slogan library、component library、你自己的設計判斷來建立；若本輪材料有 reviewer feedback，也可以把它納入考量。建立時請把你正在考慮的理由說出來；如果不想出聲，也可以用文字輸入理由。
 >
 > Private phase 2 有 7 分鐘，系統會整理大家建立的 items，請你先做自己的排序。這個階段一定要完成你的個人排序，Public phase 會以這份排序作為你的初始個人清單；如果時間快到，請先把你認為最重要的 items 排到最前面。
 >
