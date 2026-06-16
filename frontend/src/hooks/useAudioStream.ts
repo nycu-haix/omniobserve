@@ -207,7 +207,7 @@ export function useAudioStream(
 
 	const updateLocalSpeaking = useCallback(
 		(samples: Float32Array) => {
-			if (activeMetaRef.current?.mode !== "public") {
+			if (!activeMetaRef.current) {
 				clearLocalSpeakingReleaseTimer();
 				setLocalSpeakingState(false);
 				return;

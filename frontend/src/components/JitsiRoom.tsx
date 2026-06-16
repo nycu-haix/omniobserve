@@ -9,6 +9,7 @@ interface JitsiRoomProps {
 	roomName?: string;
 	displayName?: string;
 	micMode: MicMode;
+	isLocalSpeaking?: boolean;
 	publicAudioDuckingEnabled?: boolean;
 	allowInteraction?: boolean;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
@@ -235,6 +236,7 @@ export function JitsiRoom({
 	roomName,
 	displayName = "OmniObserve User",
 	micMode,
+	isLocalSpeaking = false,
 	publicAudioDuckingEnabled = true,
 	allowInteraction = false,
 	onApiReady,
@@ -244,7 +246,7 @@ export function JitsiRoom({
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const desiredAudioMutedRef = useRef(micMode !== "public");
-	const desiredRemoteAudioVolumeRef = useRef(getJitsiPublicAudioVolume({ micMode, duckingEnabled: publicAudioDuckingEnabled }));
+	const desiredRemoteAudioVolumeRef = useRef(getJitsiPublicAudioVolume({ micMode, duckingEnabled: publicAudioDuckingEnabled, isLocalSpeaking }));
 	const audioSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const jitsiListenersRef = useRef<{ api: IJitsiMeetExternalApi; listeners: [string, JitsiEventListener][] } | null>(null);
 	const audioParticipantsRef = useRef<Map<string, JitsiParticipantAudioState>>(new Map());
@@ -490,9 +492,9 @@ export function JitsiRoom({
 	}, [micMode, syncJitsiAudioMuted]);
 
 	useEffect(() => {
-		desiredRemoteAudioVolumeRef.current = getJitsiPublicAudioVolume({ micMode, duckingEnabled: publicAudioDuckingEnabled });
-		syncJitsiRemoteParticipantVolumes("micMode");
-	}, [micMode, publicAudioDuckingEnabled, syncJitsiRemoteParticipantVolumes]);
+		desiredRemoteAudioVolumeRef.current = getJitsiPublicAudioVolume({ micMode, duckingEnabled: publicAudioDuckingEnabled, isLocalSpeaking });
+		syncJitsiRemoteParticipantVolumes("publicAudioDucking");
+	}, [isLocalSpeaking, micMode, publicAudioDuckingEnabled, syncJitsiRemoteParticipantVolumes]);
 
 	useEffect(() => detachJitsiListeners, [detachJitsiListeners]);
 
