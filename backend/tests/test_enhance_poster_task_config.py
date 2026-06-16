@@ -70,6 +70,21 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
                 self.assertEqual(layout["first"], expected_left_pane)
                 self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
 
+    def test_public_phase_keeps_rankings_and_task_instructions_visible(self) -> None:
+        phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
+        layout = phases_by_id["group"]["default_layout"]
+
+        self.assertEqual(layout["type"], "split")
+        self.assertEqual(layout["direction"], "horizontal")
+        self.assertEqual(layout["ratio"], 62)
+        self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
+
+        ranking_stack = layout["first"]
+        self.assertEqual(ranking_stack["type"], "split")
+        self.assertEqual(ranking_stack["direction"], "vertical")
+        self.assertEqual(ranking_stack["first"], {"type": "leaf", "content": "public-ranking"})
+        self.assertEqual(ranking_stack["second"], {"type": "leaf", "content": "private-ranking"})
+
     def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
         self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
         self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
