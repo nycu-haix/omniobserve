@@ -2152,7 +2152,7 @@ export default function MeetingRoom() {
 					</div>
 					{hasAudioConnectionError && (
 						<div
-							className="absolute right-0 top-10 z-30 flex max-w-[min(30rem,calc(100vw-2rem))] items-center gap-2 rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs text-destructive shadow-md"
+							className="absolute bottom-full right-0 z-30 mb-2 flex max-w-[min(30rem,calc(100vw-2rem))] items-center gap-2 rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs text-destructive shadow-md"
 							role="alert"
 						>
 							<AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
