@@ -267,7 +267,7 @@ export function IdeaBlockItem({
 			className={cn(
 				"relative grid min-h-8 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-lg border bg-background px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
-				shouldShowPublicContext && "border-neutral-900/70 pt-4",
+				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
 				isDeleted && "border-muted bg-muted/35 text-muted-foreground/60",
 				isHighlighted && "ring-2 ring-primary",
