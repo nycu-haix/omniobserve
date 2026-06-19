@@ -265,7 +265,7 @@ export function IdeaBlockItem({
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"relative grid min-h-8 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-lg border bg-background px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
@@ -286,7 +286,7 @@ export function IdeaBlockItem({
 				onToggle(block.id);
 			}}
 		>
-			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
+			{block.isUnread && !isDeleted && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{shouldShowPublicContext && (
 				<span
 					className="pointer-events-none absolute left-3 top-1.5 z-10 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
@@ -326,14 +326,15 @@ export function IdeaBlockItem({
 					autoFocus
 				/>
 			) : (
-				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? generatingLabel : rowLabel}</span>
+				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-5">{isGenerating ? generatingLabel : rowLabel}</span>
 			)}
 			{!isGenerating && (
-				<div className="relative col-start-2 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1.5">
+				<div className="relative col-start-3 row-start-1 -my-1 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1">
 					{isEditingTitle ? (
 						<>
 							<Button
 								aria-label="Cancel title edit"
+								className="h-7 w-7"
 								size="icon"
 								variant="ghost"
 								onClick={event => {
@@ -346,6 +347,7 @@ export function IdeaBlockItem({
 							</Button>
 							<Button
 								aria-label="Save title edit"
+								className="h-7 w-7"
 								size="icon"
 								onClick={event => {
 									event.stopPropagation();
@@ -367,6 +369,7 @@ export function IdeaBlockItem({
 								<>
 									<Button
 										aria-label="Confirm delete idea block"
+										className="h-7 w-7"
 										size="icon"
 										variant="destructive"
 										onClick={event => {
@@ -379,6 +382,7 @@ export function IdeaBlockItem({
 									</Button>
 									<Button
 										aria-label="Cancel delete idea block"
+										className="h-7 w-7"
 										size="icon"
 										variant="ghost"
 										onClick={event => {
@@ -392,17 +396,25 @@ export function IdeaBlockItem({
 							) : (
 								<>
 									{!isDeleted && (
-										<Button aria-label="Share idea block to public chat" title={shareButtonTitle} size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
+										<Button
+											aria-label="Share idea block to public chat"
+											className="h-7 w-7"
+											title={shareButtonTitle}
+											size="icon"
+											variant="ghost"
+											onClick={shareBlockToChat}
+											disabled={!canShareCurrentBlock}
+										>
 											<Send className="h-4 w-4" />
 										</Button>
 									)}
 									{!isDeleted && !block.isDraft && (
-										<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
+										<Button aria-label="Edit idea block title" className="h-7 w-7" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 											<Pencil className="h-4 w-4" />
 										</Button>
 									)}
 									{!isDeleted && (
-										<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
+										<Button aria-label="Delete idea block" className="h-7 w-7" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
 											<Trash2 className="h-4 w-4" />
 										</Button>
 									)}
@@ -414,7 +426,7 @@ export function IdeaBlockItem({
 					{hasLinkedTranscript && (
 						<Button
 							aria-label="Jump to transcript"
-							className="w-fit gap-2"
+							className="h-7 w-fit gap-2 px-2"
 							variant="ghost"
 							size="sm"
 							onClick={event => {
@@ -446,7 +458,7 @@ export function IdeaBlockItem({
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
 
 			{block.expanded && !isGenerating && !isDeleted && (
-				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
+				<div className="ml-7 mr-7 grid gap-1.5 overflow-hidden rounded-lg px-0.5 py-0.5">
 					{shouldShowCue && (
 						<div className="flex flex-wrap items-center gap-1.5">
 							<Badge className="w-fit" variant="secondary">
@@ -502,7 +514,7 @@ export function IdeaBlockItem({
 					<textarea
 						ref={aiSummaryTextareaRef}
 						rows={1}
-						className="min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						className="min-h-8 w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						value={draftAiSummary}
 						onChange={event => setDraftAiSummary(event.target.value)}
 					/>
