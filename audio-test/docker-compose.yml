@@ -65,6 +65,12 @@ services:
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.middlewares=${VAD_ROUTER_NAME:-vad-audio}-strip"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.service=${VAD_SERVICE_NAME:-vad-audio}"
 
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai.rule=${VAD_AI_HOST_RULE:-Host(`disabled-vad-ai.invalid`)}"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai.service=${VAD_SERVICE_NAME:-vad-audio}"
+
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.rule=${VAD_AI_ALIAS_HOST_RULE:-Host(`disabled-vad-ai-alias.invalid`)}"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.entrypoints=websecure"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.tls=true"
