@@ -19,6 +19,7 @@ from ..services.idea_block_service import (
     delete_scoped_idea_block,
     get_scoped_idea_block,
     list_idea_blocks,
+    restore_scoped_idea_block,
     update_scoped_idea_block,
 )
 from ..services.transcript_pipeline import (
@@ -210,3 +211,17 @@ async def remove_idea_block(
 ) -> Response:
     await delete_scoped_idea_block(idea_block_id, session_name=session_name, user_id=user_id, db=db)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/sessions/{session_name}/users/{user_id}/idea-blocks/{idea_block_id}/restore",
+    response_model=IdeaBlockResponse,
+    summary="Restore Soft-Deleted Idea Block",
+)
+async def restore_deleted_idea_block(
+    session_name: str,
+    user_id: int,
+    idea_block_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> IdeaBlockResponse:
+    return await restore_scoped_idea_block(idea_block_id, session_name=session_name, user_id=user_id, db=db)

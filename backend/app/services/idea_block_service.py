@@ -287,6 +287,16 @@ async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
     await db.commit()
 
 
+async def restore_idea_block(idea_block_id: int, db: AsyncSession) -> IdeaBlock:
+    idea_block = await get_idea_block(idea_block_id, db)
+    if not idea_block.is_deleted:
+        return idea_block
+
+    idea_block.is_deleted = False
+    await db.commit()
+    return await get_idea_block(idea_block_id, db)
+
+
 async def _create_embedding_or_none(text: str) -> list[float] | None:
     try:
         return await create_text_embedding(text)
@@ -330,6 +340,32 @@ async def delete_scoped_idea_block(
     )
     idea_block.is_deleted = True
     await db.commit()
+
+
+async def restore_scoped_idea_block(
+    idea_block_id: int,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> IdeaBlock:
+    idea_block = await get_scoped_idea_block(
+        idea_block_id,
+        session_name=session_name,
+        user_id=user_id,
+        db=db,
+    )
+    if not idea_block.is_deleted:
+        return idea_block
+
+    idea_block.is_deleted = False
+    await db.commit()
+    return await get_scoped_idea_block(
+        idea_block_id,
+        session_name=session_name,
+        user_id=user_id,
+        db=db,
+    )
 
 
 async def _delete_similarity_references(idea_block_id: int, db: AsyncSession) -> None:
