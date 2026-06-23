@@ -7,9 +7,9 @@ test("adds the ASR gateway prefix for bare Omni API websocket hosts", () => {
 	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.observe.tw/"), "wss://api.omni.observe.tw/asr");
 });
 
-test("uses branch-specific ASR hosts for personal Omni deployments", () => {
-	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.observe.tw", { frontendHostname: "sky.omni.observe.tw" }), "wss://sky.ai.omni.observe.tw");
-	assert.equal(normalizeAudioWsBaseUrl("wss://sky.api.omni.observe.tw"), "wss://sky.ai.omni.observe.tw");
+test("uses the configured API host for ASR gateway routing", () => {
+	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.observe.tw", { frontendHostname: "sky.omni.observe.tw" }), "wss://api.omni.observe.tw/asr");
+	assert.equal(normalizeAudioWsBaseUrl("wss://ej.api.omni.observe.tw"), "wss://ej.api.omni.observe.tw/asr");
 });
 
 test("keeps explicit ASR gateway prefixes unchanged", () => {
