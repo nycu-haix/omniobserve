@@ -41,6 +41,13 @@ services:
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.priority=10000"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}.service=${VAD_SERVICE_NAME:-vad-audio}"
 
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.rule=(${VAD_API_ALIAS_HOST_RULE:-Host(`disabled-vad-api-alias.invalid`)}) && PathPrefix(`${VAD_PATH_PREFIX:-/sessions}`)"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.priority=10000"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-alias.service=${VAD_SERVICE_NAME:-vad-audio}"
+
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.rule=Host(`${VAD_API_DOMAIN:-api.omni.observe.tw}`) && PathPrefix(`${VAD_STRIP_PREFIX:-/asr}${VAD_PATH_PREFIX:-/sessions}`)"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.entrypoints=websecure"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.tls=true"
@@ -49,6 +56,20 @@ services:
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.middlewares=${VAD_ROUTER_NAME:-vad-audio}-strip"
       - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed.service=${VAD_SERVICE_NAME:-vad-audio}"
       - "traefik.http.middlewares.${VAD_ROUTER_NAME:-vad-audio}-strip.stripprefix.prefixes=${VAD_STRIP_PREFIX:-/asr}"
+
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.rule=(${VAD_API_ALIAS_HOST_RULE:-Host(`disabled-vad-api-alias.invalid`)}) && PathPrefix(`${VAD_STRIP_PREFIX:-/asr}${VAD_PATH_PREFIX:-/sessions}`)"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.priority=10001"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.middlewares=${VAD_ROUTER_NAME:-vad-audio}-strip"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-prefixed-alias.service=${VAD_SERVICE_NAME:-vad-audio}"
+
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.rule=${VAD_AI_ALIAS_HOST_RULE:-Host(`disabled-vad-ai-alias.invalid`)}"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.entrypoints=websecure"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.tls=true"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.${VAD_ROUTER_NAME:-vad-audio}-ai-alias.service=${VAD_SERVICE_NAME:-vad-audio}"
 
       - "traefik.http.services.${VAD_SERVICE_NAME:-vad-audio}.loadbalancer.server.port=8000"
 
