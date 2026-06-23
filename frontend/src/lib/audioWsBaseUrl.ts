@@ -1,5 +1,5 @@
 function isOmniApiHost(hostname: string): boolean {
-	return hostname === "api.omni.elvismao.com" || hostname.endsWith(".api.omni.elvismao.com");
+	return hostname === "api.omni.observe.tw" || hostname.endsWith(".api.omni.observe.tw");
 }
 
 function branchFromOmniHost(hostname: string): string | null {
@@ -8,13 +8,13 @@ function branchFromOmniHost(hostname: string): string | null {
 		return null;
 	}
 
-	const apiSuffix = ".api.omni.elvismao.com";
+	const apiSuffix = ".api.omni.observe.tw";
 	if (normalizedHostname.endsWith(apiSuffix)) {
 		const branch = normalizedHostname.slice(0, -apiSuffix.length);
 		return branch && !branch.includes(".") ? branch : null;
 	}
 
-	const appSuffix = ".omni.elvismao.com";
+	const appSuffix = ".omni.observe.tw";
 	if (normalizedHostname.endsWith(appSuffix)) {
 		const branch = normalizedHostname.slice(0, -appSuffix.length);
 		return branch && !branch.includes(".") && !["ai", "api", "meet"].includes(branch) ? branch : null;
@@ -38,7 +38,7 @@ export function normalizeAudioWsBaseUrl(baseUrl: string, options: NormalizeAudio
 		if ((url.protocol === "ws:" || url.protocol === "wss:") && isOmniApiHost(url.hostname) && (url.pathname === "" || url.pathname === "/")) {
 			const branch = branchFromOmniHost(options.frontendHostname ?? "") ?? branchFromOmniHost(url.hostname);
 			if (branch) {
-				return `${url.protocol}//${branch}.ai.omni.elvismao.com`;
+				return `${url.protocol}//${branch}.ai.omni.observe.tw`;
 			}
 
 			url.pathname = "/asr";

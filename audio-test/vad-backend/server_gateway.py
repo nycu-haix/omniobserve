@@ -81,7 +81,7 @@ SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
 
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
-DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").strip().rstrip("/")
+DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.observe.tw").strip().rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
 PIPELINE_PERSIST_TIMEOUT_SEC = float(os.getenv("PIPELINE_PERSIST_TIMEOUT_SEC", "10"))
 PIPELINE_FINAL_RELAY_RETRIES = int(os.getenv("PIPELINE_FINAL_RELAY_RETRIES", "3"))
@@ -181,7 +181,7 @@ def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
         or parsed.fragment
     )
     if parsed.scheme not in {"ws", "wss"} or not has_clean_base_url or not (
-        hostname == "api.omni.elvismao.com" or hostname.endswith(".api.omni.elvismao.com")
+        hostname == "api.omni.observe.tw" or hostname.endswith(".api.omni.observe.tw")
     ):
         print(
             "Invalid pipeline_ws_base_url ignored: "

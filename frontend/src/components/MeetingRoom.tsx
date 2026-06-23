@@ -111,7 +111,7 @@ function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
-const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
+const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.observe.tw";
 const DEFAULT_PRIVATE_BOARD_WIDTH = 500;
 const MIN_PRIVATE_BOARD_WIDTH = 420;
 const MIN_MEETING_COLUMN_WIDTH = 640;
