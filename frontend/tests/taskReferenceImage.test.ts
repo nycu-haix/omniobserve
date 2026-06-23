@@ -12,7 +12,7 @@ test("task reference image retry preserves hash fragments", () => {
 });
 
 test("task reference image retry supports absolute URLs", () => {
-	assert.equal(buildTaskReferenceImageSrc("https://sky.omni.elvismao.com/task-assets/poster.png?v=old", 3), "https://sky.omni.elvismao.com/task-assets/poster.png?v=old&_retry=3");
+	assert.equal(buildTaskReferenceImageSrc("https://sky.omni.observe.tw/task-assets/poster.png?v=old", 3), "https://sky.omni.observe.tw/task-assets/poster.png?v=old&_retry=3");
 });
 
 test("task reference image retry leaves initial image URLs unchanged", () => {

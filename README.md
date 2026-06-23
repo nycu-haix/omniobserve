@@ -169,7 +169,7 @@ Cue condition 可由管理員切換 `experimental`（推送 cue）/ `control`（
 | `id` | 參與者 ID（必須爲整數） |
 | `name` | 顯示名稱 |
 
-範例：`https://omni.elvismao.com/?room_name=lost-at-sea&id=1&name=Alice`
+範例：`https://omni.observe.tw/?room_name=lost-at-sea&id=1&name=Alice`
 
 ### Key UI Components
 
@@ -220,7 +220,7 @@ docker compose -p omniobserve-local -f docker-compose.local.yml up --build
 | Backend | `http://127.0.0.1:8000` | FastAPI API + board WebSockets |
 | VAD/ASR gateway | `http://127.0.0.1:8001` | `audio-test/vad-backend` diagnostic page and `/sessions/{id}/audio-stream` |
 | Audio static tests | `http://127.0.0.1:3001` | Legacy audio-test static pages |
-| Jitsi Meet | `https://meet.omni.elvismao.com` | Remote meeting UI used by the frontend |
+| Jitsi Meet | `https://meet.omni.observe.tw` | Remote meeting UI used by the frontend |
 | Postgres | `127.0.0.1:5433` | Local DB |
 | Ollama | `127.0.0.1:11434` | Local embedding service |
 
@@ -230,7 +230,7 @@ The frontend in this stack is configured with:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_WS_BASE_URL=ws://127.0.0.1:8000
 VITE_AUDIO_WS_BASE_URL=ws://127.0.0.1:8001
-VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+VITE_JITSI_BASE_URL=https://meet.omni.observe.tw
 ```
 
 The frontend is published on host port `5177` by default to avoid common local Vite ports `5173-5176`. Override it with `FRONTEND_PORT=...` if needed.
@@ -246,7 +246,7 @@ curl http://127.0.0.1:8001/asr-status
 
 Set `ASR_MOCK=1` if you want a fast local smoke test that returns `local mock transcript` without loading Breeze. Set `ASR_DEVICE=cpu` to force CPU, or leave `ASR_DEVICE=auto` to use CUDA if Docker exposes a GPU.
 
-Local Jitsi is optional. By default the frontend uses `https://meet.omni.elvismao.com`. To test the local Jitsi containers instead:
+Local Jitsi is optional. By default the frontend uses `https://meet.omni.observe.tw`. To test the local Jitsi containers instead:
 
 ```bash
 VITE_JITSI_BASE_URL=http://127.0.0.1:8088 \
@@ -279,8 +279,8 @@ Below is the deployment/testing checklist for running with the real backend, Jit
 Set these values in `frontend/.env` before starting or building the frontend:
 
 ```env
-VITE_WS_BASE_URL=wss://meet.omni.elvismao.com
-VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+VITE_WS_BASE_URL=wss://meet.omni.observe.tw
+VITE_JITSI_BASE_URL=https://meet.omni.observe.tw
 VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
@@ -288,7 +288,7 @@ For local WebSocket testing, use:
 
 ```env
 VITE_WS_BASE_URL=ws://localhost:8000
-VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+VITE_JITSI_BASE_URL=https://meet.omni.observe.tw
 VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
@@ -311,14 +311,14 @@ http://localhost:5173/?room_name=lost-at-sea&id=4
 In production, the page URL follows the same pattern:
 
 ```text
-https://omni.elvismao.com?room_name=lost-at-sea&id=1
+https://omni.observe.tw?room_name=lost-at-sea&id=1
 ```
 
 This creates:
 
 ```text
-Jitsi URL: https://meet.omni.elvismao.com/lost-at-sea
-Board WS: wss://meet.omni.elvismao.com/ws/sessions/lost-at-sea/board?participant_id=1
+Jitsi URL: https://meet.omni.observe.tw/lost-at-sea
+Board WS: wss://meet.omni.observe.tw/ws/sessions/lost-at-sea/board?participant_id=1
 ```
 
 ## Backend Environment

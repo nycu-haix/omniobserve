@@ -3369,6 +3369,39 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		setIdeaBlocks(prev => sortIdeaBlocks(prev.map(block => (block.id === id ? { ...block, expanded: false, isDeleted: true } : block))));
 	};
 
+	const restoreIdeaBlock = async (id: string) => {
+		if (ENABLE_PRIVATE_BOARD_MOCK_DATA) {
+			setIdeaBlocks(prev => sortIdeaBlocks(prev.map(block => (block.id === id ? { ...block, isDeleted: false } : block))));
+			return;
+		}
+
+		const response = await fetch(`${buildIdeaBlockDetailUrl(sessionId, participantId, id)}/restore`, {
+			method: "POST"
+		});
+
+		if (!response.ok) {
+			throw new Error(await getResponseErrorMessage(response, "Failed to restore idea block"));
+		}
+
+		const restoredBlock = ideaBlockResponseToBlock((await response.json()) as IdeaBlockResponse);
+		setIdeaBlocks(prev =>
+			sortIdeaBlocks(
+				prev.map(block =>
+					block.id === id
+						? {
+								...block,
+								...restoredBlock,
+								expanded: false,
+								cueText: block.cueText,
+								createdAtMs: block.createdAtMs ?? restoredBlock.createdAtMs
+							}
+						: block
+				)
+			)
+		);
+		setIdeaBlockRefreshKey(current => current + 1);
+	};
+
 	const addManualIdeaBlock = async () => {
 		const normalizedContent = manualIdeaText.trim();
 		if (!normalizedContent) {
@@ -3758,6 +3791,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 												onToggle={toggleBlock}
 												onSave={saveIdeaBlock}
 												onDelete={deleteIdeaBlock}
+												onRestore={restoreIdeaBlock}
 												onJumpToTranscript={jumpToTranscript}
 												onShareToChat={shareIdeaBlockToChat}
 												onShareSimilarityReason={shareSimilarityReasonFromBlock}

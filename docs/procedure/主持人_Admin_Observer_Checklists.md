@@ -43,7 +43,7 @@ Link、permission、staff-only room、condition assignment、hidden setup 與 ex
 - [ ] 每位參與者的 Task 1 OmniObserve link 已產生、測試可開啟，且只包含該 participant system id。
 - [ ] 每位參與者的 Task 2 OmniObserve link 已產生、測試可開啟，且在 Task 1 前不提供給參與者操作。
 - [ ] 每位真實參與者的個別 Google Meet link 已建立，Observer 知道自己負責哪一間。
-- [ ] Staff-only fallback room（例如 `meet.omni.elvismao.com` 或團隊指定會議室）已建立，用於 Host/Observer 旁聽與協調，不進入參與者的 OmniObserve participant room。
+- [ ] Staff-only fallback room（例如 `meet.omni.observe.tw` 或團隊指定會議室）已建立，用於 Host/Observer 旁聽與協調，不進入參與者的 OmniObserve participant room。
 - [ ] 教學影片、Debrief 影片、Google Forms、小表單 A/B、大表單、Canva、圖床與 task materials 的權限已用非擁有者帳號測試。
 - [ ] 參與者可見的 link/email 沒有透露 task order、cue/no-cue 條件、暗樁安排、研究假設或 staff-only room。
 - [ ] Slack/Line/Email fallback channel 已指定；若正式 link 失效，由 Host 統一發送更新，不讓 Observer 私下改發 cue/condition 資訊。

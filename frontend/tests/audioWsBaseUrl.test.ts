@@ -4,16 +4,16 @@ import test from "node:test";
 import { normalizeAudioWsBaseUrl } from "../src/lib/audioWsBaseUrl.ts";
 
 test("adds the ASR gateway prefix for bare Omni API websocket hosts", () => {
-	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.elvismao.com/"), "wss://api.omni.elvismao.com/asr");
+	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.observe.tw/"), "wss://api.omni.observe.tw/asr");
 });
 
-test("uses branch-specific ASR hosts for personal Omni deployments", () => {
-	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.elvismao.com", { frontendHostname: "sky.omni.elvismao.com" }), "wss://sky.ai.omni.elvismao.com");
-	assert.equal(normalizeAudioWsBaseUrl("wss://sky.api.omni.elvismao.com"), "wss://sky.ai.omni.elvismao.com");
+test("uses the configured API host for ASR gateway routing", () => {
+	assert.equal(normalizeAudioWsBaseUrl("wss://api.omni.observe.tw", { frontendHostname: "sky.omni.observe.tw" }), "wss://api.omni.observe.tw/asr");
+	assert.equal(normalizeAudioWsBaseUrl("wss://ej.api.omni.observe.tw"), "wss://ej.api.omni.observe.tw/asr");
 });
 
 test("keeps explicit ASR gateway prefixes unchanged", () => {
-	assert.equal(normalizeAudioWsBaseUrl("wss://sky.api.omni.elvismao.com/asr"), "wss://sky.api.omni.elvismao.com/asr");
+	assert.equal(normalizeAudioWsBaseUrl("wss://sky.api.omni.observe.tw/asr"), "wss://sky.api.omni.observe.tw/asr");
 });
 
 test("keeps local and custom audio websocket bases unchanged", () => {

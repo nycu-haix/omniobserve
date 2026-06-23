@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, UserRound, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, RotateCcw, Send, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
 import { isSimilarityCueDisplayPhase } from "../../lib/similarityCueLifecycle";
@@ -14,6 +14,7 @@ interface IdeaBlockItemProps {
 	onToggle: (id: string) => void;
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
+	onRestore?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	onShareToChat?: (block: IdeaBlock) => void;
 	onShareSimilarityReason?: (block: IdeaBlock) => void;
@@ -29,6 +30,7 @@ export function IdeaBlockItem({
 	onToggle,
 	onSave,
 	onDelete,
+	onRestore,
 	onJumpToTranscript,
 	onShareToChat,
 	onShareSimilarityReason,
@@ -45,6 +47,7 @@ export function IdeaBlockItem({
 	const [isSaving, setIsSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [isRestoring, setIsRestoring] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const itemRootRef = useRef<HTMLDivElement | null>(null);
@@ -207,6 +210,23 @@ export function IdeaBlockItem({
 			setSaveError(error instanceof Error ? error.message : "Failed to delete idea block");
 		} finally {
 			setIsDeleting(false);
+		}
+	};
+
+	const restoreBlock = async (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!onRestore || isRestoring || !isDeleted) {
+			return;
+		}
+
+		setIsRestoring(true);
+		setSaveError(null);
+		try {
+			await onRestore(block.id);
+		} catch (error) {
+			setSaveError(error instanceof Error ? error.message : "Failed to restore idea block");
+		} finally {
+			setIsRestoring(false);
 		}
 	};
 
@@ -395,6 +415,11 @@ export function IdeaBlockItem({
 								</>
 							) : (
 								<>
+									{isDeleted && (
+										<Button aria-label="Restore idea block" className="h-7 w-7" title="復原 idea block" size="icon" variant="ghost" onClick={restoreBlock} disabled={isRestoring}>
+											<RotateCcw className={cn("h-4 w-4", isRestoring && "animate-spin")} />
+										</Button>
+									)}
 									{!isDeleted && (
 										<Button
 											aria-label="Share idea block to public chat"
@@ -456,6 +481,7 @@ export function IdeaBlockItem({
 			)}
 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
+			{isDeleted && saveError && <p className="ml-7 text-xs font-semibold text-destructive">{saveError}</p>}
 
 			{block.expanded && !isGenerating && !isDeleted && (
 				<div className="ml-7 mr-7 grid gap-1.5 overflow-hidden rounded-lg px-0.5 py-0.5">

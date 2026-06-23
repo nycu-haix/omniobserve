@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CornerDownRight, Loader2, Radio } from "lucide-react";
+import { AlertTriangle, CornerDownRight, Loader2, Radio } from "lucide-react";
 import { formatParticipantDisplayName } from "../../lib/participantDefaults";
 import type { TranscriptIdeaBlockStatus } from "../../lib/transcriptIdeaBlockDisplay";
 import { cn } from "../../lib/utils";
@@ -71,11 +71,7 @@ function getIdeaBlockStateBadge(status: TranscriptIdeaBlockStatus) {
 				animate: true
 			};
 		case "no_idea":
-			return {
-				Icon: CheckCircle2,
-				label: "已收到，未產生新的想法",
-				className: "border-emerald-200 bg-emerald-50 text-emerald-700"
-			};
+			return null;
 		case "failed":
 			return {
 				Icon: AlertTriangle,
