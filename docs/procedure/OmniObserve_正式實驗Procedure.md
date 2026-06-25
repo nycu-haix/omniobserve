@@ -1,4 +1,4 @@
-# OmniObserve 正式實驗 Procedure
+# 線上會議輔助系統正式實驗 Procedure
 
 本文件是正式實驗執行手冊。它描述一場暫時保留約 150-152 分鐘的 within-subject 實驗，包含 Lost-at-Sea 與 Enhance-the-Poster 兩個 task。兩個 task 的順序與 cue / no-cue 條件要 counterbalance；近期先做兩組時，實際順序暫定皆為 Lost-at-Sea 後 Enhance-the-Poster，但文件不得把這個順序寫死。
 
@@ -13,9 +13,9 @@
 - 同一組連續完成 Lost-at-Sea 與 Enhance-the-Poster，屬於 within-subject 設計。
 - 兩個 task 的順序可 counterbalance。
 - 兩個 task 中，只有一個被分配為實驗組 with cue，另一個被分配為對照組 no cue；task 和 condition 的配對需隨機或事先 counterbalance。
-- 兩個 task 都使用 OmniObserve 主要功能：個人排序、public phase 全體排序、think-aloud 與文字輸入生成 idea blocks、public chat、transcript。
-- Screen recording 不是 OmniObserve 主要功能；目前以個別 Google Meet 錄影作為外部 workaround。
-- 目前系統不支援同一個 group 在同一個連結中連續跑兩個 tasks；每位參與者需收到兩個 OmniObserve 系統連結，分別用於 Task 1 與 Task 2。
+- 兩個 task 都使用線上會議輔助系統主要功能：個人排序、public phase 全體排序、think-aloud 與文字輸入生成 idea blocks、public chat、transcript。
+- Screen recording 不是線上會議輔助系統主要功能；目前以個別 Google Meet 錄影作為外部 workaround。
+- 目前系統不支援同一個 group 在同一個連結中連續跑兩個 tasks；每位參與者需收到兩個線上會議輔助系統連結，分別用於 Task 1 與 Task 2。
 - 實驗組相較對照組多 Similarity Cue，包括 same reason / different reason cue。
 - 對照組仍有 idea blocks，但沒有 similarity cue。
 
@@ -45,7 +45,7 @@
 | 角色 | 人數 | 責任 |
 | --- | ---: | --- |
 | Host / Admin | 1 | 開場、影片/口頭說明、控時、phase 切換、cue/control 條件管理、資料匯出協調 |
-| Observer / Interviewer | 3 | 每人負責一位真實參與者的觀察紀錄與 Debrief 前個別訪談 |
+| Observer / Interviewer | 3 | 各自負責一位真實參與者的觀察紀錄與 個別訪談 |
 | Confederate | 1 | 參與兩個 task，依事先腳本在討論中製造可觀察的討論壓力或方向，但不在三位真實參與者個別訪談中受訪 |
 | 真實參與者 | 3 | 完成兩個 task、兩次小表單/小訪談、個別訪談與最後 Debrief |
 
@@ -74,11 +74,11 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 | 報到、設備、第二螢幕、Google Meet 錄影與研究說明 | 8 分鐘 | 確認四人到場、每位使用者遠距會議室都有第二螢幕、開啟錄影、關閉通知、進入系統 |
 | 系統教學與 Task 1 說明 | 10 分鐘 | 影片尚未完成前由 Host 口頭說明 |
 | Task 1 | 30 或 34 分鐘 | Lost-at-Sea 為 30 分鐘；Poster 為 34 分鐘 |
-| Task 1 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填 Google Form |
+| Task 1 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填寫表單 |
 | 正式休息與任務切換 | 5 分鐘 | 切換 task/material/condition |
 | Task 2 說明與系統確認 | 5 分鐘 | 影片尚未完成前由 Host 口頭說明 |
 | Task 2 | 30 或 34 分鐘 | 另一個 task；Lost-at-Sea 為 30 分鐘，Poster 為 34 分鐘 |
-| Task 2 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填 Google Form |
+| Task 2 後小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填寫表單 |
 | 個別訪談分流與訪談 | 30 分鐘 | 三位實驗人員分別訪談三位真實參與者；訪談中不揭露暗樁 |
 | 最後 Debrief | 5 分鐘 | 個別訪談完成後，再說明其中一位為暗樁；可由影片或 Host 口頭呈現 |
 | 收尾與資料確認 | 5 分鐘 | 檢查錄影、問卷、log、訪談錄音 |
@@ -109,6 +109,20 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 若因場地或排程限制必須縮短任何核心區段，Host 必須在 incident log 記錄縮短原因、實際被縮短的區段、實際開始 / 結束時間，以及可能影響的資料品質。若後續要真正縮短到 120-130 分鐘或改成兩次 session / between-subject，需另做研究設計決策，不在現場臨時調整。
 
+### 2.2 若採 between-subject 時長為 98 ~ 102 分鐘
+
+| 區段 | 時間 | 說明 |
+| --- | ---: | --- |
+| 報到、設備、第二螢幕、Google Meet 錄影與研究說明 | 8 分鐘 | 確認四人到場、每位使用者遠距會議室都有第二螢幕、開啟錄影、關閉通知、進入系統 |
+| 系統教學與 Task 說明 | 10 分鐘 | 影片尚未完成前由 Host 口頭說明 |
+| Task | 30 或 34 分鐘 | Lost-at-Sea 為 30 分鐘；Poster 為 34 分鐘 |
+| 小訪談 / 小表單 | 10 分鐘 | 實驗人員口頭問，實驗人員填寫表單 |
+| 個別訪談分流與訪談 | 30 分鐘 | 三位實驗人員分別訪談三位真實參與者；訪談中不揭露暗樁 |
+| 最後 Debrief | 5 分鐘 | 個別訪談完成後，再說明其中一位為暗樁；可由影片或 Host 口頭呈現 |
+| 收尾與資料確認 | 5 分鐘 | 檢查錄影、問卷、log、訪談錄音 |
+
+時間核對：固定區段 68 分鐘 + Lost-at-Sea 30 分鐘 / Enhance-the-Poster 34 分鐘 = 98 / 102 分鐘。
+
 ## 3. 場前準備
 
 正式執行前，Host/Admin 必須先完成 [主持人 Admin Observer Checklists](主持人_Admin_Observer_Checklists.md) 的 Run-of-show Preflight 與 Observer Per-room Preflight。該清單是 staff-only 文件，不提供給參與者；participant-facing email 和現場說明仍以本 Procedure 與 [受試者事前通知信](../communications/受試者事前通知信.md) 為準。
@@ -130,7 +144,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 - 暗樁只用內部 Confederate ID 記錄，不出現在受試者可見畫面。
 - 目前系統 URL participant id 仍要求整數；實驗當天需建立私下 mapping table，例如 `system_id 1/2/3/4 -> G01P1/G01P2/G01P3/Confederate internal ID`。
 - mapping table 只供 Host/Admin 與 Observer 使用，不放在受試者信件、受試者可見畫面或公開資料夾。
-- 為每位參與者準備兩個 OmniObserve 系統連結，分別對應 Task 1 與 Task 2；連結需依 participant system id 與 task/condition 設定產生。
+- 為每位參與者準備兩個線上會議輔助系統連結，分別對應 Task 1 與 Task 2；連結需依 participant system id 與 task/condition 設定產生。
 - 設定 task order 與 condition assignment。
 - 確認 Lost-at-Sea 與 Enhance-the-Poster 的 phase 設定正確。
 - 確認 no-cue 條件停用 same reason / different reason cue。
@@ -144,8 +158,8 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 - 每位參與者使用不同的個別 Google Meet 連結，不使用單一全組 Google Meet 作為畫面錄影來源。
 - 每位真實參與者的個別 Meet 由其負責 Observer 或指定研究人員加入並確認錄影。
 - 暗樁若需要錄製畫面，也使用獨立的內部 Meet 連結；若不錄暗樁畫面，需在 session summary 記錄原因。
-- 使用 Google Meet 內建錄影作為 screen recording workaround，不視為 OmniObserve 系統內建功能。
-- 參與者加入自己的個別 Meet 後，依研究人員指示分享 OmniObserve 所在視窗或整個螢幕。
+- 使用 Google Meet 內建錄影作為 screen recording workaround，不視為線上會議輔助系統內建功能。
+- 參與者加入自己的個別 Meet 後，依研究人員指示分享線上會議輔助系統所在視窗或整個螢幕。
 - 開始正式說明前，確認每位真實參與者的個別 Meet 錄影已開始、畫面可讀、聲音可收。
 - 收尾前確認每個個別 Meet 錄影已停止且檔案會保存。
 
@@ -154,7 +168,7 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 - 每位使用者所在的遠距會議室都需要一個第二螢幕。
 - 第二螢幕可以使用會議室既有的大電視、投影顯示設備，或由研究團隊自備外接螢幕。
 - 場前需確認每位使用者的筆電可接上第二螢幕；若需要 HDMI、USB-C、Mini DisplayPort 或其他轉接頭，需由受試者或研究團隊事先準備。
-- 場前需確認第二螢幕位置不會干擾受試者操作筆電、看 OmniObserve、加入個別 Google Meet 或進行螢幕分享。
+- 場前需確認第二螢幕位置不會干擾受試者操作筆電、看線上會議輔助系統、加入個別 Google Meet 或進行螢幕分享。
 - 第二螢幕用途是支援現場遠距會議與研究人員指示；不得在會議開始前要求受試者自行開啟系統連結或 Canva 連結。
 - Host/Admin 需在報到設備檢查時確認每個遠距會議室的第二螢幕已連上、畫面可讀、音訊不會造成回授。
 
@@ -177,11 +191,11 @@ Private-expression、whisper、idea blocks 與 similarity cue 的可觀察效果
 
 ### 4.1 開場
 
-> 謝謝大家今天參與 OmniObserve 實驗。整場大約 150 分鐘多一點，會包含兩個團體任務，中間有 5 分鐘正式休息，後段會有個別訪談，活動最後會有研究說明。
+> 謝謝大家今天參與線上會議輔助系統實驗。整場大約 150 分鐘多一點，會包含兩個團體任務，中間有 5 分鐘正式休息，後段會有個別訪談，活動最後會有研究說明。
 >
 > 今天不是能力測驗，也沒有個人分數。我們關心的是小組討論時，大家如何先形成自己的想法，如何公開討論，以及系統是否能幫助你回顧自己的想法或找到適合提出的時機。
 >
-> 你們會使用 OmniObserve 系統。系統會在 private phase 中協助建立個人排序，也會在你 think aloud 的時候持續聽你的講話內容，產生 idea blocks，幫你回顧剛剛說過的重點。Think aloud 的意思不是只說最後答案，而是在自己思考時把「我正在比較什麼」「我為什麼暫時這樣排」這類理由說出來。如果講出來不自然，也可以用文字輸入把理由記下來。public phase 中你們會一起操作全體排序。聊天室也是正式公開發言管道，如果你不想用口頭說，也可以用聊天室公開分享。
+> 你們會使用線上會議輔助系統。系統會在 private phase 中協助建立個人排序，也會在你 think aloud 的時候持續聽你的講話內容，產生 idea blocks，幫你回顧剛剛說過的重點。Think aloud 的意思不是只說最後答案，而是在自己思考時把「我正在比較什麼」「我為什麼暫時這樣排」這類理由說出來。如果講出來不自然，也可以用文字輸入把理由記下來。public phase 中你們會一起操作全體排序。聊天室也是正式公開發言管道，如果你不想用口頭說，也可以用聊天室公開分享。
 >
 > 有些場次或任務中，系統可能會出現 similarity cue，例如提醒你有人的想法和你相近，或相同結論但理由不同。提示不是命令，你可以選擇採納、忽略或稍後再說。
 >
@@ -344,7 +358,7 @@ Debrief 講稿：
 - idea blocks：兩個條件都要保存，並保留 speech/text 來源標記。
 - cue logs：with-cue 條件保存 same reason / different reason cue logs；no-cue 條件記錄為 not enabled。
 - chat：所有 public chat messages；不應存在 private chat logs。
-- screen recording workaround：每位真實參與者的個別 Google Meet 錄影；暗樁錄影依內部需求記錄。這不是 OmniObserve 系統輸出。
+- screen recording workaround：每位真實參與者的個別 Google Meet 錄影；暗樁錄影依內部需求記錄。這不是線上會議輔助系統輸出。
 - Google Forms responses：小表單 A/B、大表單。
 - form skip metadata：功能是否可用、是否看到、是否使用、`N/A` 原因。
 - participant familiarity screener 與 task 後 familiarity responses。
