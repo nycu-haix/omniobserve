@@ -1,9 +1,13 @@
 import asyncio
 import unittest
-from whisper_drain import drain_whisper_stream
+from whisper_drain import drain_whisper_stream, committed_whisper_text
 
 
 class DrainTests(unittest.IsolatedAsyncioTestCase):
+    def test_multiple_committed_utterances_survive_finalization(self):
+        lines = [{"text":"第一句。"}, {"speaker":-2,"text":"silence"}, {"text":"第二句。"}, {"transcription":"最後一句。"}]
+        self.assertEqual(committed_whisper_text(lines), "第一句。第二句。最後一句。")
+
     async def test_audio_precedes_eof_and_delayed_final_is_received(self):
         queue = asyncio.Queue()
         ready = asyncio.Event()

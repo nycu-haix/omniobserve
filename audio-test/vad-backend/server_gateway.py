@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse
 FLUSH_BEFORE_FINAL = os.getenv("WHISPERLIVEKIT_FLUSH_BEFORE_FINAL", "0") == "1"
 
 
-from whisper_drain import drain_whisper_stream
+from whisper_drain import drain_whisper_stream, committed_whisper_text
 
 
 ASR_ENGINE = os.getenv("ASR_ENGINE", "whisperlivekit").strip().lower()
@@ -1402,7 +1402,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def build_live_text(lines: list[dict[str, Any]], buffer_text: str) -> str:
         latest = latest_speech_line(lines)
-        latest_line_text = whisperlivekit_line_text(latest[1]) if latest else ""
+        latest_line_text = (clean_asr_transcript_text(committed_whisper_text(lines))
+                            if FLUSH_BEFORE_FINAL else whisperlivekit_line_text(latest[1]) if latest else "")
 
         normalized_buffer = buffer_text.strip()
         if latest_line_text and normalized_buffer:
@@ -1704,7 +1705,8 @@ async def handle_whisperlivekit_audio_ws(
             return
 
         latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
-        last_finalized_state_line_count = len(state_lines)
+        if not FLUSH_BEFORE_FINAL:
+            last_finalized_state_line_count = len(state_lines)
         pending_audio_silence_segment_id = segment_id
         if FLUSH_BEFORE_FINAL:
             await drain_whisper_stream(wlk_ws, sender_task, wlk_send_queue, wlk_ready_event)
@@ -1799,7 +1801,8 @@ async def handle_whisperlivekit_audio_ws(
             cancel_pending_silence_finalize()
             if current_draft_text:
                 latest = latest_speech_line(state_lines)
-                await forward_final_text(current_final_text(), latest[1] if latest else None)
+                text = build_live_text(state_lines, "") if FLUSH_BEFORE_FINAL else current_final_text()
+                await forward_final_text(text or current_final_text(), latest[1] if latest else None)
             wlk_ready_event.set()
             print("WhisperLiveKit ready_to_stop")
             return

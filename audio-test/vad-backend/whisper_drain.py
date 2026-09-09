@@ -11,3 +11,9 @@ async def drain_whisper_stream(ws, sender_task, queue, ready_event, timeout=60):
     await ws.send(b"")
     await asyncio.wait_for(ready_event.wait(), timeout=timeout)
 
+
+
+def committed_whisper_text(lines):
+    """LocalAgreement commits successive utterances as separate lines."""
+    return "".join(str(line.get("text") or line.get("transcription") or "")
+                   for line in lines if isinstance(line, dict) and line.get("speaker") != -2)
