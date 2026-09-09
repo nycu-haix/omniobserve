@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Pull-based Dokploy CD for hosts that cannot receive GitHub webhooks."""
 import argparse
+import datetime
+import re
 import json
 import os
 import pathlib
@@ -55,10 +57,11 @@ def tick(config, state, state_path):
         pending = entry.get('pending')
         if pending:
             deployments = sorted(info.get('deployments') or [], key=lambda d: d.get('createdAt', ''), reverse=True)
-            deployment = next((d for d in deployments if d.get('title') == pending['title']), None)
+            deployment = next((d for d in deployments if d.get('title') == pending['title'] or pending['sha'] in (d.get('description') or '') or (d.get('createdAt') and datetime.datetime.fromisoformat(d['createdAt'].replace('Z', '+00:00')).timestamp() >= pending['queued_at'])), None)
             if deployment and deployment.get('status') == 'done':
                 if healthy(target):
-                    entry['deployed'] = pending['sha']
+                    actual = re.search(r'Commit: ([0-9a-f]{40})', deployment.get('description') or '')
+                    entry['deployed'] = actual.group(1) if actual else pending['sha']
                     entry.pop('pending')
                     entry.pop('failure', None)
                     log('deployed ' + branch + ' ' + pending['sha'])
