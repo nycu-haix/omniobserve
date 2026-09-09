@@ -5,15 +5,15 @@ from . import lost_at_sea
 
 TASK_ID = "multimedia-hci-capstone"
 TASK_TITLE = "Multimedia and Human Computer Interaction Capstone"
-TEMPLATE_DESCRIPTION = "Upload a spreadsheet item list for a capstone ranking discussion."
+TEMPLATE_DESCRIPTION = "期末專題題目討論"
 
 TOPIC_DESCRIPTION = (
     "Participants discuss and rank a custom item list for the Multimedia and Human Computer Interaction Capstone. "
     "The item list is uploaded by a session participant before ranking begins."
 )
 TASK_TOPIC_DETAIL = (
-    "Upload an Excel-exported CSV/TSV item list, then rank the uploaded items by importance. "
-    "Required columns can be simple: item/title/name, and optional description."
+    "Upload an XLSX/CSV/TSV item list with topic and discription columns, then rank the uploaded topics by importance. "
+    "The first row is treated as headers and is not imported as an item. Two-row topic/discription sheets are also supported."
 )
 LLM_TOPIC_DESCRIPTION = TOPIC_DESCRIPTION
 SIMILARITY_TASK_CONTEXT = TOPIC_DESCRIPTION

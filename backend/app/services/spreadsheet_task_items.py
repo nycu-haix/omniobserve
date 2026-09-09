@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 
-HEADER_KEYS = {"id", "item", "title", "name", "label", "label_zh", "label_en", "description", "description_zh"}
+HEADER_KEYS = {"id", "topic", "item", "title", "name", "label", "label_zh", "label_en", "discription", "description", "description_zh"}
 NS = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 
 
@@ -27,12 +27,15 @@ def parse_spreadsheet_task_items(filename: str, content_base64: str) -> list[dic
 def rows_to_task_items(rows: list[list[str]]) -> list[dict[str, Any]]:
     if not rows:
         return []
+    transposed_items = _rows_to_transposed_topic_items(rows)
+    if transposed_items:
+        return transposed_items
     first_row = [cell.strip().lower() for cell in rows[0]]
     headers = first_row if any(cell in HEADER_KEYS for cell in first_row) else []
     data_rows = rows[1:]
     id_column = _find_column(headers, "id")
-    label_column = _find_column(headers, "item", "title", "name", "label", "label_zh", "label_en")
-    description_column = _find_column(headers, "description", "description_zh")
+    label_column = _find_column(headers, "topic", "item", "title", "name", "label", "label_zh", "label_en")
+    description_column = _find_column(headers, "discription", "description", "description_zh")
     seen_ids: set[str] = set()
     items: list[dict[str, Any]] = []
     for index, row in enumerate(data_rows, start=1):
@@ -49,6 +52,39 @@ def rows_to_task_items(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "label_zh": label,
                 "label_en": label,
                 "description_zh": description,
+                "aliases": [],
+                "image_title": label,
+                "image_bg": "#f8fafc",
+                "image_fg": "#334155",
+                "image_mark": str(len(items) + 1),
+            }
+        )
+    return items
+
+
+def _rows_to_transposed_topic_items(rows: list[list[str]]) -> list[dict[str, Any]]:
+    if len(rows) < 2:
+        return []
+    topic_row = rows[0]
+    description_row = rows[1]
+    if _cell(topic_row, 0).strip().lower() != "topic":
+        return []
+    if _cell(description_row, 0).strip().lower() not in {"discription", "description", "description_zh"}:
+        return []
+    seen_ids: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for column_index in range(1, max(len(topic_row), len(description_row))):
+        label = _cell(topic_row, column_index)
+        if not label:
+            continue
+        item_id = _unique_id(_slugify(label, f"capstone_item_{column_index}"), seen_ids)
+        items.append(
+            {
+                "id": item_id,
+                "label": label,
+                "label_zh": label,
+                "label_en": label,
+                "description_zh": _cell(description_row, column_index),
                 "aliases": [],
                 "image_title": label,
                 "image_bg": "#f8fafc",

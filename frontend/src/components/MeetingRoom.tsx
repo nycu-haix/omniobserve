@@ -128,7 +128,7 @@ const MAX_TASK_PANES = 3;
 const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
 const CAPSTONE_TASK_ID = "multimedia-hci-capstone";
 const CAPSTONE_TASK_TITLE = "Multimedia and Human Computer Interaction Capstone";
-const CAPSTONE_TASK_DETAIL = "Upload an XLSX/CSV/TSV item list, then rank the uploaded items by importance.";
+const CAPSTONE_TASK_DETAIL = "Upload an XLSX/CSV/TSV item list with topic and discription columns, then rank the uploaded topics by importance. Two-row topic/discription sheets are also supported.";
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
 	"phase-task-items": "Task Items",
@@ -204,14 +204,18 @@ function parseDelimitedTaskItems(text: string): TaskConfigItem[] {
 	}
 	const delimiter = lines.some(line => line.includes("\t")) ? "\t" : ",";
 	const rows = lines.map(line => splitDelimitedLine(line, delimiter));
+	const transposedItems = parseTransposedTopicItems(rows);
+	if (transposedItems.length > 0) {
+		return transposedItems;
+	}
 	const firstRow = rows[0].map(cell => cell.trim().toLowerCase());
-	const headerKeys = new Set(["id", "item", "title", "name", "label", "label_zh", "label_en", "description", "description_zh"]);
+	const headerKeys = new Set(["id", "topic", "item", "title", "name", "label", "label_zh", "label_en", "discription", "description", "description_zh"]);
 	const headers = firstRow.some(cell => headerKeys.has(cell)) ? firstRow : [];
 	const dataRows = rows.slice(1);
 	const findColumn = (...keys: string[]) => headers.findIndex(header => keys.includes(header));
 	const idColumn = findColumn("id");
-	const labelColumn = findColumn("item", "title", "name", "label", "label_zh", "label_en");
-	const descriptionColumn = findColumn("description", "description_zh");
+	const labelColumn = findColumn("topic", "item", "title", "name", "label", "label_zh", "label_en");
+	const descriptionColumn = findColumn("discription", "description", "description_zh");
 	const seenIds = new Set<string>();
 
 	return dataRows.flatMap((row, index) => {
@@ -244,6 +248,46 @@ function parseDelimitedTaskItems(text: string): TaskConfigItem[] {
 			}
 		];
 	});
+}
+
+function parseTransposedTopicItems(rows: string[][]): TaskConfigItem[] {
+	if (rows.length < 2 || rows[0][0]?.trim().toLowerCase() !== "topic") {
+		return [];
+	}
+	const descriptionHeader = rows[1][0]?.trim().toLowerCase();
+	if (!["discription", "description", "description_zh"].includes(descriptionHeader || "")) {
+		return [];
+	}
+	const seenIds = new Set<string>();
+	const items: TaskConfigItem[] = [];
+	const columnCount = Math.max(rows[0].length, rows[1].length);
+	for (let columnIndex = 1; columnIndex < columnCount; columnIndex += 1) {
+		const label = rows[0][columnIndex]?.trim() || "";
+		if (!label) {
+			continue;
+		}
+		const baseId = slugifyTaskItemId(label, `capstone_item_${columnIndex}`);
+		let id = baseId;
+		let suffix = 2;
+		while (seenIds.has(id)) {
+			id = `${baseId}_${suffix}`;
+			suffix += 1;
+		}
+		seenIds.add(id);
+		items.push({
+			id,
+			label,
+			label_zh: label,
+			label_en: label,
+			description_zh: rows[1][columnIndex]?.trim() || "",
+			aliases: [],
+			image_title: label,
+			image_bg: "#f8fafc",
+			image_fg: "#334155",
+			image_mark: String(items.length + 1)
+		});
+	}
+	return items;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -1073,7 +1117,7 @@ function CapstoneTaskItemUploadPanel({
 					/>
 				</label>
 			</div>
-			<p className="text-xs leading-5 text-muted-foreground">Columns: item/title/name/label, optional id and description.</p>
+			<p className="text-xs leading-5 text-muted-foreground">Use topic and discription. The first row is treated as headers; two-row topic/discription sheets are also supported.</p>
 			{uploadError && (
 				<div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-background px-2.5 py-2 text-xs text-destructive" role="alert">
 					<AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1739,7 +1783,7 @@ export default function MeetingRoom() {
 						});
 					} catch {
 						console.error("Failed to parse capstone task items", error);
-						setCapstoneUploadError("No items found. Upload an XLSX/CSV/TSV with an item, title, name, or label column.");
+						setCapstoneUploadError("No items found. Upload an XLSX/CSV/TSV with topic and discription columns.");
 					}
 				}
 			};
