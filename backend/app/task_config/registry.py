@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import enhance_the_poster, lost_at_sea
+from . import enhance_the_poster, lost_at_sea, multimedia_hci_capstone
 
 
 DEFAULT_TASK_NAME = lost_at_sea.TASK_ID
@@ -78,15 +78,15 @@ class TaskPromptConfig:
 
 def normalize_task_name(task_name: str | None) -> str:
     value = (task_name or DEFAULT_TASK_NAME).strip()
-    if value not in {lost_at_sea.TASK_ID, enhance_the_poster.TASK_ID}:
+    if value not in {lost_at_sea.TASK_ID, enhance_the_poster.TASK_ID, multimedia_hci_capstone.TASK_ID}:
         raise HTTPException(status_code=400, detail=f"Unsupported task_name: {value}")
     return value
 
 
 def get_task_prompt_config(task_name: str | None) -> TaskPromptConfig:
     normalized_task_name = normalize_task_name(task_name)
-    if normalized_task_name == enhance_the_poster.TASK_ID:
-        return _enhance_the_poster_prompt_config()
+    if normalized_task_name in {enhance_the_poster.TASK_ID, multimedia_hci_capstone.TASK_ID}:
+        return _poster_prompt_config(normalized_task_name)
     return _lost_at_sea_prompt_config()
 
 
@@ -110,7 +110,8 @@ def _lost_at_sea_prompt_config() -> TaskPromptConfig:
     )
 
 
-def _enhance_the_poster_prompt_config() -> TaskPromptConfig:
+def _poster_prompt_config(task_name: str) -> TaskPromptConfig:
+    task_module = multimedia_hci_capstone if task_name == multimedia_hci_capstone.TASK_ID else enhance_the_poster
     task_context = """
 Participants are improving an ugly poster. In Private Phase 1, each participant proposes at least four poster task items, with no maximum. Each task item combines:
 - component_id: the poster element being changed
@@ -119,11 +120,11 @@ Participants are improving an ugly poster. In Private Phase 1, each participant 
 In Private Phase 2 and Public Phase, participants rank only the top 10 most important proposed poster task items. Items below the top 10 are treated as not changed.
 """.strip()
     return TaskPromptConfig(
-        task_name=enhance_the_poster.TASK_ID,
-        task_title=enhance_the_poster.TASK_TITLE,
+        task_name=task_module.TASK_ID,
+        task_title=task_module.TASK_TITLE,
         idea_block_topic_context=task_context,
         similarity_system_prompt=SHARED_SIMILARITY_SYSTEM_PROMPT_TEMPLATE.format(
-            task_title=enhance_the_poster.TASK_TITLE,
+            task_title=task_module.TASK_TITLE,
             task_context=task_context,
             similarity_definition=(
                 "A candidate idea is similar only when it shares a compatible poster-improvement stance with the core idea. "
@@ -136,7 +137,7 @@ In Private Phase 2 and Public Phase, participants rank only the top 10 most impo
             ),
         ),
         task_items=[],
-        poster_components=[dict(item) for item in enhance_the_poster.PHASE1_POSTER_COMPONENTS],
-        actions=[dict(item) for item in enhance_the_poster.PHASE1_ACTION_ITEMS],
+        poster_components=[dict(item) for item in task_module.PHASE1_POSTER_COMPONENTS],
+        actions=[dict(item) for item in task_module.PHASE1_ACTION_ITEMS],
         advanced_actions=[],
     )

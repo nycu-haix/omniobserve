@@ -18,9 +18,9 @@ const fallbackTaskTemplates: TaskTemplate[] = [
 		is_default: true
 	},
 	{
-		task_id: "enhance-the-poster",
-		title: "Enhance the Poster",
-		session_prefix: "enhance-the-poster",
+		task_id: "multimedia-hci-capstone",
+		title: "Multimedia and Human Computer Interaction Capstone",
+		session_prefix: "multimedia-hci-capstone",
 		description: "海報改善面向排序任務。",
 		is_default: false
 	}

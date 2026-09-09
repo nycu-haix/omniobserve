@@ -1,0 +1,44 @@
+from typing import Any
+
+from . import enhance_the_poster as poster
+
+
+TASK_ID = "multimedia-hci-capstone"
+TASK_TITLE = "Multimedia and Human Computer Interaction Capstone"
+TEMPLATE_DESCRIPTION = "Capstone discussion template using the poster-improvement task item builder."
+
+TOPIC_DESCRIPTION = poster.TOPIC_DESCRIPTION
+TASK_TOPIC_DETAIL = poster.TASK_TOPIC_DETAIL
+LLM_TOPIC_DESCRIPTION = poster.LLM_TOPIC_DESCRIPTION
+SIMILARITY_TASK_CONTEXT = poster.SIMILARITY_TASK_CONTEXT
+REFERENCE_IMAGE_SRC = poster.REFERENCE_IMAGE_SRC
+REFERENCE_IMAGE_ALT = poster.REFERENCE_IMAGE_ALT
+PHASE1_MIN_TASK_ITEMS = poster.PHASE1_MIN_TASK_ITEMS
+RANKING_IMPORTANCE_LIMIT = poster.RANKING_IMPORTANCE_LIMIT
+CUSTOM_DETAIL_ACTION_ID = poster.CUSTOM_DETAIL_ACTION_ID
+REPLACE_IMAGE_LIBRARY_ACTION_ID = poster.REPLACE_IMAGE_LIBRARY_ACTION_ID
+QR_AREA_LAYOUT_ACTION_IDS = poster.QR_AREA_LAYOUT_ACTION_IDS
+IMAGE_LIBRARY_COMPONENT_IDS = poster.IMAGE_LIBRARY_COMPONENT_IDS
+FIXED_CONTEXT_COMPONENT_IDS = poster.FIXED_CONTEXT_COMPONENT_IDS
+TASK_ITEMS = poster.TASK_ITEMS
+RANKING_ITEMS = poster.RANKING_ITEMS
+RANKING_ITEM_DISPLAY_NAMES = poster.RANKING_ITEM_DISPLAY_NAMES
+PHASE1_POSTER_COMPONENTS = poster.PHASE1_POSTER_COMPONENTS
+PHASE1_ACTION_ITEMS = poster.PHASE1_ACTION_ITEMS
+PHASE1_BUILDER_CONFIG = poster.PHASE1_BUILDER_CONFIG
+TASK_PHASES = poster.TASK_PHASES
+
+TASK_CONFIG = {
+    **poster.TASK_CONFIG,
+    "task_id": TASK_ID,
+    "title": TASK_TITLE,
+    "template_description": TEMPLATE_DESCRIPTION,
+}
+
+
+def serialize_task_config() -> dict[str, Any]:
+    payload = poster.serialize_task_config()
+    payload["task_id"] = TASK_ID
+    payload["title"] = TASK_TITLE
+    payload["template_description"] = TEMPLATE_DESCRIPTION
+    return payload

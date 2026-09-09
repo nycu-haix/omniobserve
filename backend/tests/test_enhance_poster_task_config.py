@@ -20,7 +20,7 @@ from app.task_config.enhance_the_poster import (
     TASK_TOPIC_DETAIL,
     TOPIC_DESCRIPTION,
 )
-from app.task_config import serialize_task_config
+from app.task_config import resolve_task_id, serialize_task_config, serialize_task_templates
 
 
 def _option_by_id(options, option_id: str):
@@ -28,6 +28,25 @@ def _option_by_id(options, option_id: str):
 
 
 class EnhancePosterTaskConfigTests(unittest.TestCase):
+    def test_capstone_template_replaces_enhance_poster_in_new_meeting_options(self) -> None:
+        templates = serialize_task_templates()
+        template_ids = [template["task_id"] for template in templates]
+
+        self.assertIn("lost-at-sea", template_ids)
+        self.assertIn("multimedia-hci-capstone", template_ids)
+        self.assertNotIn("enhance-the-poster", template_ids)
+        self.assertEqual(resolve_task_id(task_id="enhance-the-poster"), "enhance-the-poster")
+
+    def test_capstone_preserves_poster_builder_settings(self) -> None:
+        capstone_payload = serialize_task_config(task_id="multimedia-hci-capstone")
+        poster_payload = serialize_task_config(task_id="enhance-the-poster")
+
+        self.assertEqual(capstone_payload["task_id"], "multimedia-hci-capstone")
+        self.assertEqual(capstone_payload["title"], "Multimedia and Human Computer Interaction Capstone")
+        self.assertEqual(capstone_payload["phase1_builder"], poster_payload["phase1_builder"])
+        self.assertEqual(capstone_payload["ranking_limit"], poster_payload["ranking_limit"])
+        self.assertEqual(capstone_payload["reference_image_src"], poster_payload["reference_image_src"])
+
     def test_custom_detail_statement_omits_action_words(self) -> None:
         component = {"label_zh": "Component"}
         action = _option_by_id(PHASE1_ACTION_ITEMS, CUSTOM_DETAIL_ACTION_ID)
