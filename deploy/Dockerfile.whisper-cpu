@@ -1,0 +1,6 @@
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu && pip install whisperlivekit==0.2.20 python-multipart
+ENTRYPOINT ["wlk", "--host", "0.0.0.0"]
+CMD ["--backend", "faster-whisper", "--model", "small", "--language", "zh", "--backend-policy", "localagreement", "--pcm-input"]
