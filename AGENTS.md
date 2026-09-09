@@ -5,7 +5,5 @@
   - Use the Dokploy project/environment and service deployment pages for the current branch, not another person's environment.
   - Verify the relevant service deployment is `Done` for the pushed commit hash. If both backend and frontend changed, verify both. If only frontend changed, still verify the branch deployment URL serves the new frontend asset after Dokploy finishes.
   - Use Chrome for production verification on the branch deployment URL after Dokploy is done.
-  - For the `sky` branch, the Dokploy links are:
-    - Project/environment: `https://dokploy.observe.tw/dashboard/project/eBpy0zdwgD7qwalkeefAd/environment/DcsSA4yUGTALixthLZ0v4`
-    - Backend compose deployments: `https://dokploy.observe.tw/dashboard/project/eBpy0zdwgD7qwalkeefAd/environment/DcsSA4yUGTALixthLZ0v4/services/compose/aUjeHZM855eQ9jlgG56_0?tab=deployments`
-    - Frontend compose deployments: `https://dokploy.observe.tw/dashboard/project/eBpy0zdwgD7qwalkeefAd/environment/DcsSA4yUGTALixthLZ0v4/services/compose/nj1X_yllF5Z_cPbU6CJWp?tab=deployments`
+  - Current IIC environments and deployment links are listed in [deploy/README.md](deploy/README.md). Each environment uses one Compose deployment for backend and frontend.
+  - Production is `main` at `https://omni.observe.tw/`; `em-prompt` deploys to `https://em.omni.observe.tw/`.
