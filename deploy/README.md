@@ -42,3 +42,30 @@ a five-minute delay. Successful deployment requires frontend/API HTTPS checks.
 Run `python3 deploy/test_cd_poller.py` for polling and retry behavior tests.
 The host-installed poller is upgraded explicitly; application pushes do not
 replace the systemd service or private configuration.
+
+## Shared meeting and speech services
+
+`meet/docker-compose.yml` runs one Jitsi stack for all six environments at
+https://meet.omni.observe.tw. Set JVB_ADVERTISE_IPS to the VM public IP and permit
+UDP10000 in its IIC security group. Traefik terminates HTTPS and proxies XMPP and
+Colibri WebSockets. Service passwords remain in Dokploy. On the 8GiB bootstrap
+host set VIDEOBRIDGE_MAX_MEMORY=768m and JICOFO_MAX_MEMORY=384m. P2P is disabled so
+media traverses the tested JVB route. Two synthetic participants verified audio
+reception and decoded video through140.110.146.224:10000.
+
+`deploy/compose.asr.cpu.yml` provides a shared Whisper small CPU fallback plus
+the existing audio gateway. It does real transcription, with mock mode disabled.
+The model cache is a persistent volume. The gateway serves ai.omni.observe.tw and
+all five NAME.ai.omni.observe.tw aliases; each frontend supplies its own pipeline
+WebSocket URL so transcripts go to that branch's backend/database. CPU inference
+has lower throughput than Breeze ASR on GPU; it is a bootstrap service, not a
+claim of equivalent accuracy or multi-speaker real-time capacity.
+
+Shared infrastructure targets in the pull-CD configuration use unique `id`
+values even when they follow the same main branch. Their `health_checks` list
+contains hostname/path pairs, allowing Jitsi and ASR checks without assuming a
+frontend/backend pair. Existing targets without `id` remain keyed by branch.
+
+GPU allocation and the LLM provider key are separate prerequisites. Configure
+OPENAI_API_KEY, OPENAI_BASE_URL and OPENAI_MODEL in each app's Dokploy environment
+and redeploy that app. Do not put credentials into Git.

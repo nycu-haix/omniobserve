@@ -1,0 +1,52 @@
+services:
+  gateway:
+    build:
+      context: ../audio-test/vad-backend
+    image: omniobserve-asr-gateway:bootstrap
+    restart: unless-stopped
+    environment:
+      ASR_ENGINE: whisperlivekit
+      ASR_MOCK: '0'
+      WHISPERLIVEKIT_WS_URLS: ws://whisper-cpu:8000/asr
+      PIPELINE_WS_BASE_URL: wss://api.omni.observe.tw
+      WHISPERLIVEKIT_MODE: full
+      PYTHONUNBUFFERED: '1'
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      whisper-cpu:
+        condition: service_healthy
+    mem_limit: 384m
+  whisper-cpu:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.whisper-cpu
+    image: omniobserve-whisper:cpu-0.2.20
+    restart: unless-stopped
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    volumes:
+    - asr-models:/root/.cache
+    mem_limit: 2300m
+    cpus: 1.5
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 600s
+volumes:
+  asr-models: {}

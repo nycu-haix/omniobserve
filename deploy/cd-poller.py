@@ -36,7 +36,8 @@ def log(message):
 
 
 def healthy(target):
-    for host, path in [(target['frontend'], '/'), (target['backend'], '/health')]:
+    checks = target.get('health_checks') or [(target['frontend'], '/'), (target['backend'], '/health')]
+    for host, path in checks:
         result = subprocess.run(['curl', '--fail', '--silent', '--show-error', '--max-time', '15', '--resolve', host + ':443:127.0.0.1', 'https://' + host + path], capture_output=True)
         if result.returncode:
             return False
@@ -47,13 +48,14 @@ def tick(config, state, state_path):
     targets = config['targets']
     refs = subprocess.check_output(['git', 'ls-remote', config['repository']] + ['refs/heads/' + t['branch'] for t in targets], timeout=45, env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'}).decode()
     remote = {ref.removeprefix('refs/heads/'): sha for sha, ref in (line.split() for line in refs.splitlines())}
-    statuses = {t['branch']: api(config, 'compose.one', {'composeId': t['compose_id']}) for t in targets}
+    statuses = {t.get('id', t['branch']): api(config, 'compose.one', {'composeId': t['compose_id']}) for t in targets}
     active = False
     now = time.time()
     for target in targets:
         branch = target['branch']
-        info = statuses[branch]
-        entry = state.setdefault(branch, {'deployed': target['initial_commit']})
+        target_id = target.get('id', branch)
+        info = statuses[target_id]
+        entry = state.setdefault(target_id, {'deployed': target['initial_commit']})
         pending = entry.get('pending')
         if pending:
             deployments = sorted(info.get('deployments') or [], key=lambda d: d.get('createdAt', ''), reverse=True)
@@ -64,7 +66,7 @@ def tick(config, state, state_path):
                     entry['deployed'] = actual.group(1) if actual else pending['sha']
                     entry.pop('pending')
                     entry.pop('failure', None)
-                    log('deployed ' + branch + ' ' + pending['sha'])
+                    log('deployed ' + target_id + ' ' + pending['sha'])
                 elif now - pending['queued_at'] > 900:
                     entry['failure'] = {'sha': pending['sha'], 'at': now, 'attempts': pending['attempts']}
                     entry.pop('pending')
@@ -88,9 +90,10 @@ def tick(config, state, state_path):
         return
     for target in targets:
         branch = target['branch']
-        info = statuses[branch]
+        target_id = target.get('id', branch)
+        info = statuses[target_id]
         sha = remote.get(branch)
-        entry = state[branch]
+        entry = state[target_id]
         if not sha or sha == entry.get('deployed') or not info.get('autoDeploy'):
             continue
         failure = entry.get('failure', {})
@@ -101,7 +104,7 @@ def tick(config, state, state_path):
         api(config, 'compose.deploy', {'composeId': target['compose_id'], 'title': title, 'description': 'Automatic Git branch update. Commit: ' + sha})
         entry['pending'] = {'sha': sha, 'title': title, 'queued_at': now, 'attempts': attempts + 1}
         save(state_path, state)
-        log('queued ' + branch + ' ' + sha)
+        log('queued ' + target_id + ' ' + sha)
         break
 
 
