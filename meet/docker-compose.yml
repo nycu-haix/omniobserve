@@ -6,6 +6,7 @@ services:
       - .env
     volumes:
       - web-config:/config
+      - ./custom-config.js:/config/custom-config.js:ro
       - web-crontabs:/var/spool/cron/crontabs
       - transcripts:/usr/share/jitsi-meet/transcripts
       - web-load-test:/usr/share/jitsi-meet/load-test

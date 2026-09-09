@@ -7,6 +7,7 @@ services:
     environment:
       ASR_ENGINE: whisperlivekit
       ASR_MOCK: "0"
+      WHISPERLIVEKIT_FLUSH_BEFORE_FINAL: "1"
       WHISPERLIVEKIT_WS_URLS: ws://whisper-cpu:8000/asr
       PIPELINE_WS_BASE_URL: wss://api.omni.observe.tw
       WHISPERLIVEKIT_MODE: full

@@ -21,6 +21,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 # from transcript_normalizer import to_traditional
 
+FLUSH_BEFORE_FINAL = os.getenv("WHISPERLIVEKIT_FLUSH_BEFORE_FINAL", "0") == "1"
+
+
+from whisper_drain import drain_whisper_stream
+
+
 ASR_ENGINE = os.getenv("ASR_ENGINE", "whisperlivekit").strip().lower()
 if ASR_ENGINE == "local":
     import torch
@@ -1238,6 +1244,7 @@ async def handle_whisperlivekit_audio_ws(
     wlk_tail_silence_duration = 0.0
     restart_wlk_after_final = False
     wlk_session_generation = 0
+    wlk_ready_event = asyncio.Event()
     wlk_restart_lock = asyncio.Lock()
     wlk_last_progress_at = time.monotonic()
     wlk_recovery_task: asyncio.Task | None = None
@@ -1699,7 +1706,10 @@ async def handle_whisperlivekit_audio_ws(
         latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
         last_finalized_state_line_count = len(state_lines)
         pending_audio_silence_segment_id = segment_id
-        await forward_final_text(current_final_text(), latest[1] if latest else None)
+        if FLUSH_BEFORE_FINAL:
+            await drain_whisper_stream(wlk_ws, sender_task, wlk_send_queue, wlk_ready_event)
+        else:
+            await forward_final_text(current_final_text(), latest[1] if latest else None)
 
     async def finalize_current_draft_from_idle(segment_id: str) -> None:
         nonlocal last_finalized_state_line_count, pending_draft_idle_segment_id
@@ -1727,6 +1737,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def schedule_draft_idle_finalize() -> None:
         nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if FLUSH_BEFORE_FINAL:
+            return
         if not current_draft_text:
             return
         segment_id = current_client_segment_id()
@@ -1745,6 +1757,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def schedule_silence_finalize(silence_key: str) -> None:
         nonlocal pending_silence_task, pending_silence_key
+        if FLUSH_BEFORE_FINAL:
+            return
         if not current_draft_text or silence_key in finalized_silence_keys:
             return
         if pending_silence_key == silence_key and pending_silence_task and not pending_silence_task.done():
@@ -1786,6 +1800,7 @@ async def handle_whisperlivekit_audio_ws(
             if current_draft_text:
                 latest = latest_speech_line(state_lines)
                 await forward_final_text(current_final_text(), latest[1] if latest else None)
+            wlk_ready_event.set()
             print("WhisperLiveKit ready_to_stop")
             return
         if message.get("error"):
@@ -1894,6 +1909,12 @@ async def handle_whisperlivekit_audio_ws(
     async def stop_wlk_session(send_stop: bool = True) -> None:
         nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
         ws = wlk_ws
+        if FLUSH_BEFORE_FINAL and send_stop and ws is not None:
+            try:
+                await drain_whisper_stream(ws, sender_task, wlk_send_queue, wlk_ready_event)
+            except Exception as exc:
+                await send_client_json({"type": "asr_error", "error": "ASR flush failed: " + type(exc).__name__})
+            send_stop = False
         wlk_session_generation += 1
         if ws is not None and send_stop:
             try:
@@ -1930,6 +1951,7 @@ async def handle_whisperlivekit_audio_ws(
     async def start_wlk_session() -> None:
         nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
         drain_wlk_send_queue()
+        wlk_ready_event.clear()
         wlk_ws = await connect_wlk_session()
         wlk_session_generation += 1
         generation = wlk_session_generation
