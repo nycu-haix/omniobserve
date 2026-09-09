@@ -21,6 +21,7 @@ from ..task_config import (
     get_default_phase_for_session,
     get_ranking_limit_for_session,
     get_ranking_items_for_session,
+    get_task_phases_for_session,
     get_task_config_for_session,
     normalize_phase_for_session,
 )
@@ -75,6 +76,7 @@ ADMIN_PARTICIPANT_ID_PREFIX = f"{ADMIN_PARTICIPANT_ID}-"
 PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS = 4
 PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS = 700
 PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS = 0.75
+CAPSTONE_TASK_ID = "multimedia-hci-capstone"
 _public_context_windows: dict[str, deque[str]] = defaultdict(
     lambda: deque(maxlen=PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS)
 )
@@ -276,6 +278,7 @@ session_timers: dict[str, dict[str, Any]] = defaultdict(
 )
 session_cue_conditions: dict[str, str] = defaultdict(lambda: "experimental")
 session_public_context_state: dict[str, dict[str, Any]] = {}
+session_ranking_completion: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
 
 
 def _now_ms() -> int:
@@ -359,6 +362,58 @@ def _phase_changed_message(session_id: str) -> dict[str, Any]:
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
         "timestamp_ms": _now_ms(),
     }
+
+
+def _is_capstone_session(session_id: str) -> bool:
+    return get_task_config_for_session(session_name=session_id).get("task_id") == CAPSTONE_TASK_ID
+
+
+def _get_next_session_phase(session_id: str) -> str | None:
+    phases = get_task_phases_for_session(session_name=session_id)
+    phase_ids = [str(phase["id"]) for phase in phases]
+    current_phase = _get_session_phase(session_id)
+    try:
+        current_index = phase_ids.index(current_phase)
+    except ValueError:
+        return None
+    next_index = current_index + 1
+    return phase_ids[next_index] if next_index < len(phase_ids) else None
+
+
+def _ranking_completion_subject_ids(session_id: str) -> list[str]:
+    return sorted(
+        participant_id
+        for participant_id in board_manager.get_participants(session_id)
+        if _is_participant_ranking_subject(session_id, participant_id)
+    )
+
+
+def _ranking_completion_message(session_id: str, participant_id: str | None = None) -> dict[str, Any]:
+    phase = _get_session_phase(session_id)
+    subject_ids = _ranking_completion_subject_ids(session_id)
+    subject_id_set = set(subject_ids)
+    completed_ids = sorted(session_ranking_completion[session_id][phase] & subject_id_set)
+    return {
+        "type": "ranking_completion_state",
+        "current_phase": phase,
+        "completed_participant_ids": completed_ids,
+        "completed_count": len(completed_ids),
+        "total_count": len(subject_ids),
+        "is_completed": participant_id in completed_ids if participant_id is not None else False,
+        "has_next_phase": _get_next_session_phase(session_id) is not None,
+        "timestamp_ms": _now_ms(),
+    }
+
+
+async def _broadcast_ranking_completion_state(session_id: str) -> None:
+    if not _is_capstone_session(session_id):
+        return
+    for participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            _ranking_completion_message(session_id, participant_id),
+        )
 
 
 def _public_context_component_state_message(session_id: str) -> dict[str, Any]:
@@ -1450,6 +1505,11 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "timer_end_time_ms": session_timers[session_id]["end_time_ms"],
         "cue_condition": session_cue_conditions[session_id],
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
+        "ranking_completion": (
+            _ranking_completion_message(session_id, participant_id)
+            if _is_capstone_session(session_id)
+            else None
+        ),
     }
 
 
@@ -1498,6 +1558,189 @@ def _apply_ranking_move(items: list[str], item_id: str, to_index: int, *, rankin
             )
 
     return build_ranking_items_with_cutoff(next_real_items, next_change_count)
+
+
+async def _switch_session_phase(
+    session_id: str,
+    new_phase: str,
+    *,
+    duration_s: int | None = None,
+) -> bool:
+    previous_phase = _get_session_phase(session_id)
+    if duration_s is not None:
+        _set_session_countdown(session_id, duration_s)
+
+    async with session_locks[session_id]:
+        participant_ids = sorted(
+            {
+                *board_manager.get_participants(session_id),
+                *private_ranking_state[session_id].keys(),
+            }
+        )
+        ranking_initialization = None
+        async with SessionLocal() as db:
+            try:
+                if new_phase != previous_phase:
+                    await create_phase_boundary_ranking_snapshots(
+                        db,
+                        session_name=session_id,
+                        from_phase=previous_phase,
+                        to_phase=new_phase,
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        participant_ids=_phase_snapshot_participant_ids(participant_ids),
+                        private_ranking_states=private_ranking_state[session_id],
+                        public_ranking_state=public_ranking_state.get(session_id),
+                        ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
+                    )
+                if new_phase == "group" and previous_phase != "group":
+                    for checkpoint_participant_id in [
+                        participant_id
+                        for participant_id in participant_ids
+                        if _is_participant_ranking_subject(session_id, participant_id)
+                    ]:
+                        state = private_ranking_state[session_id].get(checkpoint_participant_id)
+                        if state is None:
+                            try:
+                                effective_state = await get_effective_ranking_state(
+                                    db,
+                                    session_name=session_id,
+                                    scope="private",
+                                    participant_id=checkpoint_participant_id,
+                                    phase="private_phase_2",
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "ranking_checkpoint_rebuild_failed session_id=%s participant_id=%s reason=%s",
+                                    session_id,
+                                    checkpoint_participant_id,
+                                    exc,
+                                )
+                                continue
+                            checkpoint_real_items = list(effective_state.get("items") or [])
+                            checkpoint_items = _build_internal_ranking_items_for_session(
+                                session_id,
+                                checkpoint_real_items,
+                                change_count=_normalize_optional_int(effective_state.get("change_count")),
+                            )
+                            checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
+                        else:
+                            checkpoint_items = list(state.get("items") or [])
+                            checkpoint_revision = _normalize_int(state.get("revision"), 0)
+                        if not checkpoint_items:
+                            continue
+                        if not _is_participant_ranking_subject(session_id, checkpoint_participant_id):
+                            continue
+                        await create_ranking_checkpoint(
+                            session_name=session_id,
+                            participant_id=checkpoint_participant_id,
+                            scope="private",
+                            phase="private_phase_2",
+                            revision=checkpoint_revision,
+                            items=checkpoint_items,
+                            db=db,
+                        )
+                ranking_initialization = await initialize_phase_rankings(
+                    db,
+                    session_name=session_id,
+                    from_phase=previous_phase,
+                    to_phase=new_phase,
+                    participant_ids=[
+                        participant_id
+                        for participant_id in participant_ids
+                        if _is_participant_ranking_subject(session_id, participant_id)
+                    ],
+                )
+            except Exception as exc:
+                await db.rollback()
+                logger.exception(
+                    "phase_snapshot_initialization_failed session_id=%s from_phase=%s to_phase=%s error=%s",
+                    session_id,
+                    previous_phase,
+                    new_phase,
+                    exc,
+                )
+                return False
+
+        if ranking_initialization is not None:
+            session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
+            if ranking_initialization.private_items_by_participant_id is not None:
+                for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
+                    private_ranking_state[session_id][participant_id] = _create_ranking_state_from_items(
+                        session_id,
+                        list(item_ids),
+                    )
+            if ranking_initialization.public_items is not None:
+                public_ranking_state[session_id] = _create_ranking_state_from_items(
+                    session_id,
+                    list(ranking_initialization.public_items),
+                )
+        elif new_phase == get_default_phase_for_session(session_name=session_id):
+            session_ranking_item_catalog.pop(session_id, None)
+
+        session_phases[session_id] = new_phase
+        session_ranking_completion[session_id].pop(previous_phase, None)
+        session_ranking_completion[session_id][new_phase].clear()
+
+    phase_changed_msg = _phase_changed_message(session_id)
+    await admin_manager.broadcast(session_id, phase_changed_msg)
+    await board_manager.broadcast(session_id, phase_changed_msg)
+    await cue_manager.broadcast(session_id, phase_changed_msg)
+    for participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            _board_state_message(session_id, participant_id),
+        )
+    await broadcast_admin_ranking_state(session_id)
+    await _broadcast_ranking_completion_state(session_id)
+    return True
+
+
+async def _handle_ranking_complete(session_id: str, participant_id: str) -> None:
+    if not _is_capstone_session(session_id):
+        return
+    if not _is_participant_ranking_subject(session_id, participant_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {"type": "ranking_error", "reason": "participant cannot complete ranking"},
+        )
+        return
+
+    should_advance = False
+    next_phase: str | None = None
+    async with session_locks[session_id]:
+        current_phase = _get_session_phase(session_id)
+        next_phase = _get_next_session_phase(session_id)
+        if next_phase is None:
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                _ranking_completion_message(session_id, participant_id),
+            )
+            return
+        session_ranking_completion[session_id][current_phase].add(participant_id)
+        completion_state = _ranking_completion_message(session_id, participant_id)
+        should_advance = (
+            completion_state["total_count"] > 0
+            and completion_state["completed_count"] >= completion_state["total_count"]
+        )
+
+    await _broadcast_ranking_completion_state(session_id)
+    if should_advance and next_phase is not None:
+        switched = await _switch_session_phase(session_id, next_phase)
+        if not switched:
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "phase_transition_error",
+                    "reason": "failed to save phase ranking snapshot",
+                    "from_phase": _get_session_phase(session_id),
+                    "to_phase": next_phase,
+                },
+            )
 
 
 async def handle_board_websocket(
@@ -1570,6 +1813,7 @@ async def handle_board_websocket(
                     _board_state_message(session_id, participant_id),
                 )
                 await broadcast_presence_state(session_id)
+                await _broadcast_ranking_completion_state(session_id)
                 continue
 
             if message_type == "ping":
@@ -1580,6 +1824,10 @@ async def handle_board_websocket(
 
             if message_type == "share_similarity_reason":
                 await _handle_similarity_reason_share(session_id, participant_id, payload)
+                continue
+
+            if message_type == "ranking_complete":
+                await _handle_ranking_complete(session_id, participant_id)
                 continue
 
             if message_type == "set_ranking_items":
@@ -1818,6 +2066,7 @@ async def handle_board_websocket(
             board_manager.get_participants(session_id),
         )
         await broadcast_presence_state(session_id)
+        await _broadcast_ranking_completion_state(session_id)
 
 
 async def handle_admin_websocket(
@@ -1896,144 +2145,30 @@ async def handle_admin_websocket(
                     _public_context_component_state_message(session_id),
                 )
             elif message_type == "switch_phase":
-                previous_phase = _get_session_phase(session_id)
                 new_phase = _normalize_session_phase(session_id, payload.get("phase"))
-                if "duration_s" in payload:
-                    _set_session_countdown(
-                        session_id, _normalize_int(payload.get("duration_s"), 0)
-                    )
-
-                async with session_locks[session_id]:
-                    participant_ids = sorted(
-                        {
-                            *board_manager.get_participants(session_id),
-                            *private_ranking_state[session_id].keys(),
-                        }
-                    )
-                    ranking_initialization = None
-                    async with SessionLocal() as db:
-                        try:
-                            if new_phase != previous_phase:
-                                await create_phase_boundary_ranking_snapshots(
-                                    db,
-                                    session_name=session_id,
-                                    from_phase=previous_phase,
-                                    to_phase=new_phase,
-                                    condition=session_cue_conditions[session_id],
-                                    cue_enabled=is_similarity_cue_enabled(session_id),
-                                    participant_ids=_phase_snapshot_participant_ids(participant_ids),
-                                    private_ranking_states=private_ranking_state[session_id],
-                                    public_ranking_state=public_ranking_state.get(session_id),
-                                    ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
-                                )
-                            if new_phase == "group" and previous_phase != "group":
-                                for checkpoint_participant_id in [
-                                    participant_id
-                                    for participant_id in participant_ids
-                                    if _is_participant_ranking_subject(session_id, participant_id)
-                                ]:
-                                    state = private_ranking_state[session_id].get(checkpoint_participant_id)
-                                    if state is None:
-                                        try:
-                                            effective_state = await get_effective_ranking_state(
-                                                db,
-                                                session_name=session_id,
-                                                scope="private",
-                                                participant_id=checkpoint_participant_id,
-                                                phase="private_phase_2",
-                                            )
-                                        except Exception as exc:
-                                            logger.warning(
-                                                "ranking_checkpoint_rebuild_failed session_id=%s participant_id=%s reason=%s",
-                                                session_id,
-                                                checkpoint_participant_id,
-                                                exc,
-                                            )
-                                            continue
-                                        checkpoint_real_items = list(effective_state.get("items") or [])
-                                        checkpoint_items = _build_internal_ranking_items_for_session(
-                                            session_id,
-                                            checkpoint_real_items,
-                                            change_count=_normalize_optional_int(effective_state.get("change_count")),
-                                        )
-                                        checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
-                                    else:
-                                        checkpoint_items = list(state.get("items") or [])
-                                        checkpoint_revision = _normalize_int(state.get("revision"), 0)
-                                    if not checkpoint_items:
-                                        continue
-                                    if not _is_participant_ranking_subject(session_id, checkpoint_participant_id):
-                                        continue
-                                    await create_ranking_checkpoint(
-                                        session_name=session_id,
-                                        participant_id=checkpoint_participant_id,
-                                        scope="private",
-                                        phase="private_phase_2",
-                                        revision=checkpoint_revision,
-                                        items=checkpoint_items,
-                                        db=db,
-                                    )
-                            ranking_initialization = await initialize_phase_rankings(
-                                db,
-                                session_name=session_id,
-                                from_phase=previous_phase,
-                                to_phase=new_phase,
-                                participant_ids=[
-                                    participant_id
-                                    for participant_id in participant_ids
-                                    if _is_participant_ranking_subject(session_id, participant_id)
-                                ],
-                            )
-                        except Exception as exc:
-                            await db.rollback()
-                            logger.exception(
-                                "phase_snapshot_initialization_failed session_id=%s from_phase=%s to_phase=%s error=%s",
-                                session_id,
-                                previous_phase,
-                                new_phase,
-                                exc,
-                            )
-                            await admin_manager.send_to(
-                                session_id,
-                                admin_id,
-                                {
-                                    "type": "phase_transition_error",
-                                    "reason": "failed to save phase ranking snapshot",
-                                    "from_phase": previous_phase,
-                                    "to_phase": new_phase,
-                                },
-                            )
-                            continue
-
-                    if ranking_initialization is not None:
-                        session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
-                        if ranking_initialization.private_items_by_participant_id is not None:
-                            for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
-                                private_ranking_state[session_id][participant_id] = _create_ranking_state_from_items(
-                                    session_id,
-                                    list(item_ids),
-                                )
-                        if ranking_initialization.public_items is not None:
-                            public_ranking_state[session_id] = _create_ranking_state_from_items(
-                                session_id,
-                                list(ranking_initialization.public_items),
-                            )
-                    elif new_phase == get_default_phase_for_session(session_name=session_id):
-                        session_ranking_item_catalog.pop(session_id, None)
-
-                    session_phases[session_id] = new_phase
-
-                phase_changed_msg = _phase_changed_message(session_id)
-                await admin_manager.broadcast(session_id, phase_changed_msg)
-                await board_manager.broadcast(session_id, phase_changed_msg)
-                await cue_manager.broadcast(session_id, phase_changed_msg)
-                for participant_id in board_manager.get_participants(session_id):
-                    await board_manager.send_to(
+                duration_s = (
+                    _normalize_int(payload.get("duration_s"), 0)
+                    if "duration_s" in payload
+                    else None
+                )
+                previous_phase = _get_session_phase(session_id)
+                switched = await _switch_session_phase(
+                    session_id,
+                    new_phase,
+                    duration_s=duration_s,
+                )
+                if not switched:
+                    await admin_manager.send_to(
                         session_id,
-                        participant_id,
-                        _board_state_message(session_id, participant_id),
+                        admin_id,
+                        {
+                            "type": "phase_transition_error",
+                            "reason": "failed to save phase ranking snapshot",
+                            "from_phase": previous_phase,
+                            "to_phase": new_phase,
+                        },
                     )
-                await broadcast_admin_ranking_state(session_id)
+                    continue
             elif message_type == "set_countdown":
                 _set_session_countdown(
                     session_id, _normalize_int(payload.get("duration_s"), 0)

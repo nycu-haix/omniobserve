@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, Upload } from "lucide-react";
+import { AlertCircle, Bell, CheckCircle2, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, Upload } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -105,6 +105,17 @@ interface RankingSnapshot {
 	revision: number;
 	items: string[];
 	change_count?: number;
+}
+
+interface RankingCompletionState {
+	type: "ranking_completion_state";
+	current_phase: string;
+	completed_participant_ids?: string[];
+	completed_count: number;
+	total_count: number;
+	is_completed: boolean;
+	has_next_phase: boolean;
+	timestamp_ms?: number;
 }
 
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
@@ -740,6 +751,29 @@ function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 	);
 }
 
+function isRankingCompletionState(value: unknown): value is RankingCompletionState {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"type" in value &&
+		value.type === "ranking_completion_state" &&
+		"current_phase" in value &&
+		typeof value.current_phase === "string" &&
+		"completed_count" in value &&
+		typeof value.completed_count === "number" &&
+		"total_count" in value &&
+		typeof value.total_count === "number" &&
+		"is_completed" in value &&
+		typeof value.is_completed === "boolean" &&
+		"has_next_phase" in value &&
+		typeof value.has_next_phase === "boolean"
+	);
+}
+
+function isRankingCompletionStateMessage(message: object | null): message is RankingCompletionState {
+	return isRankingCompletionState(message);
+}
+
 function isRankingItemsChangedMessage(message: object | null): message is {
 	type: "ranking_items_changed";
 	ranking_items: TaskConfigItem[];
@@ -755,6 +789,7 @@ function isBoardStateMessage(message: object | null): message is {
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
 	ranking_items?: TaskConfigItem[] | null;
+	ranking_completion?: RankingCompletionState | null;
 	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
@@ -1548,6 +1583,7 @@ export default function MeetingRoom() {
 	const [taskRankingLimit, setTaskRankingLimit] = useState<number | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
 	const [capstoneUploadError, setCapstoneUploadError] = useState("");
+	const [rankingCompletionState, setRankingCompletionState] = useState<RankingCompletionState | null>(null);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
@@ -1616,6 +1652,10 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const showRankingCompleteButton = taskId === CAPSTONE_TASK_ID && taskItems.length > 0 && currentPhase !== "reflect" && rankingCompletionState?.has_next_phase === true;
+	const rankingCompletionCount = rankingCompletionState?.completed_count ?? 0;
+	const rankingCompletionTotal = rankingCompletionState?.total_count ?? 0;
+	const isRankingCompleteVoted = rankingCompletionState?.is_completed ?? false;
 	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
@@ -1803,6 +1843,15 @@ export default function MeetingRoom() {
 		},
 		[applyUploadedTaskItems, sendMessage]
 	);
+
+	const handleRankingComplete = useCallback(() => {
+		if (!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0) {
+			return;
+		}
+		sendMessage({
+			type: "ranking_complete"
+		});
+	}, [isConnected, isRankingCompleteVoted, rankingCompletionTotal, sendMessage]);
 
 	useEffect(() => {
 		if (!connectionParticipantId || joinRejectedMessage || participantTranscriptionEnabled !== true) {
@@ -2104,7 +2153,20 @@ export default function MeetingRoom() {
 		if (isPhaseChangedMessage(lastMessage)) {
 			const timer = window.setTimeout(() => {
 				const nextPhase = normalizeSessionPhase(lastMessage.phase);
-				if (nextPhase) setCurrentPhase(nextPhase);
+				if (nextPhase) {
+					setCurrentPhase(nextPhase);
+					setRankingCompletionState(current =>
+						current
+							? {
+									...current,
+									current_phase: nextPhase,
+									completed_participant_ids: [],
+									completed_count: 0,
+									is_completed: false
+								}
+							: current
+					);
+				}
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -2121,6 +2183,9 @@ export default function MeetingRoom() {
 
 		if (isBoardStateMessage(lastMessage)) {
 			let phaseTimer: number | null = null;
+			if ("ranking_completion" in lastMessage) {
+				setRankingCompletionState(isRankingCompletionState(lastMessage.ranking_completion) ? lastMessage.ranking_completion : null);
+			}
 			const timerEndTimeMs = lastMessage.timer_end_time_ms;
 			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
 				phaseTimer = window.setTimeout(() => {
@@ -2176,6 +2241,11 @@ export default function MeetingRoom() {
 					window.clearTimeout(phaseTimer);
 				}
 			};
+		}
+
+		if (isRankingCompletionStateMessage(lastMessage)) {
+			setRankingCompletionState(lastMessage);
+			return;
 		}
 
 		if (isRankingItemsChangedMessage(lastMessage)) {
@@ -2502,7 +2572,26 @@ export default function MeetingRoom() {
 					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
-					<div className="absolute bottom-0 right-0 hidden xl:block">
+					<div className="absolute bottom-0 right-0 hidden items-end gap-2 xl:flex">
+						{showRankingCompleteButton && (
+							<Button
+								type="button"
+								variant={isRankingCompleteVoted ? "default" : "outline"}
+								size="sm"
+								className="h-8 min-w-24 flex-col gap-0 px-2.5 py-1 leading-none"
+								aria-pressed={isRankingCompleteVoted}
+								disabled={!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0}
+								onClick={handleRankingComplete}
+							>
+								<span className="flex items-center gap-1 text-xs">
+									{isRankingCompleteVoted && <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+									已完成排序
+								</span>
+								<span className="text-[10px] font-medium opacity-80">
+									{rankingCompletionCount}/{rankingCompletionTotal}
+								</span>
+							</Button>
+						)}
 						<Button
 							type="button"
 							variant="ghost"
