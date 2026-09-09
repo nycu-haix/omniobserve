@@ -21,7 +21,7 @@ const fallbackTaskTemplates: TaskTemplate[] = [
 		task_id: "multimedia-hci-capstone",
 		title: "Multimedia and Human Computer Interaction Capstone",
 		session_prefix: "multimedia-hci-capstone",
-		description: "海報改善面向排序任務。",
+		description: "期末專題題目討論。",
 		is_default: false
 	}
 ];

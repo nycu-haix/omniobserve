@@ -187,3 +187,12 @@ class TaskTemplateResponse(BaseModel):
     phases: list[TaskPhaseResponse] = Field(default_factory=list)
     description: str
     is_default: bool
+
+
+class SpreadsheetTaskItemsParseRequest(BaseModel):
+    filename: str
+    content_base64: str
+
+
+class SpreadsheetTaskItemsParseResponse(BaseModel):
+    items: list[TaskConfigItemResponse]

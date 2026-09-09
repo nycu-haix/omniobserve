@@ -19,6 +19,8 @@ from ..schemas import (
     IdeaBlockUpdateResponse,
     ParticipantRoleResponse,
     ParticipantRoleUpdateRequest,
+    SpreadsheetTaskItemsParseRequest,
+    SpreadsheetTaskItemsParseResponse,
     TaskConfigResponse,
     TaskTemplateResponse,
     TopicDescriptionResponse,
@@ -32,6 +34,7 @@ from ..services.idea_blocks import generate_and_save_idea_blocks, update_idea_bl
 from ..services.participant_roles import list_session_participant_roles, set_session_participant_role
 from ..services.participant_status import get_participant_presence, sync_participant_roles, update_participant_role
 from ..services.realtime import board_manager, broadcast_admin_ranking_state, broadcast_presence_state, presence_manager
+from ..services.spreadsheet_task_items import parse_spreadsheet_task_items
 from ..services.transcript_pipeline import generate_idea_blocks_with_task_items_from_text
 from ..utils import to_iso_z
 
@@ -80,6 +83,23 @@ async def get_task_config(
     task_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     return serialize_task_config(session_name=session_name, task_id=task_id)
+
+
+@router.post(
+    "/api/task-items/parse-spreadsheet",
+    response_model=SpreadsheetTaskItemsParseResponse,
+    responses=COMMON_ERROR_RESPONSES,
+    summary="Parse Spreadsheet Task Items",
+    description="Parses an uploaded CSV, TSV, or XLSX file into ranking task items.",
+)
+async def parse_spreadsheet_task_items_endpoint(payload: SpreadsheetTaskItemsParseRequest) -> dict[str, Any]:
+    try:
+        items = parse_spreadsheet_task_items(payload.filename, payload.content_base64)
+    except Exception as exc:
+        raise ApiError(400, "INVALID_SPREADSHEET", "Could not parse spreadsheet task items") from exc
+    if not items:
+        raise ApiError(400, "INVALID_SPREADSHEET", "No task items found in spreadsheet")
+    return {"items": items}
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:

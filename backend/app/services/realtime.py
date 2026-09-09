@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -1257,6 +1258,76 @@ def _get_current_ranking_item_catalog(session_id: str) -> list[dict[str, Any]] |
     return [dict(item) for item in catalog] if catalog else None
 
 
+def _normalize_uploaded_ranking_item_catalog(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    normalized_items: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw_item in enumerate(items[:200], start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        label = str(raw_item.get("label") or raw_item.get("label_zh") or raw_item.get("label_en") or "").strip()
+        item_id = str(raw_item.get("id") or "").strip()
+        if not label and item_id:
+            label = item_id
+        if not label:
+            continue
+        if not item_id:
+            item_id = f"capstone_item_{index}"
+        item_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", item_id).strip("_").lower() or f"capstone_item_{index}"
+        base_item_id = item_id
+        suffix = 2
+        while item_id in seen_ids:
+            item_id = f"{base_item_id}_{suffix}"
+            suffix += 1
+        seen_ids.add(item_id)
+        description = str(raw_item.get("description_zh") or raw_item.get("description") or "").strip()
+        normalized_items.append(
+            {
+                "id": item_id,
+                "label": label,
+                "label_zh": label,
+                "label_en": str(raw_item.get("label_en") or label).strip() or label,
+                "description_zh": description,
+                "aliases": [],
+                "image_title": str(raw_item.get("image_title") or label).strip() or label,
+                "image_bg": str(raw_item.get("image_bg") or "#f8fafc").strip() or "#f8fafc",
+                "image_fg": str(raw_item.get("image_fg") or "#334155").strip() or "#334155",
+                "image_mark": str(raw_item.get("image_mark") or f"{index}").strip() or f"{index}",
+            }
+        )
+    return normalized_items
+
+
+async def _broadcast_ranking_items_changed(session_id: str, participant_id: str, ranking_items: list[dict[str, Any]]) -> None:
+    default_items = [str(item["id"]) for item in ranking_items if item.get("id")]
+    session_ranking_item_catalog[session_id] = ranking_items
+    public_ranking_state[session_id] = _create_ranking_state_from_items(session_id, default_items)
+    for current_participant_id in board_manager.get_participants(session_id):
+        private_ranking_state[session_id][current_participant_id] = _create_ranking_state_from_items(session_id, default_items)
+    await board_manager.broadcast(
+        session_id,
+        {
+            "type": "ranking_items_changed",
+            "updatedBy": participant_id,
+            "ranking_items": _get_current_ranking_item_catalog(session_id),
+            "public_ranking": _ranking_payload(session_id, public_ranking_state[session_id]),
+        },
+    )
+    for current_participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            current_participant_id,
+            {
+                "type": "ranking_state",
+                "scope": "private",
+                "updatedBy": participant_id,
+                **_ranking_payload(session_id, private_ranking_state[session_id][current_participant_id]),
+            },
+        )
+    await broadcast_admin_ranking_state(session_id)
+
+
 def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
     default_ranking_items = _get_current_ranking_items(session_id)
     default_ranking_item_set = set(default_ranking_items)
@@ -1509,6 +1580,19 @@ async def handle_board_websocket(
 
             if message_type == "share_similarity_reason":
                 await _handle_similarity_reason_share(session_id, participant_id, payload)
+                continue
+
+            if message_type == "set_ranking_items":
+                ranking_items = _normalize_uploaded_ranking_item_catalog(payload.get("items"))
+                if not ranking_items:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "ranking_error", "reason": "ranking items cannot be empty"},
+                    )
+                    continue
+                async with session_locks[session_id]:
+                    await _broadcast_ranking_items_changed(session_id, participant_id, ranking_items)
                 continue
 
             if message_type == "similarity_cue_response":

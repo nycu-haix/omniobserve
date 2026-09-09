@@ -37,15 +37,17 @@ class EnhancePosterTaskConfigTests(unittest.TestCase):
         self.assertNotIn("enhance-the-poster", template_ids)
         self.assertEqual(resolve_task_id(task_id="enhance-the-poster"), "enhance-the-poster")
 
-    def test_capstone_preserves_poster_builder_settings(self) -> None:
+    def test_capstone_uses_lost_at_sea_ranking_layout_with_uploaded_items(self) -> None:
         capstone_payload = serialize_task_config(task_id="multimedia-hci-capstone")
-        poster_payload = serialize_task_config(task_id="enhance-the-poster")
+        lost_at_sea_payload = serialize_task_config(task_id="lost-at-sea")
 
         self.assertEqual(capstone_payload["task_id"], "multimedia-hci-capstone")
         self.assertEqual(capstone_payload["title"], "Multimedia and Human Computer Interaction Capstone")
-        self.assertEqual(capstone_payload["phase1_builder"], poster_payload["phase1_builder"])
-        self.assertEqual(capstone_payload["ranking_limit"], poster_payload["ranking_limit"])
-        self.assertEqual(capstone_payload["reference_image_src"], poster_payload["reference_image_src"])
+        self.assertEqual(capstone_payload["phases"], lost_at_sea_payload["phases"])
+        self.assertEqual(capstone_payload["items"], [])
+        self.assertNotIn("phase1_builder", capstone_payload)
+        self.assertNotIn("ranking_limit", capstone_payload)
+        self.assertNotIn("reference_image_src", capstone_payload)
 
     def test_custom_detail_statement_omits_action_words(self) -> None:
         component = {"label_zh": "Component"}

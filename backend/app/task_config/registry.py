@@ -85,7 +85,7 @@ def normalize_task_name(task_name: str | None) -> str:
 
 def get_task_prompt_config(task_name: str | None) -> TaskPromptConfig:
     normalized_task_name = normalize_task_name(task_name)
-    if normalized_task_name in {enhance_the_poster.TASK_ID, multimedia_hci_capstone.TASK_ID}:
+    if normalized_task_name == enhance_the_poster.TASK_ID:
         return _poster_prompt_config(normalized_task_name)
     return _lost_at_sea_prompt_config()
 
