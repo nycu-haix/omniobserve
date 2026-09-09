@@ -6,6 +6,10 @@ COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 
 COPY . .
+ARG VITE_API_BASE_URL
+ARG VITE_WS_BASE_URL
+ARG VITE_AUDIO_WS_BASE_URL
+ARG VITE_JITSI_BASE_URL
 RUN pnpm build
 
 

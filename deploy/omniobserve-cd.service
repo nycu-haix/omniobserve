@@ -1,0 +1,22 @@
+[Unit]
+Description=OmniObserve branch continuous deployment
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/omniobserve-cd
+ExecStart=/usr/bin/python3 /home/ubuntu/omniobserve-cd/cd-poller.py --config /home/ubuntu/omniobserve-cd/config.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/omniobserve-cd
+
+[Install]
+WantedBy=multi-user.target
