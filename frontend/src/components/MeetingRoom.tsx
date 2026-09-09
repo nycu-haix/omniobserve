@@ -1172,6 +1172,7 @@ function TaskWorkspace({
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
 	const isCapstoneTask = taskId === CAPSTONE_TASK_ID;
 	const isCapstoneItemListLoaded = isCapstoneTask && capstoneItemCount > 0;
+	const isCapstoneUploadAvailable = isCapstoneTask && (currentPhase === "private" || isPrivatePhase1(currentPhase) || isPrivatePhase2(currentPhase));
 	const taskReferencePanelId = "task-reference-panel";
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
 	const [isTaskReferenceOpen, setIsTaskReferenceOpen] = useState(false);
@@ -1292,12 +1293,12 @@ function TaskWorkspace({
 							{isTaskReferenceOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
 						</Button>
 					)}
-					{isCapstoneItemListLoaded && <CapstoneUploadButton onUpload={onCapstoneItemUpload} />}
+					{isCapstoneItemListLoaded && isCapstoneUploadAvailable && <CapstoneUploadButton onUpload={onCapstoneItemUpload} />}
 					{compactPhaseTimer}
 				</div>
 			</header>
 			{phase1BuilderEnabled && phase1Builder && isTaskReferenceOpen && <TaskReferencePanel id={taskReferencePanelId} builder={phase1Builder} />}
-			{isCapstoneTask && !isCapstoneItemListLoaded && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
+			{isCapstoneUploadAvailable && !isCapstoneItemListLoaded && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
 			<div className="min-h-0 overflow-hidden">
 				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>
