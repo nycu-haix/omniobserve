@@ -21,14 +21,14 @@ GPU ASR and Jitsi are not part of this CPU Compose file.
 
 ## Environments
 
-| Branch | Site | Dokploy |
-| --- | --- | --- |
-| sky | https://sky.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/qA8mx7xjiAv3Ti1Qc8SFb/services/compose/5IHPHhil26L4hiXNrCAaw?tab=deployments) |
-| main | https://omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/waDEpmtDbwTvSUTYGZSHY/services/compose/XEaczm-V5IwvpnEPa1VZ1?tab=deployments) |
-| ej | https://ej.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/fh12whx2Ap4VWOJc-kx7E/services/compose/DBVEbmg3tC4HIKBO2_iVh?tab=deployments) |
-| ethel | https://ethel.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/Yt5l_znYlq4QQoxOHI5DB/services/compose/vQd0bkC8v25N2j2wVi3QE?tab=deployments) |
-| jason | https://jason.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/3a5DwBCjH3KxBGprjlmqH/services/compose/Q-sYCuFfUZB-FO0cIITvB?tab=deployments) |
-| em-prompt | https://em.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/6LXUM3fGRhsRUO0Mw8Mvm/services/compose/W7GffAxu3Gz8Aw08tA_LC?tab=deployments) |
+| Branch    | Site                          | Dokploy                                                                                                                                                                    |
+| --------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sky       | https://sky.omni.observe.tw   | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/qA8mx7xjiAv3Ti1Qc8SFb/services/compose/5IHPHhil26L4hiXNrCAaw?tab=deployments) |
+| main      | https://omni.observe.tw       | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/waDEpmtDbwTvSUTYGZSHY/services/compose/XEaczm-V5IwvpnEPa1VZ1?tab=deployments) |
+| ej        | https://ej.omni.observe.tw    | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/fh12whx2Ap4VWOJc-kx7E/services/compose/DBVEbmg3tC4HIKBO2_iVh?tab=deployments) |
+| ethel     | https://ethel.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/Yt5l_znYlq4QQoxOHI5DB/services/compose/vQd0bkC8v25N2j2wVi3QE?tab=deployments) |
+| jason     | https://jason.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/3a5DwBCjH3KxBGprjlmqH/services/compose/Q-sYCuFfUZB-FO0cIITvB?tab=deployments) |
+| em-prompt | https://em.omni.observe.tw    | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/6LXUM3fGRhsRUO0Mw8Mvm/services/compose/W7GffAxu3Gz8Aw08tA_LC?tab=deployments) |
 
 ## CD service
 
