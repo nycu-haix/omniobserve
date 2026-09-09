@@ -1084,6 +1084,27 @@ function TaskReferencePanel({ id, builder }: { id: string; builder: Phase1Builde
 	);
 }
 
+function CapstoneUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
+	return (
+		<label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
+			<Upload className="h-3.5 w-3.5" aria-hidden="true" />
+			<span>Upload Excel</span>
+			<input
+				type="file"
+				accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values"
+				className="sr-only"
+				onChange={event => {
+					const file = event.target.files?.[0];
+					event.target.value = "";
+					if (file) {
+						onUpload(file);
+					}
+				}}
+			/>
+		</label>
+	);
+}
+
 function CapstoneTaskItemUploadPanel({
 	itemCount,
 	uploadError,
@@ -1100,22 +1121,7 @@ function CapstoneTaskItemUploadPanel({
 					<div className="text-xs font-semibold text-muted-foreground">Item List</div>
 					<div className="text-sm text-foreground">{itemCount > 0 ? `${itemCount} items loaded` : "Upload an XLSX, CSV, or TSV before ranking."}</div>
 				</div>
-				<label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
-					<Upload className="h-3.5 w-3.5" aria-hidden="true" />
-						<span>Upload Excel</span>
-						<input
-							type="file"
-							accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values"
-						className="sr-only"
-						onChange={event => {
-							const file = event.target.files?.[0];
-							event.target.value = "";
-							if (file) {
-								onUpload(file);
-							}
-						}}
-					/>
-				</label>
+				<CapstoneUploadButton onUpload={onUpload} />
 			</div>
 			<p className="text-xs leading-5 text-muted-foreground">Use topic and discription. The first row is treated as headers; two-row topic/discription sheets are also supported.</p>
 			{uploadError && (
@@ -1165,6 +1171,7 @@ function TaskWorkspace({
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
 	const isCapstoneTask = taskId === CAPSTONE_TASK_ID;
+	const isCapstoneItemListLoaded = isCapstoneTask && capstoneItemCount > 0;
 	const taskReferencePanelId = "task-reference-panel";
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
 	const [isTaskReferenceOpen, setIsTaskReferenceOpen] = useState(false);
@@ -1172,7 +1179,10 @@ function TaskWorkspace({
 	const normalizedReferenceImageSrc = referenceImageSrc || "";
 	const referenceImageRetryToken = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.retryToken : 0;
 	const isReferenceImageFailed = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.failed : false;
-	const visibleLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
+	const visibleLayout = useMemo(
+		() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, isCapstoneItemListLoaded ? undefined : phaseLayoutConfig),
+		[currentPhase, isCapstoneItemListLoaded, phase1BuilderEnabled, phaseLayoutConfig]
+	);
 	const referenceImageDisplaySrc = useMemo(() => buildTaskReferenceImageSrc(normalizedReferenceImageSrc, referenceImageRetryToken), [normalizedReferenceImageSrc, referenceImageRetryToken]);
 
 	useEffect(() => {
@@ -1256,7 +1266,7 @@ function TaskWorkspace({
 		<section
 			className={cn(
 				"grid min-h-0 gap-3 overflow-hidden rounded-lg border p-3",
-				(isTaskReferenceOpen && phase1BuilderEnabled) || isCapstoneTask ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]"
+				(isTaskReferenceOpen && phase1BuilderEnabled) || (isCapstoneTask && !isCapstoneItemListLoaded) ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]"
 			)}
 			aria-label="Task workspace"
 		>
@@ -1282,11 +1292,12 @@ function TaskWorkspace({
 							{isTaskReferenceOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
 						</Button>
 					)}
+					{isCapstoneItemListLoaded && <CapstoneUploadButton onUpload={onCapstoneItemUpload} />}
 					{compactPhaseTimer}
 				</div>
 			</header>
 			{phase1BuilderEnabled && phase1Builder && isTaskReferenceOpen && <TaskReferencePanel id={taskReferencePanelId} builder={phase1Builder} />}
-			{isCapstoneTask && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
+			{isCapstoneTask && !isCapstoneItemListLoaded && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
 			<div className="min-h-0 overflow-hidden">
 				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>
