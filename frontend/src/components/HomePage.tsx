@@ -206,7 +206,7 @@ export function HomePage() {
 											onClick={() => selectTemplate(template.task_id)}
 										>
 											<span className="flex items-center justify-between gap-2">
-												<span className="min-w-0 truncate text-sm font-semibold">{template.title}</span>
+												<span className="min-w-0 break-words text-sm font-semibold leading-snug">{template.title}</span>
 												{isSelected && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
 											</span>
 											<span className="break-all font-mono text-xs text-muted-foreground">{template.session_prefix}</span>

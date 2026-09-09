@@ -28,9 +28,8 @@ def rows_to_task_items(rows: list[list[str]]) -> list[dict[str, Any]]:
     if not rows:
         return []
     first_row = [cell.strip().lower() for cell in rows[0]]
-    has_header = any(cell in HEADER_KEYS for cell in first_row)
-    headers = first_row if has_header else []
-    data_rows = rows[1:] if has_header else rows
+    headers = first_row if any(cell in HEADER_KEYS for cell in first_row) else []
+    data_rows = rows[1:]
     id_column = _find_column(headers, "id")
     label_column = _find_column(headers, "item", "title", "name", "label", "label_zh", "label_en")
     description_column = _find_column(headers, "description", "description_zh")

@@ -206,9 +206,8 @@ function parseDelimitedTaskItems(text: string): TaskConfigItem[] {
 	const rows = lines.map(line => splitDelimitedLine(line, delimiter));
 	const firstRow = rows[0].map(cell => cell.trim().toLowerCase());
 	const headerKeys = new Set(["id", "item", "title", "name", "label", "label_zh", "label_en", "description", "description_zh"]);
-	const hasHeader = firstRow.some(cell => headerKeys.has(cell));
-	const headers = hasHeader ? firstRow : [];
-	const dataRows = hasHeader ? rows.slice(1) : rows;
+	const headers = firstRow.some(cell => headerKeys.has(cell)) ? firstRow : [];
+	const dataRows = rows.slice(1);
 	const findColumn = (...keys: string[]) => headers.findIndex(header => keys.includes(header));
 	const idColumn = findColumn("id");
 	const labelColumn = findColumn("item", "title", "name", "label", "label_zh", "label_en");
