@@ -27,6 +27,10 @@ class PollerTests(unittest.TestCase):
         state={'sky':{'deployed':'old','pending':{'sha':'new','title':'CD sky new','queued_at':m.time.time(),'attempts':1}}};self.run_tick(state);self.assertEqual(self.calls,[])
     def test_completed_job_is_recorded_after_health(self):
         state={'sky':{'deployed':'old','pending':{'sha':'new','title':'CD sky new','queued_at':m.time.time(),'attempts':1}}};self.info['deployments']=[{'title':'CD sky new','status':'done'}];self.run_tick(state);self.assertEqual(state['sky']['deployed'],'new');self.assertNotIn('pending',state['sky']);self.assertEqual(self.calls,[])
+    def test_native_git_commit_metadata_is_recognized(self):
+        state={'sky':{'deployed':'old','pending':{'sha':'new','title':'CD sky new','queued_at':m.time.time(),'attempts':1}}}
+        self.info['deployments']=[{'title':'Git commit message replaces job title','description':'Commit: new','status':'done'}]
+        self.run_tick(state);self.assertEqual(state['sky']['deployed'],'new');self.assertNotIn('pending',state['sky'])
     def test_failed_commit_stops_after_three_attempts(self):
         state={'sky':{'deployed':'old','failure':{'sha':'new','at':0,'attempts':3}}};self.run_tick(state);self.assertEqual(self.calls,[])
     def test_new_commit_can_recover_after_previous_failure(self):
