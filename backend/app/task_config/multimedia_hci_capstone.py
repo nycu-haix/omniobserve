@@ -5,7 +5,7 @@ from . import lost_at_sea
 
 TASK_ID = "multimedia-hci-capstone"
 TASK_TITLE = "Multimedia and Human Computer Interaction Capstone"
-TEMPLATE_DESCRIPTION = "期末專題題目討論"
+TEMPLATE_DESCRIPTION = "期末專題題目討論。"
 
 TOPIC_DESCRIPTION = (
     "Participants discuss and rank a custom item list for the Multimedia and Human Computer Interaction Capstone. "
