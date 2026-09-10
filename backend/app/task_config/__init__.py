@@ -1,9 +1,10 @@
 from typing import Any
 
-from . import enhance_the_poster, lost_at_sea
+from . import enhance_the_poster, lost_at_sea, multimedia_hci_capstone
 
 DEFAULT_TASK_ID = lost_at_sea.TASK_ID
-TASK_MODULES = (lost_at_sea, enhance_the_poster)
+TASK_MODULES = (lost_at_sea, enhance_the_poster, multimedia_hci_capstone)
+TASK_TEMPLATE_MODULES = (lost_at_sea, multimedia_hci_capstone)
 TASK_CONFIGS = {module.TASK_ID: module.TASK_CONFIG for module in TASK_MODULES}
 DEFAULT_TASK_PHASES = lost_at_sea.TASK_PHASES
 
@@ -167,7 +168,7 @@ def serialize_task_templates() -> list[dict[str, Any]]:
             "description": module.TASK_CONFIG.get("template_description") or module.TASK_TOPIC_DETAIL,
             "is_default": module.TASK_ID == DEFAULT_TASK_ID,
         }
-        for module in TASK_MODULES
+        for module in TASK_TEMPLATE_MODULES
     ]
 
 __all__ = [
@@ -181,6 +182,7 @@ __all__ = [
     "TASK_CONFIGS",
     "TASK_ID",
     "TASK_MODULES",
+    "TASK_TEMPLATE_MODULES",
     "TASK_TITLE",
     "TASK_TOPIC_DETAIL",
     "TOPIC_DESCRIPTION",

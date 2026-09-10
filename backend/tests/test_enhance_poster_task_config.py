@@ -20,7 +20,7 @@ from app.task_config.enhance_the_poster import (
     TASK_TOPIC_DETAIL,
     TOPIC_DESCRIPTION,
 )
-from app.task_config import serialize_task_config
+from app.task_config import resolve_task_id, serialize_task_config, serialize_task_templates
 
 
 def _option_by_id(options, option_id: str):
@@ -28,6 +28,27 @@ def _option_by_id(options, option_id: str):
 
 
 class EnhancePosterTaskConfigTests(unittest.TestCase):
+    def test_capstone_template_replaces_enhance_poster_in_new_meeting_options(self) -> None:
+        templates = serialize_task_templates()
+        template_ids = [template["task_id"] for template in templates]
+
+        self.assertIn("lost-at-sea", template_ids)
+        self.assertIn("multimedia-hci-capstone", template_ids)
+        self.assertNotIn("enhance-the-poster", template_ids)
+        self.assertEqual(resolve_task_id(task_id="enhance-the-poster"), "enhance-the-poster")
+
+    def test_capstone_uses_lost_at_sea_ranking_layout_with_uploaded_items(self) -> None:
+        capstone_payload = serialize_task_config(task_id="multimedia-hci-capstone")
+        lost_at_sea_payload = serialize_task_config(task_id="lost-at-sea")
+
+        self.assertEqual(capstone_payload["task_id"], "multimedia-hci-capstone")
+        self.assertEqual(capstone_payload["title"], "Multimedia and Human Computer Interaction Capstone")
+        self.assertEqual(capstone_payload["phases"], lost_at_sea_payload["phases"])
+        self.assertEqual(capstone_payload["items"], [])
+        self.assertNotIn("phase1_builder", capstone_payload)
+        self.assertNotIn("ranking_limit", capstone_payload)
+        self.assertNotIn("reference_image_src", capstone_payload)
+
     def test_custom_detail_statement_omits_action_words(self) -> None:
         component = {"label_zh": "Component"}
         action = _option_by_id(PHASE1_ACTION_ITEMS, CUSTOM_DETAIL_ACTION_ID)

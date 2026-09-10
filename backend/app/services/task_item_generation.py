@@ -334,7 +334,7 @@ async def replace_poster_component_mappings_for_idea_block(
 ) -> list[PosterIdeaBlockTaskItem]:
     resolved_task_name = _resolve_task_name(session_name, task_name)
     task_config = get_task_config_for_session(session_name=session_name, task_id=resolved_task_name)
-    if task_config.get("task_id") != "enhance-the-poster":
+    if not task_config.get("phase1_builder"):
         return []
 
     mappings = await build_poster_component_action_mappings_with_llm(text, session_name=session_name, task_name=resolved_task_name)

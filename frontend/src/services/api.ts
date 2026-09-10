@@ -165,6 +165,18 @@ export async function fetchTaskConfig(options: FetchTaskConfigOptions = {}) {
 	return (await response.json()) as TaskConfig;
 }
 
+export async function parseSpreadsheetTaskItems(filename: string, contentBase64: string) {
+	const response = await fetch(apiUrl("/api/task-items/parse-spreadsheet"), {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ filename, content_base64: contentBase64 })
+	});
+	if (!response.ok) {
+		throw new Error(await getResponseErrorMessage(response, "Failed to parse spreadsheet task items"));
+	}
+	return (await response.json()) as { items: TaskConfigItem[] };
+}
+
 export async function fetchPrivatePhaseTaskItems(options: { sessionName: string; userId: string | number; signal?: AbortSignal }) {
 	const response = await fetch(apiUrl(privatePhaseTaskItemsPath(options.sessionName, options.userId)), { signal: options.signal });
 	if (!response.ok) {

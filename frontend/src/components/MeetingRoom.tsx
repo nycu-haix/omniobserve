@@ -2,7 +2,7 @@ import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, Bell, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio } from "lucide-react";
+import { AlertCircle, Bell, CheckCircle2, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, Upload } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
@@ -43,7 +43,7 @@ import {
 } from "../lib/taskPaneSplit";
 import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
-import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
+import { fetchTaskConfig, parseSpreadsheetTaskItems, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
@@ -107,6 +107,17 @@ interface RankingSnapshot {
 	change_count?: number;
 }
 
+interface RankingCompletionState {
+	type: "ranking_completion_state";
+	current_phase: string;
+	completed_participant_ids?: string[];
+	completed_count: number;
+	total_count: number;
+	is_completed: boolean;
+	has_next_phase: boolean;
+	timestamp_ms?: number;
+}
+
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
@@ -126,6 +137,9 @@ const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
 const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
+const CAPSTONE_TASK_ID = "multimedia-hci-capstone";
+const CAPSTONE_TASK_TITLE = "Multimedia and Human Computer Interaction Capstone";
+const CAPSTONE_TASK_DETAIL = "Upload an XLSX/CSV/TSV item list with topic and discription columns, then rank the uploaded topics by importance. Two-row topic/discription sheets are also supported.";
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
 	"phase-task-items": "Task Items",
@@ -152,6 +166,153 @@ const ITEM_DESCRIPTIONS: Record<string, string> = {
 
 function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
+}
+
+function slugifyTaskItemId(value: string, fallback: string) {
+	const slug = value
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return slug || fallback;
+}
+
+function splitDelimitedLine(line: string, delimiter: string) {
+	const cells: string[] = [];
+	let current = "";
+	let quoted = false;
+	for (let index = 0; index < line.length; index += 1) {
+		const character = line[index];
+		const nextCharacter = line[index + 1];
+		if (character === "\"" && quoted && nextCharacter === "\"") {
+			current += "\"";
+			index += 1;
+			continue;
+		}
+		if (character === "\"") {
+			quoted = !quoted;
+			continue;
+		}
+		if (character === delimiter && !quoted) {
+			cells.push(current.trim());
+			current = "";
+			continue;
+		}
+		current += character;
+	}
+	cells.push(current.trim());
+	return cells;
+}
+
+function parseDelimitedTaskItems(text: string): TaskConfigItem[] {
+	const lines = text
+		.replace(/^\uFEFF/, "")
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(Boolean);
+	if (lines.length === 0) {
+		return [];
+	}
+	const delimiter = lines.some(line => line.includes("\t")) ? "\t" : ",";
+	const rows = lines.map(line => splitDelimitedLine(line, delimiter));
+	const transposedItems = parseTransposedTopicItems(rows);
+	if (transposedItems.length > 0) {
+		return transposedItems;
+	}
+	const firstRow = rows[0].map(cell => cell.trim().toLowerCase());
+	const headerKeys = new Set(["id", "topic", "item", "title", "name", "label", "label_zh", "label_en", "discription", "description", "description_zh"]);
+	const headers = firstRow.some(cell => headerKeys.has(cell)) ? firstRow : [];
+	const dataRows = rows.slice(1);
+	const findColumn = (...keys: string[]) => headers.findIndex(header => keys.includes(header));
+	const idColumn = findColumn("id");
+	const labelColumn = findColumn("topic", "item", "title", "name", "label", "label_zh", "label_en");
+	const descriptionColumn = findColumn("discription", "description", "description_zh");
+	const seenIds = new Set<string>();
+
+	return dataRows.flatMap((row, index) => {
+		const rawLabel = (labelColumn >= 0 ? row[labelColumn] : row[0])?.trim() || "";
+		if (!rawLabel) {
+			return [];
+		}
+		const rawId = (idColumn >= 0 ? row[idColumn] : "")?.trim() || rawLabel;
+		const baseId = slugifyTaskItemId(rawId, `capstone_item_${index + 1}`);
+		let id = baseId;
+		let suffix = 2;
+		while (seenIds.has(id)) {
+			id = `${baseId}_${suffix}`;
+			suffix += 1;
+		}
+		seenIds.add(id);
+		const description = (descriptionColumn >= 0 ? row[descriptionColumn] : row[1])?.trim() || "";
+		return [
+			{
+				id,
+				label: rawLabel,
+				label_zh: rawLabel,
+				label_en: rawLabel,
+				description_zh: description,
+				aliases: [],
+				image_title: rawLabel,
+				image_bg: "#f8fafc",
+				image_fg: "#334155",
+				image_mark: String(index + 1)
+			}
+		];
+	});
+}
+
+function parseTransposedTopicItems(rows: string[][]): TaskConfigItem[] {
+	if (rows.length < 2 || rows[0][0]?.trim().toLowerCase() !== "topic") {
+		return [];
+	}
+	const descriptionHeader = rows[1][0]?.trim().toLowerCase();
+	if (!["discription", "description", "description_zh"].includes(descriptionHeader || "")) {
+		return [];
+	}
+	const seenIds = new Set<string>();
+	const items: TaskConfigItem[] = [];
+	const columnCount = Math.max(rows[0].length, rows[1].length);
+	for (let columnIndex = 1; columnIndex < columnCount; columnIndex += 1) {
+		const label = rows[0][columnIndex]?.trim() || "";
+		if (!label) {
+			continue;
+		}
+		const baseId = slugifyTaskItemId(label, `capstone_item_${columnIndex}`);
+		let id = baseId;
+		let suffix = 2;
+		while (seenIds.has(id)) {
+			id = `${baseId}_${suffix}`;
+			suffix += 1;
+		}
+		seenIds.add(id);
+		items.push({
+			id,
+			label,
+			label_zh: label,
+			label_en: label,
+			description_zh: rows[1][columnIndex]?.trim() || "",
+			aliases: [],
+			image_title: label,
+			image_bg: "#f8fafc",
+			image_fg: "#334155",
+			image_mark: String(items.length + 1)
+		});
+	}
+	return items;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+	let binary = "";
+	const bytes = new Uint8Array(buffer);
+	bytes.forEach(byte => {
+		binary += String.fromCharCode(byte);
+	});
+	return window.btoa(binary);
+}
+
+function isCapstoneSessionName(sessionName: string) {
+	const normalizedSessionName = sessionName.trim().toLowerCase();
+	return normalizedSessionName === CAPSTONE_TASK_ID || normalizedSessionName.startsWith(`${CAPSTONE_TASK_ID}-`);
 }
 
 function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem {
@@ -590,6 +751,37 @@ function isRankingSnapshot(value: unknown): value is RankingSnapshot {
 	);
 }
 
+function isRankingCompletionState(value: unknown): value is RankingCompletionState {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"type" in value &&
+		value.type === "ranking_completion_state" &&
+		"current_phase" in value &&
+		typeof value.current_phase === "string" &&
+		"completed_count" in value &&
+		typeof value.completed_count === "number" &&
+		"total_count" in value &&
+		typeof value.total_count === "number" &&
+		"is_completed" in value &&
+		typeof value.is_completed === "boolean" &&
+		"has_next_phase" in value &&
+		typeof value.has_next_phase === "boolean"
+	);
+}
+
+function isRankingCompletionStateMessage(message: object | null): message is RankingCompletionState {
+	return isRankingCompletionState(message);
+}
+
+function isRankingItemsChangedMessage(message: object | null): message is {
+	type: "ranking_items_changed";
+	ranking_items: TaskConfigItem[];
+	public_ranking?: RankingSnapshot;
+} {
+	return !!message && "type" in message && message.type === "ranking_items_changed" && "ranking_items" in message && isTaskConfigItemList(message.ranking_items);
+}
+
 function isBoardStateMessage(message: object | null): message is {
 	type: "board_state";
 	revision: number;
@@ -597,6 +789,7 @@ function isBoardStateMessage(message: object | null): message is {
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
 	ranking_items?: TaskConfigItem[] | null;
+	ranking_completion?: RankingCompletionState | null;
 	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
@@ -848,6 +1041,11 @@ function LostAtSeaRankingPanel({
 					))}
 				</div>
 			)}
+			{items.length === 0 && (
+				<div className="grid min-h-32 place-items-center rounded-md border border-dashed bg-muted/30 p-4 text-center text-sm leading-6 text-muted-foreground">
+					Upload an item list to start ranking.
+				</div>
+			)}
 			{items.map((item, index) => (
 				<Fragment key={item.id}>
 					{!readOnly && rankingLimit !== undefined && changeCount !== undefined && index === changeCount && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
@@ -921,6 +1119,56 @@ function TaskReferencePanel({ id, builder }: { id: string; builder: Phase1Builde
 	);
 }
 
+function CapstoneUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
+	return (
+		<label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
+			<Upload className="h-3.5 w-3.5" aria-hidden="true" />
+			<span>Upload Excel</span>
+			<input
+				type="file"
+				accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values"
+				className="sr-only"
+				onChange={event => {
+					const file = event.target.files?.[0];
+					event.target.value = "";
+					if (file) {
+						onUpload(file);
+					}
+				}}
+			/>
+		</label>
+	);
+}
+
+function CapstoneTaskItemUploadPanel({
+	itemCount,
+	uploadError,
+	onUpload
+}: {
+	itemCount: number;
+	uploadError: string;
+	onUpload: (file: File) => void;
+}) {
+	return (
+		<section className="grid gap-2 rounded-md border bg-muted/35 p-3" aria-label="Capstone item upload">
+			<div className="flex flex-wrap items-center justify-between gap-2">
+				<div className="grid min-w-0 gap-1">
+					<div className="text-xs font-semibold text-muted-foreground">Item List</div>
+					<div className="text-sm text-foreground">{itemCount > 0 ? `${itemCount} items loaded` : "Upload an XLSX, CSV, or TSV before ranking."}</div>
+				</div>
+				<CapstoneUploadButton onUpload={onUpload} />
+			</div>
+			<p className="text-xs leading-5 text-muted-foreground">Use topic and discription. The first row is treated as headers; two-row topic/discription sheets are also supported.</p>
+			{uploadError && (
+				<div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-background px-2.5 py-2 text-xs text-destructive" role="alert">
+					<AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+					<span>{uploadError}</span>
+				</div>
+			)}
+		</section>
+	);
+}
+
 function TaskWorkspace({
 	currentPhase,
 	taskTitle,
@@ -933,6 +1181,9 @@ function TaskWorkspace({
 	phase1Builder,
 	phaseLayoutConfig,
 	compactPhaseTimer,
+	capstoneItemCount,
+	capstoneUploadError,
+	onCapstoneItemUpload,
 	renderPrivateRanking,
 	renderPublicRanking
 }: {
@@ -947,10 +1198,16 @@ function TaskWorkspace({
 	phase1Builder?: Phase1BuilderConfig;
 	phaseLayoutConfig?: TaskPaneLayoutConfig;
 	compactPhaseTimer?: React.ReactNode;
+	capstoneItemCount: number;
+	capstoneUploadError: string;
+	onCapstoneItemUpload: (file: File) => void;
 	renderPrivateRanking: () => React.ReactNode;
 	renderPublicRanking: () => React.ReactNode;
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
+	const isCapstoneTask = taskId === CAPSTONE_TASK_ID;
+	const isCapstoneItemListLoaded = isCapstoneTask && capstoneItemCount > 0;
+	const isCapstoneUploadAvailable = isCapstoneTask && (currentPhase === "private" || isPrivatePhase1(currentPhase) || isPrivatePhase2(currentPhase));
 	const taskReferencePanelId = "task-reference-panel";
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
 	const [isTaskReferenceOpen, setIsTaskReferenceOpen] = useState(false);
@@ -958,7 +1215,10 @@ function TaskWorkspace({
 	const normalizedReferenceImageSrc = referenceImageSrc || "";
 	const referenceImageRetryToken = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.retryToken : 0;
 	const isReferenceImageFailed = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.failed : false;
-	const visibleLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
+	const visibleLayout = useMemo(
+		() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, isCapstoneItemListLoaded ? undefined : phaseLayoutConfig),
+		[currentPhase, isCapstoneItemListLoaded, phase1BuilderEnabled, phaseLayoutConfig]
+	);
 	const referenceImageDisplaySrc = useMemo(() => buildTaskReferenceImageSrc(normalizedReferenceImageSrc, referenceImageRetryToken), [normalizedReferenceImageSrc, referenceImageRetryToken]);
 
 	useEffect(() => {
@@ -1040,7 +1300,10 @@ function TaskWorkspace({
 
 	return (
 		<section
-			className={cn("grid min-h-0 gap-3 overflow-hidden rounded-lg border p-3", isTaskReferenceOpen && phase1BuilderEnabled ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]")}
+			className={cn(
+				"grid min-h-0 gap-3 overflow-hidden rounded-lg border p-3",
+				(isTaskReferenceOpen && phase1BuilderEnabled) || (isCapstoneTask && !isCapstoneItemListLoaded) ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]"
+			)}
 			aria-label="Task workspace"
 		>
 			<header className="flex shrink-0 flex-wrap items-center justify-between gap-2">
@@ -1065,10 +1328,12 @@ function TaskWorkspace({
 							{isTaskReferenceOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
 						</Button>
 					)}
+					{isCapstoneItemListLoaded && isCapstoneUploadAvailable && <CapstoneUploadButton onUpload={onCapstoneItemUpload} />}
 					{compactPhaseTimer}
 				</div>
 			</header>
 			{phase1BuilderEnabled && phase1Builder && isTaskReferenceOpen && <TaskReferencePanel id={taskReferencePanelId} builder={phase1Builder} />}
+			{isCapstoneUploadAvailable && !isCapstoneItemListLoaded && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
 			<div className="min-h-0 overflow-hidden">
 				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>
@@ -1317,6 +1582,8 @@ export default function MeetingRoom() {
 	const [phase1BuilderConfig, setPhase1BuilderConfig] = useState<Phase1BuilderConfig | undefined>();
 	const [taskRankingLimit, setTaskRankingLimit] = useState<number | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
+	const [capstoneUploadError, setCapstoneUploadError] = useState("");
+	const [rankingCompletionState, setRankingCompletionState] = useState<RankingCompletionState | null>(null);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
@@ -1385,6 +1652,10 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const showRankingCompleteButton = taskId === CAPSTONE_TASK_ID && taskItems.length > 0 && currentPhase !== "reflect" && rankingCompletionState?.has_next_phase === true;
+	const rankingCompletionCount = rankingCompletionState?.completed_count ?? 0;
+	const rankingCompletionTotal = rankingCompletionState?.total_count ?? 0;
+	const isRankingCompleteVoted = rankingCompletionState?.is_completed ?? false;
 	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
@@ -1423,6 +1694,15 @@ export default function MeetingRoom() {
 
 		const loadTaskConfig = async () => {
 			try {
+				if (isCapstoneSessionName(roomName)) {
+					setTaskId(CAPSTONE_TASK_ID);
+					setTaskTitle(CAPSTONE_TASK_TITLE);
+					setTaskDetail(CAPSTONE_TASK_DETAIL);
+					setTaskReferenceImageSrc("");
+					setTaskReferenceImageAlt(CAPSTONE_TASK_TITLE);
+					setPhase1BuilderConfig(undefined);
+					setTaskRankingLimit(undefined);
+				}
 				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				const nextTaskItemsById = Object.fromEntries(taskConfig.items.map(item => [item.id, item]));
 				const nextDefaultItemIds = taskConfig.items.map(item => item.id);
@@ -1461,6 +1741,15 @@ export default function MeetingRoom() {
 			} catch (error) {
 				if (error instanceof DOMException && error.name === "AbortError") {
 					return;
+				}
+				if (isCapstoneSessionName(roomName)) {
+					setTaskId(CAPSTONE_TASK_ID);
+					setTaskTitle(CAPSTONE_TASK_TITLE);
+					setTaskDetail(CAPSTONE_TASK_DETAIL);
+					setTaskReferenceImageSrc("");
+					setTaskReferenceImageAlt(CAPSTONE_TASK_TITLE);
+					setPhase1BuilderConfig(undefined);
+					setTaskRankingLimit(undefined);
 				}
 				console.error("Failed to load task config", error);
 			}
@@ -1505,6 +1794,64 @@ export default function MeetingRoom() {
 	const handlePublicMicActivation = useCallback(() => {
 		void handleMic(getNextMicModeAfterPublicActivation(micMode));
 	}, [handleMic, micMode]);
+
+	const applyUploadedTaskItems = useCallback((nextTaskItems: TaskConfigItem[]) => {
+		const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
+		const nextDefaultItemIds = nextTaskItems.map(item => item.id);
+		setTaskItems(nextTaskItems);
+		setPublicItems(createRankedItems(nextDefaultItemIds, nextTaskItemsById, nextDefaultItemIds));
+		setPrivateItems(createRankedItems(nextDefaultItemIds, nextTaskItemsById, nextDefaultItemIds));
+		setPublicRankingRevision(current => current + 1);
+		setPrivateRankingRevision(current => current + 1);
+		setPublicRankingChangeCount(undefined);
+		setPrivateRankingChangeCount(undefined);
+		pendingRankingRef.current.public = null;
+		pendingRankingRef.current.private = null;
+	}, []);
+
+	const handleCapstoneItemUpload = useCallback(
+		(file: File) => {
+			setCapstoneUploadError("");
+			const load = async () => {
+				try {
+					const buffer = await file.arrayBuffer();
+					const parsed = await parseSpreadsheetTaskItems(file.name, arrayBufferToBase64(buffer));
+					applyUploadedTaskItems(parsed.items);
+					sendMessage({
+						type: "set_ranking_items",
+						items: parsed.items
+					});
+				} catch (error) {
+					try {
+						const text = await file.text();
+						const nextTaskItems = parseDelimitedTaskItems(text);
+						if (nextTaskItems.length === 0) {
+							throw error;
+						}
+						applyUploadedTaskItems(nextTaskItems);
+						sendMessage({
+							type: "set_ranking_items",
+							items: nextTaskItems
+						});
+					} catch {
+						console.error("Failed to parse capstone task items", error);
+						setCapstoneUploadError("No items found. Upload an XLSX/CSV/TSV with topic and discription columns.");
+					}
+				}
+			};
+			void load();
+		},
+		[applyUploadedTaskItems, sendMessage]
+	);
+
+	const handleRankingComplete = useCallback(() => {
+		if (!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0) {
+			return;
+		}
+		sendMessage({
+			type: "ranking_complete"
+		});
+	}, [isConnected, isRankingCompleteVoted, rankingCompletionTotal, sendMessage]);
 
 	useEffect(() => {
 		if (!connectionParticipantId || joinRejectedMessage || participantTranscriptionEnabled !== true) {
@@ -1799,10 +2146,27 @@ export default function MeetingRoom() {
 	};
 
 	useEffect(() => {
+		if (!lastMessage) {
+			return;
+		}
+
 		if (isPhaseChangedMessage(lastMessage)) {
 			const timer = window.setTimeout(() => {
 				const nextPhase = normalizeSessionPhase(lastMessage.phase);
-				if (nextPhase) setCurrentPhase(nextPhase);
+				if (nextPhase) {
+					setCurrentPhase(nextPhase);
+					setRankingCompletionState(current =>
+						current
+							? {
+									...current,
+									current_phase: nextPhase,
+									completed_participant_ids: [],
+									completed_count: 0,
+									is_completed: false
+								}
+							: current
+					);
+				}
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1819,6 +2183,9 @@ export default function MeetingRoom() {
 
 		if (isBoardStateMessage(lastMessage)) {
 			let phaseTimer: number | null = null;
+			if ("ranking_completion" in lastMessage) {
+				setRankingCompletionState(isRankingCompletionState(lastMessage.ranking_completion) ? lastMessage.ranking_completion : null);
+			}
 			const timerEndTimeMs = lastMessage.timer_end_time_ms;
 			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
 				phaseTimer = window.setTimeout(() => {
@@ -1876,6 +2243,19 @@ export default function MeetingRoom() {
 			};
 		}
 
+		if (isRankingCompletionStateMessage(lastMessage)) {
+			setRankingCompletionState(lastMessage);
+			return;
+		}
+
+		if (isRankingItemsChangedMessage(lastMessage)) {
+			applyUploadedTaskItems(lastMessage.ranking_items);
+			if (isRankingSnapshot(lastMessage.public_ranking)) {
+				applyRankingSnapshot("public", lastMessage.public_ranking);
+			}
+			return;
+		}
+
 		if (isRankingStateMessage(lastMessage)) {
 			const scope = lastMessage.scope === "private" ? "private" : "public";
 			const nextRanking = {
@@ -1889,7 +2269,7 @@ export default function MeetingRoom() {
 			}
 			applyRankingSnapshot(scope, nextRanking);
 		}
-	}, [applyRankingSnapshot, lastMessage]);
+	}, [applyRankingSnapshot, applyUploadedTaskItems, lastMessage]);
 
 	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
 	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
@@ -1950,6 +2330,9 @@ export default function MeetingRoom() {
 					phase1Builder={phase1BuilderConfig}
 					phaseLayoutConfig={phaseLayoutConfigById[currentPhase]}
 					compactPhaseTimer={timerEndTime > 0 ? <CompactPhaseTimer phase={currentPhase} endTimeMs={timerEndTime} /> : null}
+					capstoneItemCount={taskItems.length}
+					capstoneUploadError={capstoneUploadError}
+					onCapstoneItemUpload={handleCapstoneItemUpload}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
 							scope="public"
@@ -2189,7 +2572,26 @@ export default function MeetingRoom() {
 					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
-					<div className="absolute bottom-0 right-0 hidden xl:block">
+					<div className="absolute bottom-0 right-0 hidden items-end gap-2 xl:flex">
+						{showRankingCompleteButton && (
+							<Button
+								type="button"
+								variant={isRankingCompleteVoted ? "default" : "outline"}
+								size="sm"
+								className="h-8 min-w-24 flex-col gap-0 px-2.5 py-1 leading-none"
+								aria-pressed={isRankingCompleteVoted}
+								disabled={!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0}
+								onClick={handleRankingComplete}
+							>
+								<span className="flex items-center gap-1 text-xs">
+									{isRankingCompleteVoted && <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+									已完成排序
+								</span>
+								<span className="text-[10px] font-medium opacity-80">
+									{rankingCompletionCount}/{rankingCompletionTotal}
+								</span>
+							</Button>
+						)}
 						<Button
 							type="button"
 							variant="ghost"
