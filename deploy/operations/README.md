@@ -6,9 +6,9 @@ branches are sky, ej, ethel, jason and em-prompt.
 
 - `https://ops.omni.observe.tw`: authenticated deployment overview and recording queue.
 - `https://status.omni.observe.tw`: authenticated monitoring inside IIC.
-- `https://uptime.omni.observe.tw`: independent monitoring on skyhong.tw, with its
-  own containers, database and login. The original status.skyhong.tw target list
-  remains separate. External checks may fail while local checks pass: preserve
+- `https://status.skyhong.tw/#omniobserve`: external monitoring on skyhong.tw,
+  in a dedicated OmniObserve section of the shared dashboard. Other projects
+  stay in the Products and services section. External checks may fail while local checks pass: preserve
   that signal and investigate routing/firewalls before declaring an outage global.
 
 ## Operations service
@@ -42,7 +42,9 @@ Check database compatibility and backups before merging a rollback PR.
 
 ## External monitor
 
-`monitor/docker-compose.yml` is deployed independently on skyhong.tw. Supply
+`uptime.omni.observe.tw` has been retired. Its containers are stopped and its
+DNS record removed; its data volume is retained. The files under `monitor/`
+are retained for recovery only. If reinstating that standalone monitor, supply
 private `.env` (three AUTH_* variables plus PUBLIC_ORIGIN), `config.yaml` with
 OmniObserve-only endpoints and any authorized notification destination, and
 `auth.py`. The proxy must be on dokploy-network. TLS is issued by the host's
