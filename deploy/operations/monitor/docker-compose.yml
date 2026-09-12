@@ -1,0 +1,65 @@
+services:
+  metrics:
+    image: ghcr.io/twin/gatus:stable
+    restart: unless-stopped
+    volumes:
+    - data:/data
+    - ./config.yaml:/config/config.yaml:ro
+    labels:
+      traefik.enable: 'false'
+    mem_limit: 128m
+    cpus: '0.25'
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+  monitor:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command:
+    - python
+    - /app/auth.py
+    user: 65534:65534
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    depends_on:
+    - metrics
+    mem_limit: 96m
+    cpus: '0.25'
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+    volumes:
+    - ./auth.py:/app/auth.py:ro
+    env_file:
+    - .env
+    networks:
+    - default
+    - dokploy-network
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: dokploy-network
+      traefik.http.routers.omni-external.rule: Host(`uptime.omni.observe.tw`)
+      traefik.http.routers.omni-external.entrypoints: websecure
+      traefik.http.routers.omni-external.tls: 'true'
+      traefik.http.routers.omni-external.tls.certresolver: letsencrypt
+      traefik.http.services.omni-external.loadbalancer.server.port: '8080'
+volumes:
+  data: {}
+networks:
+  dokploy-network:
+    external: true
