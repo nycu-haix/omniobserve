@@ -17,6 +17,10 @@ RUN apt-get update \
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu121 \
     && pip install --no-cache-dir whisperlivekit==0.2.20 python-multipart safetensors
 
+COPY batch_endpoint.py /app/batch_endpoint.py
+RUN printf '\nimport os\nif os.getenv("OMNI_BATCH_WORKER") == "1":\n    from batch_endpoint import install\n    install(globals())\n' >> /usr/local/lib/python3.12/site-packages/whisperlivekit/basic_server.py
+ENV PYTHONPATH=/app
+
 EXPOSE 8000
 
 ENTRYPOINT ["wlk", "--host", "0.0.0.0"]

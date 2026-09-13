@@ -78,6 +78,22 @@ def transcribe_job(job, model):
     duration = float(json.loads(probe.stdout)['format']['duration'])
     if not 0 < duration <= 3600: raise ValueError('duration')
     update(job['id'], duration=duration, error='')
+    endpoint = os.getenv('ASR_HTTP_URL', '').strip()
+    if endpoint:
+        boundary = 'omni-' + secrets.token_hex(16)
+        prefix = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio"\r\n'
+                  'Content-Type: application/octet-stream\r\n\r\n').encode()
+        body = prefix + audio.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
+        request = urllib.request.Request(endpoint, data=body, headers={
+            'Content-Type': 'multipart/form-data; boundary=' + boundary,
+        })
+        with urllib.request.urlopen(request, timeout=3600) as response:
+            text = json.load(response).get('text', '').strip()
+        if not text:
+            raise RuntimeError('GPU transcription returned no text')
+        if not cancelled(job['id']):
+            update(job['id'], status='completed', progress=100, text=text, error='')
+        return
     segments, _ = model.transcribe(str(audio), beam_size=1, vad_filter=True)
     text = []
     for segment in segments:
@@ -96,7 +112,7 @@ def worker():
             time.sleep(2)
             continue
         try:
-            if model is None:
+            if model is None and not os.getenv('ASR_HTTP_URL', '').strip():
                 from faster_whisper import WhisperModel
                 model = WhisperModel(os.getenv('ASR_MODEL', 'small'), device='cpu', compute_type='int8', cpu_threads=1, num_workers=1)
             transcribe_job(job, model)

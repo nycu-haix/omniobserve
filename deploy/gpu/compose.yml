@@ -28,7 +28,7 @@ services:
       ASR_ENGINE: whisperlivekit
       ASR_MOCK: "0"
       WHISPERLIVEKIT_FLUSH_BEFORE_FINAL: "1"
-      WHISPERLIVEKIT_WS_URLS: ws://whisper-0:8000/asr,ws://whisper-1:8000/asr
+      WHISPERLIVEKIT_WS_URLS: ws://whisper-0:8000/asr
       PIPELINE_WS_BASE_URL: wss://api.omni.observe.tw
       WHISPERLIVEKIT_MODE: full
       PYTHONUNBUFFERED: "1"
@@ -86,6 +86,11 @@ services:
       - inference
   whisper-1:
     <<: *whisper
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      NVIDIA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      OMNI_BATCH_WORKER: "1"
     ports:
       - 127.0.0.1:18002:8000
 volumes:
