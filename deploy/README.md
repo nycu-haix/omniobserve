@@ -1,4 +1,4 @@
-# IIC CPU deployment
+# IIC deployment
 
 The host CD service checks configured Git branches every 30 seconds and asks
 Dokploy to clone the changed branch and build deploy/compose.cpu.yml. GitHub
@@ -16,8 +16,10 @@ VITE_AUDIO_WS_BASE_URL and VITE_JITSI_BASE_URL in Dokploy. They are build argume
 redeploy after changing them. Without build arguments, the normal frontend
 Dockerfile continues to use its existing Vite configuration.
 
-The shared CPU embedding service is managed separately in infrastructure.
-GPU ASR and Jitsi are not part of this CPU Compose file.
+All six application stacks now run on one H200 vGPU host. `compose.cpu.yml` remains
+the application/DB Compose filename; it does not mean a separate CPU VM is required.
+Shared GPU ASR, local Qwen3 8B, bge-m3, Jitsi and TURN are managed in infrastructure.
+See [the single-GPU runbook](gpu/README.md) for hosts, backups, rollback and acceptance.
 
 ## Environments
 
