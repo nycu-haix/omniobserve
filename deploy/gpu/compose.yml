@@ -1,0 +1,52 @@
+# Shared inference only. All workers use the single H200 vGPU visible as device 0.
+services:
+  whisper-0: &whisper
+    build:
+      context: ../../audio-test/whisperlivekit
+    image: omniobserve-whisper:gpu-0.2.20
+    restart: unless-stopped
+    command:
+      - --backend
+      - whisper
+      - --model-path
+      - MediaTek-Research/Breeze-ASR-25
+      - --language
+      - zh
+      - --backend-policy
+      - simulstreaming
+      - --pcm-input
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      NVIDIA_VISIBLE_DEVICES: "0"
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - asr-models:/root/.cache
+    ports:
+      - 127.0.0.1:18001:8000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 600s
+    networks:
+      - inference
+  whisper-1:
+    <<: *whisper
+    ports:
+      - 127.0.0.1:18002:8000
+volumes:
+  asr-models:
+    external: true
+    name: ${OMNI_ASR_MODEL_VOLUME:?Preserve the existing model cache volume}
+networks:
+  inference:
+    external: true
+    name: omniobserve-inference
