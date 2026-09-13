@@ -7,7 +7,8 @@ On 2026-09-13 the new VM `omniobserve-gpu` at `10.0.0.120` reported
 NVIDIA H200-35C, 35840 MiB VRAM, driver 570.172.08, 8 vCPU and 62 GiB usable RAM.
 Image: Ubuntu 24.04-vgpu. No second GPU VM was created.
 
-`compose.yml` shares CUDA device 0 between two ASR workers. Start the first worker
+`compose.yml` shares CUDA device 0 between a realtime ASR worker and a dedicated
+complete-file worker. Start the first worker
 and finish model download before starting the second worker. Both use the existing
 external model cache volume. Do not run the legacy device-1 configuration on a single vGPU.
 
@@ -41,9 +42,11 @@ Verified before public cutover on 2026-09-13:
   through the GPU gateway and a persisted backend event. It still appended a stray
   `[` character; direct batch transcription returned only a prefix. Both need further work.
 - First encrypted offsite restic snapshot completed at 2026-09-13 13:58:58 UTC.
-  Isolated restore from that snapshot is still pending.
+  All seven databases from that snapshot restored in a network-isolated pgvector
+  container: Dokploy 67 tables, with application table counts matching the list above.
 - Public traffic remains on the old CPU host. TURN, full product acceptance,
-  notification testing and old-host retirement remain pending.
+  old-host retirement remain pending. The existing incident channel accepted a
+  clearly labelled test notification; the status dashboard accepted the backup heartbeat.
 
 ## Shared local LLM
 
@@ -82,3 +85,35 @@ Mandarin meetings. Breeze-ASR-26 was reviewed but not deployed: its
 describes Taiwanese Hokkien fine-tuning, not a general Mandarin upgrade.
 `OMNI_ASR_MODEL` can override the default during a future isolated evaluation;
 preserve the model cache volume when redeploying.
+
+## TURN
+
+`turn.compose.yml` is installed in the existing Dokploy infrastructure environment
+as Compose `v3-xHel9haw8kqyO6NnAV`. The DNS-only A record `turn.omni.observe.tw`
+uses the existing public IPv4. `turn-traefik.yml` routes TLS by SNI on TCP 443 to
+coturn on private port 5349. Relay UDP is limited to 49160–49200 in IIC and coturn.
+The TLS certificate is issued by the existing Traefik DNS-01 resolver.
+`turn-certificate.py` and its hourly systemd timer export renewed certificate
+material privately and restart coturn only when it changes. Include this material
+and the TURN shared secret in encrypted backups.
+
+Jitsi advertises `TURNS_HOST=turn.omni.observe.tw`, `TURNS_PORT=443` with its
+private `TURN_CREDENTIALS` shared secret. The JVB advertises both the public IP and
+10.0.0.120 so the local TURN server can reach it without relying on public NAT
+hairpinning. Coturn permits that specific private peer and denies other private,
+loopback and link-local ranges. Public two-client media and forced-relay acceptance
+are still required after the floating IP cutover.
+
+## Latest functional evidence before cutover
+
+- Qwen3 8B ran the actual backend idea-extraction function with `LLM_MOCK=0`.
+  The 48-character Mandarin survival-task sample produced two relevant idea blocks
+  in 5.4 seconds. Full meeting workflow/quality acceptance remains pending.
+- The dedicated GPU batch decoder returned the complete 7.416-second Mandarin
+  sample. The authenticated operations upload queue completed the same job and
+  downloaded exactly the saved transcript (no truncated prefix).
+- Unified status refreshed at 2026-09-13 14:28 UTC: 25/25 targets, 19/19 Docker
+  services, 5/5 heartbeats. These counts still reflect the pre-cutover origin path;
+  they do not prove GPU public access or product acceptance.
+- Local direct IIC access briefly timed out; the existing Unix-socket monitor tunnel
+  retained verified TLS access. Public Chrome and HTTPS probes subsequently recovered.
