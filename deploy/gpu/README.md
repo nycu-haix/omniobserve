@@ -76,11 +76,9 @@ an isolated restore test and notification test.
 
 ## ASR model selection
 
-The requested deployment default is `MediaTek-Research/Breeze-ASR-26`. Its
+The selected deployment model remains `MediaTek-Research/Breeze-ASR-25` for
+Mandarin meetings. Breeze-ASR-26 was reviewed but not deployed: its
 [official model card](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)
-describes a Whisper-large-v2 model fine-tuned for Taiwanese Hokkien, with Mandarin
-character output. It is not evidence of a general Mandarin accuracy upgrade over
-Breeze-ASR-25. The earlier streaming acceptance above used version 25; repeat it
-for 26 before accepting the change. To roll back, set
-`OMNI_ASR_MODEL=MediaTek-Research/Breeze-ASR-25` in the existing ASR environment
-and redeploy. Preserve the same model cache volume.
+describes Taiwanese Hokkien fine-tuning, not a general Mandarin upgrade.
+`OMNI_ASR_MODEL` can override the default during a future isolated evaluation;
+preserve the model cache volume when redeploying.
