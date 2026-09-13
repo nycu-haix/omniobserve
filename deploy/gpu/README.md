@@ -160,7 +160,7 @@ The TCP passthrough router alone handles the real TURN hostname.
 | EJ | ej | ej.omni.observe.tw / ej.api.omni.observe.tw | omniobserve-ej-uqrtcz_postgres_data |
 | Ethel | ethel | ethel.omni.observe.tw / ethel.api.omni.observe.tw | omniobserve-ethel-wnzans_postgres_data |
 | Jason | jason | jason.omni.observe.tw / jason.api.omni.observe.tw | omniobserve-jason-ngozpx_postgres_data |
-| EM | em-prompt | em.omni.observe.tw / em.api.omni.observe.tw | omniobserve-em-al3hyb_postgres_data |
+| EM | em | em.omni.observe.tw / em.api.omni.observe.tw | omniobserve-em-al3hyb_postgres_data |
 
 All rows run on `omniobserve-gpu`, AI-Trust, UUID
 `5b5a8e23-c302-4940-a742-cccb58328451`. Shared services use

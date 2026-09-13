@@ -2,7 +2,7 @@
 
 This is a dedicated OmniObserve interface. It does not display or administer
 unrelated personal services. Production tracks main; the five development
-branches are sky, ej, ethel, jason and em-prompt.
+branches are sky, ej, ethel, jason and em.
 
 - `https://ops.omni.observe.tw`: authenticated deployment overview and recording queue.
 - `https://status.omni.observe.tw`: authenticated monitoring inside IIC.
