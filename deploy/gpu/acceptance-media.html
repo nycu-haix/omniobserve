@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><title>OmniObserve GPU media acceptance</title>
+<h1>Jitsi synthetic audio/video test</h1><p>Two independent participants; generated canvas video and tone audio only. No camera or microphone access.</p>
+<button id="start">Start participant</button><button id="stop">Stop test</button><pre id="status">Ready</pre><div id="videos"></div>
+<script>
+const params=new URLSearchParams(location.search), relay=params.get('relay')==='1';
+const pcs=[],connections=[],rooms=[],tracks=[],timers=[];const NativePC=window.RTCPeerConnection;
+window.RTCPeerConnection=class extends NativePC{constructor(config,...args){super({...config,...(relay?{iceTransportPolicy:'relay'}:{})},...args);pcs.push(this);this.addEventListener('icecandidateerror',e=>log('ICE ERROR '+e.errorCode+' '+e.errorText+' '+e.url))} setConfiguration(config){super.setConfiguration({...config,...(relay?{iceTransportPolicy:'relay'}:{})})}};
+const output=document.getElementById('status');const log=t=>output.textContent+='\n'+t;
+window.onerror=(m)=>log('ERROR '+m);window.onunhandledrejection=e=>log('ERROR '+e.reason);
+</script>
+<script src="https://meet.omni.observe.tw/libs/lib-jitsi-meet.min.js"></script>
+<script>
+const roomName=params.get('room')||'omni-gpu-media-'+Date.now();
+async function peer(n){
+ const c=document.createElement('canvas');c.width=320;c.height=180;const ctx=c.getContext('2d');timers.push(setInterval(()=>{ctx.fillStyle=n===1?'#344bbb':'#258b55';ctx.fillRect(0,0,320,180);ctx.fillStyle='white';ctx.font='20px sans-serif';ctx.fillText('Peer '+n+' '+Date.now(),10,90)},100));
+ const ac=new AudioContext();await ac.resume();const oscillator=ac.createOscillator();oscillator.frequency.value=400+n*100;const gain=ac.createGain();gain.gain.value=.02;const dest=ac.createMediaStreamDestination();oscillator.connect(gain).connect(dest);oscillator.start();
+ const stream=new MediaStream([...c.captureStream(10).getVideoTracks(),...dest.stream.getAudioTracks()]);
+ const local=JitsiMeetJS.createLocalTracksFromMediaStreams([{stream,mediaType:'video',videoType:'camera',sourceType:'camera'},{stream,mediaType:'audio',sourceType:'mic'}]);tracks.push(...local);
+ const connection=new JitsiMeetJS.JitsiConnection(null,null,{hosts:{domain:'meet.jitsi',muc:'muc.meet.jitsi'},serviceUrl:'wss://meet.omni.observe.tw/xmpp-websocket',clientNode:'http://jitsi.org/jitsimeet'});connections.push(connection);
+ connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_FAILED,(...e)=>log('Connection failed '+n+' '+JSON.stringify(e)));
+ connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED,async()=>{
+  log('Connected '+n);const room=connection.initJitsiConference(roomName,{p2p:{enabled:false},openBridgeChannel:'websocket',disableSimulcast:true,enableLayerSuspension:false});rooms.push(room);room.setDisplayName('Synthetic peer '+n);
+  room.on(JitsiMeetJS.events.conference.CONFERENCE_JOINED,()=>log('Joined '+n));room.on(JitsiMeetJS.events.conference.CONFERENCE_FAILED,(...e)=>log('Conference failed '+JSON.stringify(e)));
+  room.on(JitsiMeetJS.events.conference.TRACK_ADDED,track=>{if(track.isLocal())return;const e=document.createElement(track.getType()==='video'?'video':'audio');e.autoplay=true;e.muted=true;e.width=240;document.getElementById('videos').appendChild(e);track.attach(e);log('Remote '+track.getType()+' on '+n)});
+  for(const t of local)await room.addTrack(t);room.join();
+ });connection.connect();
+}
+document.getElementById('start').onclick=async()=>{document.getElementById('start').disabled=true;JitsiMeetJS.init({disableAudioLevels:true});JitsiMeetJS.setLogLevel(JitsiMeetJS.logLevels.ERROR);await peer(Number(params.get('peer')||1));timers.push(setInterval(async()=>{let received=[];for(const pc of pcs){if(pc.connectionState==='closed')continue;const stats=await pc.getStats();let a=0,v=0,f=0,pair='',localType='',relayProtocol='';stats.forEach(s=>{if(s.type==='inbound-rtp'){if(s.kind==='audio')a+=s.bytesReceived||0;if(s.kind==='video'){v+=s.bytesReceived||0;f+=s.framesDecoded||0}}if(s.type==='candidate-pair'&&s.nominated&&s.state==='succeeded'){const remote=stats.get(s.remoteCandidateId);pair=remote?.address+':'+remote?.port;const local=stats.get(s.localCandidateId);localType=local?.candidateType;relayProtocol=local?.relayProtocol}});received.push({state:pc.connectionState,gathering:pc.iceGatheringState,signaling:pc.signalingState,localDescription:!!pc.localDescription,remoteDescription:!!pc.remoteDescription,policy:pc.getConfiguration().iceTransportPolicy,servers:pc.getConfiguration().iceServers?.map(x=>({urls:x.urls,credentialPresent:!!x.credential})),audioBytes:a,videoBytes:v,framesDecoded:f,remote:pair,localType,relayProtocol})}let el=document.getElementById('stats');if(!el){el=document.createElement('pre');el.id='stats';document.body.appendChild(el)}el.textContent=JSON.stringify(received,null,2);if(received.filter(s=>s.audioBytes>0&&s.videoBytes>0&&s.framesDecoded>0).length>=1)el.textContent='PASS: this peer received real audio and decoded video through JVB\n'+el.textContent},2000))};
+document.getElementById('stop').onclick=async()=>{timers.forEach(clearInterval);for(const r of rooms)await r.leave();for(const t of tracks)await t.dispose();connections.forEach(c=>c.disconnect());log('Stopped')};
+</script>
