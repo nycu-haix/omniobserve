@@ -1,0 +1,51 @@
+services:
+  turn:
+    image: coturn/coturn:4.6.3
+    container_name: omniobserve-turn
+    restart: unless-stopped
+    network_mode: host
+    command: [-c, /etc/coturn/turnserver.conf]
+    volumes:
+      - /etc/omniobserve-turn/certs:/certs:ro
+    configs:
+      - source: turnserver
+        target: /etc/coturn/turnserver.conf
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+configs:
+  turnserver:
+    content: |
+      listening-port=3478
+      tls-listening-port=5349
+      listening-ip=${OMNI_PRIVATE_IP:-10.0.0.120}
+      relay-ip=${OMNI_PRIVATE_IP:-10.0.0.120}
+      external-ip=${OMNI_PUBLIC_IP:-140.110.146.224}/${OMNI_PRIVATE_IP:-10.0.0.120}
+      min-port=49160
+      max-port=49200
+      realm=turn.omni.observe.tw
+      server-name=turn.omni.observe.tw
+      fingerprint
+      use-auth-secret
+      static-auth-secret=${TURN_AUTH_SECRET:?Set a private TURN secret}
+      cert=/certs/fullchain.pem
+      pkey=/certs/privkey.pem
+      no-tlsv1
+      no-tlsv1_1
+      no-dtls
+      no-cli
+      no-multicast-peers
+      denied-peer-ip=0.0.0.0-0.255.255.255
+      denied-peer-ip=10.0.0.0-10.255.255.255
+      denied-peer-ip=127.0.0.0-127.255.255.255
+      denied-peer-ip=169.254.0.0-169.254.255.255
+      denied-peer-ip=172.16.0.0-172.31.255.255
+      denied-peer-ip=192.168.0.0-192.168.255.255
+      allowed-peer-ip=${OMNI_PRIVATE_IP:-10.0.0.120}
+      user-quota=12
+      total-quota=100
+      stale-nonce=600
+      log-file=stdout
+      simple-log

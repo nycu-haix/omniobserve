@@ -14,6 +14,7 @@ umask 077
 find "$stage/databases" -maxdepth 1 -type f -name '*.dump' -delete
 failed() {
   printf '{"status":"failed","timestamp":"%s"}\n' "$(date -u +%FT%TZ)" > /var/lib/omniobserve-backup/status.json
+  python3 /usr/local/lib/omniobserve/backup-notify.py failure || true
 }
 trap failed ERR
 while read -r id name; do
@@ -61,7 +62,9 @@ PY
 done
 restic "${restic_args[@]}" backup --tag omniobserve --host omniobserve-gpu \
   "$stage" /etc/dokploy /home/ubuntu/omniobserve-cd /etc/omniobserve-backup \
-  /etc/systemd/system/omniobserve-cd.service
+  /etc/omniobserve-turn /usr/local/lib/omniobserve /usr/local/sbin/omniobserve-backup \
+  /etc/systemd/system
 restic "${restic_args[@]}" forget --host omniobserve-gpu --tag omniobserve \
   --keep-daily 14 --keep-weekly 8 --keep-monthly 6 --prune
 printf '{"status":"ok","timestamp":"%s"}\n' "$(date -u +%FT%TZ)" > /var/lib/omniobserve-backup/status.json
+python3 /usr/local/lib/omniobserve/backup-notify.py success

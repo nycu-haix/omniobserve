@@ -1,0 +1,8 @@
+[Unit]
+Description=Synchronize the managed TURN TLS certificate
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/omniobserve/turn-certificate.py
+UMask=0077
