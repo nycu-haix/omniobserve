@@ -33,7 +33,8 @@ Public IPv4 charging is not yet announced on that page.
 
 The reserved public IP **140.110.146.224** was transferred to `omniobserve-gpu`
 (10.0.0.120). All six frontends/APIs, PostgreSQL, Dokploy, Jitsi, TURN and AI now
-run there. The previous CPU host at 10.0.0.60 retains rollback data; its application
+run there. The previous CPU host at 10.0.0.60 is stopped (IIC confirmed at 15:46 UTC) and
+retains rollback data; its application
 writers, polling CD and monitor tunnel are stopped. Do not restart old writers
 against stale databases or attach the public IP there without synchronizing new data.
 
@@ -66,7 +67,9 @@ Verified:
   after peer-reflexive discovery; SDP and forced policy confirm TURN allocation.
 - Encrypted offsite snapshot `5da48bba` restored all seven databases in an isolated
   container: Dokploy 67 tables plus all six application databases. Snapshot
-  `29b64e66` completed after cutover at 15:39 UTC. Backup success heartbeat and an
+  `29b64e66` completed after cutover at 15:39 UTC. The later `67ff3178` snapshot
+  completed at 15:47 UTC; an isolated restore of its upload/SQLite queue matched
+  the original audio SHA256 and completed transcript. Backup success heartbeat and an
   explicitly marked failure-notification test both delivered to existing channels.
 - Existing Unix-socket monitoring tunnel now originates on the GPU host. A verified
   TLS request through it executed on hostname `omniobserve-gpu`. No public proxy or
@@ -78,6 +81,10 @@ Limitations / not established by these tests:
 - The generic streaming ASR sample appended a stray `[`; the survival sample missed
   one character in `避免`. Batch decoding produced the complete expected text.
   Recognition quality is not perfect and has not been benchmarked on real meetings.
+- Chrome currently reports microphone permission denied for the production page.
+  Synthetic media/PCM verified transport and inference without capturing the user.
+  Physical microphone/camera capture needs the site permission and a device test;
+  this is separate from successful ASR and Jitsi/TURN transport.
 - Two-client tests establish basic operation, not six simultaneous busy environments,
   prolonged load, every task template or long-recording quality.
 - skyhong.tw still cannot directly reach the IIC public HTTPS path (10-second
@@ -226,6 +233,12 @@ representative transcript/idea relationships and an upload's downloaded text.
 For actual recovery, stop the destination writers, restore into existing correctly
 named volumes, then restore uploads/SQLite, Dokploy settings, TLS state and CD
 configuration before starting services. Never run a test restore over production.
+
+Reproduce media verification with `acceptance-media.html` served on localhost.
+Open two tabs with the same `room` query and different `peer=1` / `peer=2`; add
+`relay=1` to both to require TURN. Press Start in each and inspect inbound RTP,
+frames and relay candidates; press Stop when finished. It creates canvas video
+and tone audio, uses real Jitsi/TURN, and never accesses a physical microphone.
 
 The first isolated test's evidence is `/srv/omni-migration/restore-evidence.json`;
 final migration comparisons are under `/srv/omni-migration/final/`. These contain
