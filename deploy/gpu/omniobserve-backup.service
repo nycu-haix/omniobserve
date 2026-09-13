@@ -1,0 +1,12 @@
+[Unit]
+Description=OmniObserve encrypted offsite backup
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/omniobserve-backup
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle
+UMask=0077

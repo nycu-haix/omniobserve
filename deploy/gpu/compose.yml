@@ -1,5 +1,24 @@
 # Shared inference only. All workers use the single H200 vGPU visible as device 0.
 services:
+  llm-proxy:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: [python, -u, /app/llm-proxy.py]
+    volumes:
+      - ./llm-proxy.py:/app/llm-proxy.py:ro
+    environment:
+      OLLAMA_ORIGIN: http://embedding-cpu:11434
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - embeddings
   gateway:
     build:
       context: ../../audio-test/vad-backend
@@ -36,7 +55,7 @@ services:
       - --backend
       - whisper
       - --model-path
-      - MediaTek-Research/Breeze-ASR-25
+      - ${OMNI_ASR_MODEL:-MediaTek-Research/Breeze-ASR-26}
       - --language
       - zh
       - --backend-policy
@@ -74,6 +93,9 @@ volumes:
     external: true
     name: ${OMNI_ASR_MODEL_VOLUME:?Preserve the existing model cache volume}
 networks:
+  embeddings:
+    external: true
+    name: omniobserve-embeddings
   inference:
     external: true
     name: omniobserve-inference

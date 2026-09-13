@@ -30,6 +30,57 @@ Public IPv4 charging is not yet announced on that page.
 
 ## Acceptance status
 
-VM and host GPU detection passed. Container CUDA, real ASR, all environment
-cutover, restored backups, TURN, notifications and final retirement remain pending.
-Update this section with measured evidence before calling the migration complete.
+Verified before public cutover on 2026-09-13:
+
+- Container CUDA access and both Breeze-ASR workers passed; GPU device 0 is shared.
+- Six isolated database dumps restored: main/sky/ej 18 tables, ethel/jason 12,
+  em 15. Volume names retained. A final source snapshot is still required at cutover.
+- Destination HTTPS for production, sky and Dokploy passed with SNI and full
+  certificate validation. This does not establish public-route availability.
+- A 7.416-second Chinese PCM recording produced a complete streaming transcript
+  through the GPU gateway and a persisted backend event. It still appended a stray
+  `[` character; direct batch transcription returned only a prefix. Both need further work.
+- First encrypted offsite restic snapshot completed at 2026-09-13 13:58:58 UTC.
+  Isolated restore from that snapshot is still pending.
+- Public traffic remains on the old CPU host. TURN, full product acceptance,
+  notification testing and old-host retirement remain pending.
+
+## Shared local LLM
+
+The selected local candidate is Ollama `qwen3:8b`, alongside `bge-m3` embeddings.
+This is a smaller model than the previous configured cloud `qwen3.6-plus`; assess
+meeting idea extraction and generated task quality before accepting it.
+`llm-proxy.py` privately translates application `enable_thinking` to Ollama
+`reasoning_effort`. A simple JSON response passed in 0.13 seconds with reasoning
+explicitly disabled; this is not a general latency benchmark or product acceptance.
+The proxy has no public route. Backend configuration uses
+`OPENAI_BASE_URL=http://llm-proxy:8080/v1`, `OPENAI_MODEL=qwen3:8b`, and a nonempty
+local-client placeholder key (Ollama requires no provider secret). Keep `LLM_MOCK=0`.
+
+## Offsite backup
+
+Install `backup.sh` as `/usr/local/sbin/omniobserve-backup`, with the supplied
+systemd service/timer. Private SSH key, pinned host key and restic password live
+under `/etc/omniobserve-backup` (mode 0700). Keep an independent recovery copy of
+that password; the encrypted repository alone cannot recover it.
+The destination is the restricted `omni-backup` account on skyhong.tw, under
+`/var/lib/omni-backup/omniobserve`. The schedule is 03:20 Asia/Taipei with up to
+10 minutes jitter; retention is 14 daily, 8 weekly and 6 monthly snapshots.
+
+The job dumps all six application databases and Dokploy, snapshots SQLite with
+its backup API, and includes application volumes, Dokploy/TLS settings and CD
+configuration. Re-downloadable model caches are excluded. Status is written to
+`/var/lib/omniobserve-backup/status.json`. A successful snapshot is distinct from
+an isolated restore test and notification test.
+
+
+## ASR model selection
+
+The requested deployment default is `MediaTek-Research/Breeze-ASR-26`. Its
+[official model card](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)
+describes a Whisper-large-v2 model fine-tuned for Taiwanese Hokkien, with Mandarin
+character output. It is not evidence of a general Mandarin accuracy upgrade over
+Breeze-ASR-25. The earlier streaming acceptance above used version 25; repeat it
+for 26 before accepting the change. To roll back, set
+`OMNI_ASR_MODEL=MediaTek-Research/Breeze-ASR-25` in the existing ASR environment
+and redeploy. Preserve the same model cache volume.
