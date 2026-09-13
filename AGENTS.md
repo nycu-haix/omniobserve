@@ -6,4 +6,4 @@
   - Verify the relevant service deployment is `Done` for the pushed commit hash. If both backend and frontend changed, verify both. If only frontend changed, still verify the branch deployment URL serves the new frontend asset after Dokploy finishes.
   - Use Chrome for production verification on the branch deployment URL after Dokploy is done.
   - Current IIC environments and deployment links are listed in [deploy/README.md](deploy/README.md). Each environment uses one Compose deployment for backend and frontend.
-  - Production is `main` at `https://omni.observe.tw/`; `em-prompt` deploys to `https://em.omni.observe.tw/`.
+  - Production is `main` at `https://omni.observe.tw/`; `em` deploys to `https://em.omni.observe.tw/`.

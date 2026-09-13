@@ -3,8 +3,8 @@
 The host CD service checks configured Git branches every 30 seconds and asks
 Dokploy to clone the changed branch and build deploy/compose.cpu.yml. GitHub
 webhook delivery cannot reach the IIC host, so delivery does not depend on inbound
-webhooks. Use main for production; sky, ej, ethel, jason, and em-prompt
-for their matching development environments (em-prompt uses the em hostname).
+webhooks. Use main for production; sky, ej, ethel, jason, and em
+for their matching development environments.
 
 Set OMNI_POSTGRES_VOLUME to the existing environment-specific database volume.
 The volume and omniobserve-embeddings network must already exist. Database
@@ -28,7 +28,7 @@ GPU ASR and Jitsi are not part of this CPU Compose file.
 | ej | https://ej.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/fh12whx2Ap4VWOJc-kx7E/services/compose/DBVEbmg3tC4HIKBO2_iVh?tab=deployments) |
 | ethel | https://ethel.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/Yt5l_znYlq4QQoxOHI5DB/services/compose/vQd0bkC8v25N2j2wVi3QE?tab=deployments) |
 | jason | https://jason.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/3a5DwBCjH3KxBGprjlmqH/services/compose/Q-sYCuFfUZB-FO0cIITvB?tab=deployments) |
-| em-prompt | https://em.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/6LXUM3fGRhsRUO0Mw8Mvm/services/compose/W7GffAxu3Gz8Aw08tA_LC?tab=deployments) |
+| em | https://em.omni.observe.tw | [Deployments](https://dokploy.observe.tw/dashboard/project/4XAzxpFxB6VEErRHqWDr0/environment/6LXUM3fGRhsRUO0Mw8Mvm/services/compose/W7GffAxu3Gz8Aw08tA_LC?tab=deployments) |
 
 ## CD service
 
