@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily OmniObserve offsite backup
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Asia/Taipei
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
