@@ -55,7 +55,7 @@ services:
       - --backend
       - whisper
       - --model-path
-      - ${OMNI_ASR_MODEL:-MediaTek-Research/Breeze-ASR-26}
+      - ${OMNI_ASR_MODEL:-MediaTek-Research/Breeze-ASR-25}
       - --language
       - zh
       - --backend-policy
