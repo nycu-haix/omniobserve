@@ -12,9 +12,11 @@ interface SimilarityCueProps {
 	onShareReason: (cue: SimilarityCueData) => void;
 	canJumpToBlock?: (blockId: string) => boolean;
 	topContent?: ReactNode;
+	busy?: boolean;
+	error?: string | null;
 }
 
-export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpToBlock, topContent }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpToBlock, topContent, busy = false, error }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -69,16 +71,22 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpT
 				const canJump = canJumpToBlock ? canJumpToBlock(cue.blockId) : true;
 				const message = isDifferentReason ? "有人和你有相似的想法但原因略有不同。" : "有人和你想法一樣，要不要試著發表？";
 				return (
-					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
+					<div role="status" aria-label="Similarity cue" data-cue-id={cue.id} className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
 						<div className="mb-3 flex items-start gap-2 text-sm">
 							<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
 							<div className="grid gap-1">
 								<span>{message}</span>
+								<span className="text-muted-foreground">{cue.blockSummary}</span>
 								{isDifferentReason && <span className="text-muted-foreground">AI：你想不想讓別人知道你的理由？</span>}
 							</div>
 						</div>
+						{error && (
+							<p role="alert" className="mb-2 text-sm text-destructive">
+								{error}
+							</p>
+						)}
 						<div className="flex flex-wrap justify-end gap-2">
-							<Button className="gap-1.5" size="sm" title="分享給相似想法對象" onClick={() => onShareReason(cue)}>
+							<Button disabled={busy} className="gap-1.5" size="sm" title="分享給相似想法對象" onClick={() => onShareReason(cue)}>
 								<UserRound className="h-3.5 w-3.5" />
 								分享我的理由
 							</Button>
@@ -87,13 +95,13 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpT
 								size="sm"
 								variant={isDifferentReason ? "outline" : "default"}
 								onClick={() => canJump && onJump(cue)}
-								disabled={!canJump}
+								disabled={busy || !canJump}
 								title={canJump ? "查看相關想法" : "找不到可跳轉的 idea block"}
 							>
 								<Eye className="h-3.5 w-3.5" />
 								查看想法
 							</Button>
-							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
+							<Button disabled={busy} aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
 								<X className="h-4 w-4" />
 							</Button>
 						</div>

@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ChevronRight, Eye, Loader2, RotateCcw, X } from "lucide-react";
 import type { UIEvent } from "react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSimilarityCueQueue } from "../../hooks/useSimilarityCueQueue";
 import {
 	activeCompletionTargetKey,
 	completionTargetKeys,
@@ -14,7 +15,7 @@ import { getDisplayedIdeaBlocks } from "../../lib/ideaBlockDisplay";
 import { hasIdeaBlockJumpTarget } from "../../lib/ideaBlockJumpTargets";
 import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
 import { DEFAULT_SESSION_PHASE, getSessionPhaseLabel, isGroupPhase, normalizeSessionPhase, type SessionPhase } from "../../lib/sessionPhase";
-import { canShareSimilarityReasonInPhase, getUnrespondedSimilarityPairCues, isSimilarityCueDisplayPhase, removeSimilarityPairCues } from "../../lib/similarityCueLifecycle";
+import { canShareSimilarityReasonInPhase, isSimilarityCueDisplayPhase } from "../../lib/similarityCueLifecycle";
 import { getTranscriptIdeaBlockStatus, getTranscriptIdeaBlockTargetId, linkTranscriptLinesToReadyBlocks } from "../../lib/transcriptIdeaBlockDisplay";
 import {
 	clearPendingTranscriptLinesIdeaBlockStatus,
@@ -24,7 +25,7 @@ import {
 	markTranscriptLinesIdeaBlockStatus
 } from "../../lib/transcriptLineIdeaBlockStatus";
 import { cn } from "../../lib/utils";
-import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_SIMILARITY_CUES, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
+import { ENABLE_PRIVATE_BOARD_MOCK_DATA, MOCK_IDEA_BLOCKS, MOCK_TRANSCRIPT_LINES } from "../../mock/privateBoard";
 import { apiUrl } from "../../services/api";
 import type { BoardTab, IdeaBlock, MicMode, PublicChatMessage, SimilarityCueData, SimilarityPairCueData, SimilarityReasonSharedData, TranscriptLine as TranscriptLineType } from "../../types";
 import { Button } from "../ui/Button";
@@ -158,6 +159,7 @@ interface PublicContextMatchesPayload {
 }
 
 interface SimilarityReasonShareSentData {
+	cueId?: string | null;
 	blockId: string;
 	recipientCount?: number;
 	deliveredCount?: number;
@@ -171,7 +173,6 @@ interface SimilarityReasonShareErrorMessage {
 }
 
 type SimilarityCueResponseStatus = "shown" | "accepted" | "ignored" | "dismissed" | "shared";
-type SimilarityCueTerminalResponseStatus = Exclude<SimilarityCueResponseStatus, "shown">;
 
 interface IdeaBlockNotice {
 	id: string;
@@ -298,7 +299,6 @@ const MAX_SPEECH_TRANSCRIPT_REASON = "max_speech_ms";
 const LIVE_TRANSCRIPT_REASON = "sliding_window";
 const FINAL_TRANSCRIPT_REASONS = new Set(["silence", "client_stop", "mic_mode_switch", "disconnect", "error"]);
 const WHISPER_FINAL_TEXT_HOLD_MS = 5000;
-const PHASE_TRANSITION_CUE_BATCH_MS = 2000;
 const IDEA_BLOCK_CHAT_SHARE_ACK_TIMEOUT_MS = 8000;
 const PUBLIC_CHAT_SEND_ACK_TIMEOUT_MS = 5000;
 const VOICE_GENERATING_ID_PREFIX = "voice-generating";
@@ -307,11 +307,6 @@ const MAX_PENDING_IDEA_BLOCK_PREVIEW_COUNT = 3;
 
 function createClientNoticeId(prefix: string): string {
 	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-interface PhaseTransitionCueBatch {
-	cues: SimilarityPairCueData[];
-	timeoutId: number | null;
 }
 
 interface WhisperTransient {
@@ -624,28 +619,6 @@ function boardIdeaBlockUpdatePayloadToBlock(payload: BoardIdeaBlockUpdatePayload
 		summary: payload.summary,
 		status: payload.status ?? "ready"
 	} as BoardIdeaBlockPayload);
-}
-
-function ideaBlockToSimilarityCue(block: IdeaBlock): SimilarityPairCueData | null {
-	if (!block.hasCue || block.isDeleted) {
-		return null;
-	}
-
-	const blockSummary = block.cueText || block.aiSummary || block.summary;
-	if (!blockSummary.trim()) {
-		return null;
-	}
-
-	const hasSameReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
-	const hasDifferentReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
-	return {
-		id: `block-cue-${block.id}`,
-		blockId: block.id,
-		blockSummary,
-		hasSameReason: hasSameReason || hasDifferentReason ? hasSameReason : undefined,
-		hasDifferentReason: hasSameReason || hasDifferentReason ? hasDifferentReason : undefined,
-		isSameReason: hasDifferentReason && !hasSameReason ? false : hasSameReason && !hasDifferentReason ? true : (block.similarityIsSameReason ?? undefined)
-	};
 }
 
 function parseIdeaBlockCreatedAt(value: string | null | undefined): number | undefined {
@@ -1083,66 +1056,6 @@ function normalizeIdeaBlockText(value: string): string {
 		.replace(/[\s\p{P}]/gu, "");
 }
 
-function createPhaseTransitionSummaryCue(cues: SimilarityPairCueData[]): SimilarityCueData | null {
-	if (cues.length === 0) {
-		return null;
-	}
-
-	const uniqueCues = Array.from(new Map(cues.map(cue => [cue.id, cue])).values());
-	const sameReasonCount = uniqueCues.filter(cue => getSimilarityCueReasonFlags(cue).hasSameReason).length;
-	const differentReasonCount = uniqueCues.filter(cue => getSimilarityCueReasonFlags(cue).hasDifferentReason).length;
-	return {
-		kind: "phase-transition-summary",
-		id: `phase-transition-summary-${Date.now()}`,
-		sameReasonCount,
-		differentReasonCount
-	};
-}
-
-function isSimilarityPairCue(cue: SimilarityCueData): cue is SimilarityPairCueData {
-	return cue.kind !== "phase-transition-summary";
-}
-
-function getSimilarityCueReasonFlags(cue: SimilarityPairCueData): { hasSameReason: boolean; hasDifferentReason: boolean } {
-	return {
-		hasSameReason: cue.hasSameReason ?? cue.isSameReason !== false,
-		hasDifferentReason: cue.hasDifferentReason ?? cue.isSameReason === false
-	};
-}
-
-function resolveSimilarityCueReasonType(hasSameReason: boolean, hasDifferentReason: boolean, fallback?: boolean): boolean | undefined {
-	if (hasDifferentReason && !hasSameReason) {
-		return false;
-	}
-	if (hasSameReason && !hasDifferentReason) {
-		return true;
-	}
-	return fallback;
-}
-
-function mergeSimilarityPairCue(existingCue: SimilarityPairCueData, incomingCue: SimilarityPairCueData): SimilarityPairCueData {
-	const existingFlags = getSimilarityCueReasonFlags(existingCue);
-	const incomingFlags = getSimilarityCueReasonFlags(incomingCue);
-	const hasSameReason = existingFlags.hasSameReason || incomingFlags.hasSameReason;
-	const hasDifferentReason = existingFlags.hasDifferentReason || incomingFlags.hasDifferentReason;
-	return {
-		...existingCue,
-		...incomingCue,
-		id: existingCue.id,
-		hasSameReason,
-		hasDifferentReason,
-		isSameReason: resolveSimilarityCueReasonType(hasSameReason, hasDifferentReason, incomingCue.isSameReason ?? existingCue.isSameReason)
-	};
-}
-
-function upsertSimilarityPairCue(cues: SimilarityPairCueData[], incomingCue: SimilarityPairCueData): SimilarityPairCueData[] {
-	const existingIndex = cues.findIndex(cue => cue.id === incomingCue.id || cue.blockId === incomingCue.blockId);
-	if (existingIndex < 0) {
-		return [...cues, incomingCue];
-	}
-	return cues.map((cue, index) => (index === existingIndex ? mergeSimilarityPairCue(cue, incomingCue) : cue));
-}
-
 function buildDuplicateIdeaBlockNotice(block: IdeaBlock): IdeaBlockNotice {
 	const blockTitle = (block.aiSummary || block.summary).trim() || "既有想法";
 	const message = `已找到相似的既有想法：「${blockTitle}」`;
@@ -1442,7 +1355,19 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const [publicChatText, setPublicChatText] = useState("");
 	const [publicChatError, setPublicChatError] = useState<string | null>(null);
 	const [isSendingPublicChat, setIsSendingPublicChat] = useState(false);
-	const [cues, setCues] = useState<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
+	const [cueRefreshKey, setCueRefreshKey] = useState(0);
+	const [nowBlockIds, setNowBlockIds] = useState<string[] | null>(null);
+	const [sharingCueId, setSharingCueId] = useState<string | null>(null);
+	const pendingCueShareRef = useRef<SimilarityPairCueData | null>(null);
+	const cueQueue = useSimilarityCueQueue({
+		sessionId,
+		participantId,
+		enabled: canShowSimilarityCues && isSimilarityCueDisplayPhase(visiblePhase),
+		isConnected,
+		refreshKey: ideaBlockRefreshKey + cueRefreshKey,
+		nowBlockIds
+	});
+	const completeCue = cueQueue.complete;
 	const [unreadPublicChatCount, setUnreadPublicChatCount] = useState(0);
 	const [whisperTransient, setWhisperTransient] = useState<WhisperTransient>({ status: "idle", text: "" });
 	const blockRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1459,9 +1384,6 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const transcriptScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const ideaBlocksScrollViewportRef = useRef<HTMLDivElement | null>(null);
 	const publicChatScrollViewportRef = useRef<HTMLDivElement | null>(null);
-	const previousVisiblePhaseRef = useRef<SessionPhase>(visiblePhase);
-	const phaseTransitionCueBatchRef = useRef<PhaseTransitionCueBatch | null>(null);
-	const cuesRef = useRef<SimilarityCueData[]>(ENABLE_PRIVATE_BOARD_MOCK_DATA ? MOCK_SIMILARITY_CUES : []);
 	const setTranscriptRef = useCallback((lineId: string, node: HTMLDivElement | null) => {
 		transcriptRefs.current[lineId] = node;
 	}, []);
@@ -1494,67 +1416,9 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		},
 		[onSendBoardMessage]
 	);
-	const markSimilarityCueResponse = useCallback((target: { id?: string; cueId?: string; blockId?: string | number | null }, responseStatus: SimilarityCueTerminalResponseStatus) => {
-		const targetCueId = target.cueId || target.id;
-		const targetBlockId = target.blockId == null ? null : String(target.blockId);
-		const nextCues = cuesRef.current.map(cue => {
-			if (!isSimilarityPairCue(cue)) {
-				return cue;
-			}
-			const cueIdMatches = !!targetCueId && (cue.id === targetCueId || cue.cueId === targetCueId);
-			const blockIdMatches = !!targetBlockId && cue.blockId === targetBlockId;
-			return cueIdMatches || blockIdMatches ? { ...cue, responseStatus } : cue;
-		});
-		cuesRef.current = nextCues;
-		setCues(nextCues);
+	const queueSimilarityCueFromBlock = useCallback((block: IdeaBlock) => {
+		if (block.hasCue) setCueRefreshKey(key => key + 1);
 	}, []);
-	const queueSimilarityCueFromBlock = useCallback(
-		(block: IdeaBlock) => {
-			if (!canShowSimilarityCues) {
-				console.info("[private-board] similarity cue fallback skipped", {
-					reason: "cue_condition",
-					cueCondition,
-					blockId: block.id
-				});
-				return;
-			}
-
-			const cue = ideaBlockToSimilarityCue(block);
-			if (!cue) {
-				console.info("[private-board] similarity cue fallback skipped", {
-					reason: "missing_cue_payload",
-					blockId: block.id,
-					hasCue: block.hasCue,
-					isDeleted: block.isDeleted
-				});
-				return;
-			}
-
-			const currentBlock = ideaBlocksRef.current.find(item => item.id === block.id);
-			if (!currentBlock?.expanded) {
-				unreadIdeaBlockIdsFromRefreshRef.current.add(block.id);
-			}
-
-			setCues(prev => {
-				const alreadyQueued = prev.some(item => item.id === cue.id || (isSimilarityPairCue(item) && item.blockId === cue.blockId));
-				const nextCues = alreadyQueued
-					? prev.map(item => (isSimilarityPairCue(item) && (item.id === cue.id || item.blockId === cue.blockId) ? mergeSimilarityPairCue(item, cue) : item))
-					: [...prev, cue];
-				console.info("[private-board] similarity cue fallback detected", {
-					blockId: cue.blockId,
-					isSameReason: cue.isSameReason,
-					hasSameReason: cue.hasSameReason,
-					hasDifferentReason: cue.hasDifferentReason,
-					alreadyQueued,
-					currentBlockExpanded: !!currentBlock?.expanded
-				});
-				cuesRef.current = nextCues;
-				return nextCues;
-			});
-		},
-		[canShowSimilarityCues, cueCondition]
-	);
-
 	const isIdeaBlocksTabActive = visibleActiveTab === "ideablock";
 	const ideaBlockUnreadState = useMemo(() => getIdeaBlockUnreadState(ideaBlocks), [ideaBlocks]);
 	const displayedIdeaBlocks = useMemo(() => getDisplayedIdeaBlocks(ideaBlocks), [ideaBlocks]);
@@ -1570,89 +1434,6 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		});
 		previousIdeaBlockTopsRef.current = nextTops;
 	}, []);
-
-	const clearPhaseTransitionCueBatchTimer = useCallback(() => {
-		const batch = phaseTransitionCueBatchRef.current;
-		if (batch?.timeoutId != null) {
-			window.clearTimeout(batch.timeoutId);
-			batch.timeoutId = null;
-		}
-	}, []);
-
-	const flushPhaseTransitionCueBatch = useCallback(() => {
-		const batch = phaseTransitionCueBatchRef.current;
-		if (!batch) {
-			return;
-		}
-
-		clearPhaseTransitionCueBatchTimer();
-		phaseTransitionCueBatchRef.current = null;
-		const summaryCue = createPhaseTransitionSummaryCue(batch.cues);
-		if (!summaryCue) {
-			return;
-		}
-
-		setCues(prev => {
-			const nextCues = [...prev.filter(cue => cue.kind !== "phase-transition-summary"), summaryCue];
-			cuesRef.current = nextCues;
-			return nextCues;
-		});
-	}, [clearPhaseTransitionCueBatchTimer]);
-
-	const startPhaseTransitionCueBatch = useCallback(
-		(initialCues: SimilarityPairCueData[] = []) => {
-			clearPhaseTransitionCueBatchTimer();
-			phaseTransitionCueBatchRef.current = {
-				cues: initialCues,
-				timeoutId: window.setTimeout(() => flushPhaseTransitionCueBatch(), PHASE_TRANSITION_CUE_BATCH_MS)
-			};
-		},
-		[clearPhaseTransitionCueBatchTimer, flushPhaseTransitionCueBatch]
-	);
-
-	const clearCuesSoon = useCallback(() => {
-		window.setTimeout(() => {
-			cuesRef.current = [];
-			setCues([]);
-		}, 0);
-	}, []);
-
-	const clearSimilarityPairCuesSoon = useCallback(() => {
-		window.setTimeout(() => {
-			const previousCues = cuesRef.current;
-			getUnrespondedSimilarityPairCues(previousCues).forEach(cue => sendSimilarityCueResponse(cue, "ignored"));
-			const nextCues = removeSimilarityPairCues(previousCues);
-			cuesRef.current = nextCues;
-			setCues(nextCues);
-		}, 0);
-	}, [sendSimilarityCueResponse]);
-
-	const syncPhaseTransitionCueBatch = useCallback(
-		(nextPhase: SessionPhase) => {
-			const previousPhase = previousVisiblePhaseRef.current;
-			const isEnteringSimilarityCueDisplayPhase = !isSimilarityCueDisplayPhase(previousPhase) && isSimilarityCueDisplayPhase(nextPhase);
-			const isLeavingSimilarityCueDisplayPhase = isSimilarityCueDisplayPhase(previousPhase) && !isSimilarityCueDisplayPhase(nextPhase);
-
-			if (isEnteringSimilarityCueDisplayPhase && canShowSimilarityCues) {
-				const queuedPrivatePhaseCues = cuesRef.current.filter(isSimilarityPairCue);
-				clearCuesSoon();
-				startPhaseTransitionCueBatch(queuedPrivatePhaseCues);
-			}
-
-			if (isLeavingSimilarityCueDisplayPhase || !canShowSimilarityCues) {
-				clearPhaseTransitionCueBatchTimer();
-				phaseTransitionCueBatchRef.current = null;
-				if (!canShowSimilarityCues) {
-					clearCuesSoon();
-				} else if (isLeavingSimilarityCueDisplayPhase) {
-					clearSimilarityPairCuesSoon();
-				}
-			}
-
-			previousVisiblePhaseRef.current = nextPhase;
-		},
-		[canShowSimilarityCues, clearCuesSoon, clearPhaseTransitionCueBatchTimer, clearSimilarityPairCuesSoon, startPhaseTransitionCueBatch]
-	);
 
 	const markIdeaBlocksRead = useCallback((blockIds: Set<string>) => {
 		if (blockIds.size === 0) {
@@ -2199,24 +1980,14 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	}, [publicChatMessages]);
 
 	useEffect(() => {
-		cuesRef.current = cues;
-	}, [cues]);
-
-	useEffect(() => {
 		const voiceGeneratingTimeouts = voiceGeneratingTimeoutsRef.current;
 		const voiceGeneratingBlocks = voiceGeneratingBlocksRef.current;
 		return () => {
-			clearPhaseTransitionCueBatchTimer();
-			phaseTransitionCueBatchRef.current = null;
 			voiceGeneratingTimeouts.forEach(timeoutId => window.clearTimeout(timeoutId));
 			voiceGeneratingTimeouts.clear();
 			voiceGeneratingBlocks.clear();
 		};
-	}, [clearPhaseTransitionCueBatchTimer]);
-
-	useEffect(() => {
-		syncPhaseTransitionCueBatch(visiblePhase);
-	}, [syncPhaseTransitionCueBatch, visiblePhase]);
+	}, []);
 
 	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
@@ -2225,9 +1996,6 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 		if (lastMessage.type === "phase_changed") {
 			const nextPhase = normalizeSessionPhase(lastMessage.phase);
-			if (nextPhase) {
-				syncPhaseTransitionCueBatch(nextPhase);
-			}
 			const timer = window.setTimeout(() => {
 				clearAllVoiceGeneratingBlocks();
 				if (nextPhase) setCurrentPhase(nextPhase);
@@ -2259,14 +2027,10 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			const timer = window.setTimeout(() => {
 				const nextCondition = lastMessage.cue_condition ?? lastMessage.condition;
 				if (nextCondition) setCueCondition(nextCondition);
-				if (nextCondition === "control") {
-					cuesRef.current = [];
-					setCues([]);
-				}
 			}, 0);
 			return () => window.clearTimeout(timer);
 		}
-	}, [clearAllVoiceGeneratingBlocks, lastMessage, syncPhaseTransitionCueBatch]);
+	}, [clearAllVoiceGeneratingBlocks, lastMessage]);
 
 	useEffect(() => {
 		if (!isBoardMessage(lastMessage)) {
@@ -2391,28 +2155,6 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 					ideaBlockId: lastMessage.payload.blockId,
 					isSameReason: lastMessage.payload.isSameReason
 				});
-				const cueTargetBlock = ideaBlocksRef.current.find(block => block.id === lastMessage.payload.blockId);
-				const hasSameReason = cueTargetBlock?.similarityHasSameReason || lastMessage.payload.isSameReason === true;
-				const hasDifferentReason = cueTargetBlock?.similarityHasDifferentReason || lastMessage.payload.isSameReason === false;
-				const incomingCue: SimilarityPairCueData = {
-					...lastMessage.payload,
-					hasSameReason,
-					hasDifferentReason,
-					isSameReason: resolveSimilarityCueReasonType(hasSameReason, hasDifferentReason, lastMessage.payload.isSameReason)
-				};
-				sendSimilarityCueResponse(incomingCue, "shown");
-				if (!cueTargetBlock?.expanded) {
-					unreadIdeaBlockIdsFromRefreshRef.current.add(lastMessage.payload.blockId);
-				}
-				if (phaseTransitionCueBatchRef.current) {
-					phaseTransitionCueBatchRef.current.cues = upsertSimilarityPairCue(phaseTransitionCueBatchRef.current.cues, incomingCue);
-				} else {
-					const nextCues = cuesRef.current.some(cue => cue.id === incomingCue.id || (isSimilarityPairCue(cue) && cue.blockId === incomingCue.blockId))
-						? cuesRef.current.map(cue => (isSimilarityPairCue(cue) && (cue.id === incomingCue.id || cue.blockId === incomingCue.blockId) ? mergeSimilarityPairCue(cue, incomingCue) : cue))
-						: [...cuesRef.current, incomingCue];
-					cuesRef.current = nextCues;
-					setCues(nextCues);
-				}
 				setIdeaBlockRefreshKey(current => current + 1);
 				setIdeaBlocks(prev =>
 					prev.map(block =>
@@ -2432,6 +2174,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 			}
 
 			if (lastMessage.type === "public_context_matches") {
+				setNowBlockIds((lastMessage.payload.matches ?? []).map(match => String(match.ideaBlockId)));
 				const matchedIds = new Set((lastMessage.payload.matches ?? []).map(match => (match.ideaBlockId == null ? null : String(match.ideaBlockId))).filter((id): id is string => !!id));
 				if (matchedIds.size > 0 || lastMessage.payload.replaceExisting === true) {
 					matchedIds.forEach(blockId => {
@@ -2482,10 +2225,18 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 			if (lastMessage.type === "similarity_reason_share_sent") {
 				setIdeaBlockNotice(buildSimilarityReasonShareNotice(lastMessage.payload));
+				const pending = pendingCueShareRef.current;
+				if (pending && lastMessage.payload.cueId === pending.cueId) {
+					pendingCueShareRef.current = null;
+					setSharingCueId(null);
+					if ((lastMessage.payload.deliveredCount ?? 0) > 0) void completeCue(pending, "shared");
+				}
 			}
 
 			if (lastMessage.type === "similarity_reason_share_error") {
 				setIdeaBlockNotice(buildSimilarityReasonShareErrorNotice(lastMessage));
+				pendingCueShareRef.current = null;
+				setSharingCueId(null);
 			}
 
 			if (lastMessage.type === "public_chat_message") {
@@ -2524,6 +2275,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		return () => window.clearTimeout(timer);
 	}, [
 		canShowSimilarityCues,
+		completeCue,
 		captureIdeaBlockPositions,
 		isCollapsed,
 		isCurrentWhisperSegmentComplete,
@@ -3559,34 +3311,30 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 		[queueIdeaBlockChatShareNotice, sendPublicChatPayload, visiblePhase]
 	);
 
-	const shareSimilarityReason = (cue: SimilarityCueData) => {
-		if (!canShowSimilarityCues) {
-			return;
-		}
-		if (cue.kind === "phase-transition-summary") {
-			return;
-		}
-		onSendBoardMessage({
-			type: "share_similarity_reason",
-			blockId: cue.blockId,
-			cueId: cue.cueId || cue.id
-		});
-		setCues(prev => {
-			const nextCues = prev.filter(item => !isSimilarityPairCue(item) || item.blockId !== cue.blockId);
-			cuesRef.current = nextCues;
-			return nextCues;
-		});
-	};
+	useEffect(() => {
+		if (!sharingCueId) return;
+		const timer = window.setTimeout(() => {
+			pendingCueShareRef.current = null;
+			setSharingCueId(null);
+			setIdeaBlockNotice({ id: createClientNoticeId("cue-share-timeout"), title: "分享尚未完成", message: "未收到分享成功回覆，請再試一次。" });
+		}, 15000);
+		return () => window.clearTimeout(timer);
+	}, [sharingCueId]);
 
+	const shareSimilarityReason = (cue: SimilarityCueData) => {
+		if (!canShowSimilarityCues || !isConnected || pendingCueShareRef.current || cueQueue.busy || cue.kind === "phase-transition-summary") return;
+		pendingCueShareRef.current = cue;
+		setSharingCueId(cue.id);
+		onSendBoardMessage({ type: "share_similarity_reason", blockId: cue.blockId, cueId: cue.cueId || cue.id });
+	};
 	const viewSimilarityCue = (cue: SimilarityPairCueData) => {
+		if (sharingCueId || cueQueue.busy) return;
 		if (!jumpToBlock(cue.blockId)) {
 			setIdeaBlockNotice(buildMissingIdeaBlockJumpTargetNotice(cue));
 			return;
 		}
-		sendSimilarityCueResponse(cue, "accepted");
-		markSimilarityCueResponse(cue, "accepted");
+		void completeCue(cue, "accepted");
 	};
-
 	const shareSimilarityReasonFromBlock = useCallback(
 		(block: IdeaBlock) => {
 			if (!canShowSimilarityCues || !canShareSimilarityReasonInPhase(visiblePhase) || !block.hasCue || block.status === "generating" || block.isDeleted) {
@@ -3596,22 +3344,13 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 				type: "share_similarity_reason",
 				blockId: block.id
 			});
-			markSimilarityCueResponse({ blockId: block.id }, "shared");
 		},
-		[canShowSimilarityCues, markSimilarityCueResponse, onSendBoardMessage, visiblePhase]
+		[canShowSimilarityCues, onSendBoardMessage, visiblePhase]
 	);
 
-	const dismissSimilarityCue = (cue: SimilarityCueData, status: "dismissed" | "ignored") => {
-		if (isSimilarityPairCue(cue)) {
-			sendSimilarityCueResponse(cue, status);
-		}
-		setCues(prev => {
-			const nextCues = prev.filter(item => item.id !== cue.id);
-			cuesRef.current = nextCues;
-			return nextCues;
-		});
+	const dismissSimilarityCue = (cue: SimilarityCueData) => {
+		if (cue.kind !== "phase-transition-summary" && !sharingCueId) void completeCue(cue, "dismissed");
 	};
-
 	const publicTranscriptLines = transcriptLines.filter(line => line.source === "public");
 	const publicSubtitleLines = micMode === "private" ? publicTranscriptLines.filter(line => line.text.trim()).slice(-2) : [];
 	const showPublicSubtitlePanel = isIdeaBlocksTabActive && publicSubtitleLines.length > 0;
@@ -3620,7 +3359,7 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 	const showWhisperTransient = isIdeaBlocksTabActive && whisperTransient.status === "listening" && !!whisperTransientText;
 	const unreadIdeaBlockCountLabel = formatUnreadCount(unreadIdeaBlockCount);
 	const unreadPublicChatCountLabel = unreadPublicChatCount > 99 ? "99+" : String(unreadPublicChatCount);
-	const visibleSimilarityCues = canShowSimilarityCues && isSimilarityCueDisplayPhase(visiblePhase) ? cues : [];
+	const visibleSimilarityCues = cueQueue.active ? [cueQueue.active] : [];
 	const ideaBlockChatShareCueContent =
 		ideaBlockChatShareNotices.length > 0 ? (
 			<IdeaBlockChatShareCueContent notices={ideaBlockChatShareNotices} onView={viewIdeaBlockChatShareNotice} onRetry={retryIdeaBlockChatShareNotice} onDismiss={dismissIdeaBlockChatShareNotice} />
@@ -3878,6 +3617,8 @@ export const PrivateBoard = forwardRef<PrivateBoardHandle, PrivateBoardProps>(fu
 
 			<SimilarityCue
 				cues={visibleSimilarityCues}
+				busy={cueQueue.busy || !!sharingCueId}
+				error={cueQueue.error}
 				onJump={viewSimilarityCue}
 				onDismiss={dismissSimilarityCue}
 				onShareReason={shareSimilarityReason}

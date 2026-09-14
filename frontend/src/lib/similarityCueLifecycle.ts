@@ -1,7 +1,7 @@
 export interface SimilarityCueLifecycleItem {
 	id?: string;
 	kind?: string;
-	responseStatus?: string;
+	responseStatus?: string | null;
 }
 
 export function isSimilarityCueDisplayPhase(phase: unknown): boolean {

@@ -1163,7 +1163,7 @@ async def _handle_similarity_reason_share(
     )
     try:
         async with SessionLocal() as db:
-            if source_cue_id or own_block_id:
+            if delivered_count > 0 and (source_cue_id or own_block_id):
                 await mark_latest_similarity_cue_shared(
                     db,
                     session_name=session_id,

@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Literal
+from pydantic import BaseModel
 
 from ..db import get_db
 from ..schemas import (
@@ -19,6 +21,47 @@ from ..services.similarity_service import (
 )
 
 router = APIRouter(tags=["Similarities"])
+
+
+class CueQueueItem(BaseModel):
+    id: str
+    cueId: str
+    similarityId: int
+    blockId: str
+    ownBlockId: str
+    otherBlockId: str
+    blockSummary: str
+    isSameReason: bool
+    responseStatus: str | None = None
+
+
+class CueQueueResponse(BaseModel):
+    cues: list[CueQueueItem]
+    nowBlockIds: list[str]
+
+
+class CueResponseRequest(BaseModel):
+    cueId: str
+    response: Literal["shown", "accepted", "dismissed", "shared"]
+
+
+class CueResponseResult(BaseModel):
+    cueId: str
+    responseStatus: str
+
+
+@router.get("/sessions/{session_name}/users/{user_id}/similarity-cues", response_model=CueQueueResponse,
+            summary="Recover Participant Similarity Cue Queue")
+async def read_cue_queue(session_name: str, user_id: int, db: AsyncSession = Depends(get_db)):
+    from ..services.similarity_cue_queue import list_cue_queue
+    return await list_cue_queue(db, session_name=session_name, user_id=user_id)
+
+
+@router.post("/sessions/{session_name}/users/{user_id}/similarity-cues/response", response_model=CueResponseResult,
+             summary="Record Participant Cue Display Or Action")
+async def post_cue_response(session_name: str, user_id: int, payload: CueResponseRequest, db: AsyncSession = Depends(get_db)):
+    from ..services.similarity_cue_queue import save_cue_response
+    return await save_cue_response(db, session_name=session_name, user_id=user_id, cue_id=payload.cueId, response=payload.response)
 
 
 @router.post(

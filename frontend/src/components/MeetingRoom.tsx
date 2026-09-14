@@ -2183,12 +2183,12 @@ export default function MeetingRoom() {
 
 		if (isBoardStateMessage(lastMessage)) {
 			let phaseTimer: number | null = null;
-			if ("ranking_completion" in lastMessage) {
-				setRankingCompletionState(isRankingCompletionState(lastMessage.ranking_completion) ? lastMessage.ranking_completion : null);
-			}
 			const timerEndTimeMs = lastMessage.timer_end_time_ms;
-			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
+			if (lastMessage.current_phase || typeof timerEndTimeMs === "number" || "ranking_completion" in lastMessage) {
 				phaseTimer = window.setTimeout(() => {
+					if ("ranking_completion" in lastMessage) {
+						setRankingCompletionState(isRankingCompletionState(lastMessage.ranking_completion) ? lastMessage.ranking_completion : null);
+					}
 					const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
 					if (nextPhase) setCurrentPhase(nextPhase);
 					if (typeof timerEndTimeMs === "number") setTimerEndTime(timerEndTimeMs);
