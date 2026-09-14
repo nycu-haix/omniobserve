@@ -2244,8 +2244,8 @@ export default function MeetingRoom() {
 		}
 
 		if (isRankingCompletionStateMessage(lastMessage)) {
-			setRankingCompletionState(lastMessage);
-			return;
+			const timer = window.setTimeout(() => setRankingCompletionState(lastMessage), 0);
+			return () => window.clearTimeout(timer);
 		}
 
 		if (isRankingItemsChangedMessage(lastMessage)) {
