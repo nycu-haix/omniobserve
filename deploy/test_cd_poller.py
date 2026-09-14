@@ -33,7 +33,41 @@ class PollerTests(unittest.TestCase):
         self.run_tick(state);self.assertEqual(state['sky']['deployed'],'new');self.assertNotIn('pending',state['sky'])
     def test_failed_commit_stops_after_three_attempts(self):
         state={'sky':{'deployed':'old','failure':{'sha':'new','at':0,'attempts':3}}};self.run_tick(state);self.assertEqual(self.calls,[])
+    def test_shared_branch_targets_keep_independent_deployment_state(self):
+        self.target['id']='web'
+        self.config['targets'].append({**self.target,'id':'asr','compose_id':'asr-service'})
+        state={'web':{'deployed':'new'},'asr':{'deployed':'old'}}
+        self.run_tick(state)
+        self.assertEqual(self.calls[0]['composeId'],'asr-service')
+        self.assertEqual(state['web'],{'deployed':'new'})
+        self.assertEqual(state['asr']['pending']['sha'],'new')
+    def test_failed_commit_waits_before_retry(self):
+        state={'sky':{'deployed':'old','failure':{'sha':'new','at':m.time.time(),'attempts':1}}}
+        self.run_tick(state);self.assertEqual(self.calls,[])
+        state['sky']['failure']['at']=0
+        self.run_tick(state);self.assertEqual(state['sky']['pending']['attempts'],2)
     def test_new_commit_can_recover_after_previous_failure(self):
         state={'sky':{'deployed':'old','failure':{'sha':'failed','at':0,'attempts':3}}};self.run_tick(state);self.assertEqual(len(self.calls),1)
+
+class SharedBranchTests(unittest.TestCase):
+    def test_two_services_on_same_branch_keep_independent_state(self):
+        targets = [dict(branch='main', id=n, compose_id=n, initial_commit='old', health_checks=[['test.invalid', '/healthz']]) for n in ['web', 'asr']]
+        info = {'composeStatus':'done', 'autoDeploy':True, 'deployments':[]}
+        state = {'web': {'deployed':'new'}}
+        calls = []
+        def api(config, method, data):
+            if method == 'compose.one': return info
+            calls.append(data)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(m.subprocess,'check_output',return_value=b'new\trefs/heads/main\n'), patch.object(m,'api',side_effect=api), patch.object(m,'log'):
+            m.tick({'repository':'test','targets':targets},state,pathlib.Path(tmp)/'state.json')
+        self.assertEqual(calls[0]['composeId'], 'asr')
+        self.assertEqual(state['web']['deployed'], 'new')
+        self.assertEqual(state['asr']['pending']['sha'], 'new')
+
+    def test_custom_health_path_does_not_require_frontend_fields(self):
+        with patch.object(m.subprocess,'run') as run:
+            run.return_value.returncode=0
+            self.assertTrue(m.healthy({'health_checks':[['asr.test','/healthz']]}))
+            self.assertIn('https://asr.test/healthz', run.call_args.args[0])
 
 if __name__=='__main__':unittest.main()

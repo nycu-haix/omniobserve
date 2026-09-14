@@ -1,9 +1,10 @@
 from typing import Any
 
-from . import enhance_the_poster, lost_at_sea
+from . import enhance_the_poster, lost_at_sea, multimedia_hci_capstone
 
 DEFAULT_TASK_ID = lost_at_sea.TASK_ID
-TASK_MODULES = (lost_at_sea, enhance_the_poster)
+TASK_MODULES = (lost_at_sea, enhance_the_poster, multimedia_hci_capstone)
+TASK_TEMPLATE_MODULES = (lost_at_sea, multimedia_hci_capstone)
 TASK_CONFIGS = {module.TASK_ID: module.TASK_CONFIG for module in TASK_MODULES}
 DEFAULT_TASK_PHASES = lost_at_sea.TASK_PHASES
 
@@ -79,6 +80,9 @@ def normalize_phase_for_session(session_name: str | None = None, task_id: str | 
         "public": "group",
         "public_phase": "group",
         "group_phase": "group",
+        "reflection": "reflect",
+        "reflection_phase": "reflect",
+        "reflect_phase": "reflect",
         "private_1": "private_phase_1",
         "private_phase_one": "private_phase_1",
         "private_2": "private_phase_2",
@@ -94,6 +98,15 @@ def normalize_phase_for_session(session_name: str | None = None, task_id: str | 
 
 def get_ranking_items_for_session(session_name: str | None = None, task_id: str | None = None) -> list[str]:
     return list(get_task_module(session_name=session_name, task_id=task_id).RANKING_ITEMS)
+
+
+def get_ranking_limit_for_session(session_name: str | None = None, task_id: str | None = None) -> int | None:
+    value = get_task_config_for_session(session_name=session_name, task_id=task_id).get("ranking_limit")
+    try:
+        ranking_limit = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ranking_limit if ranking_limit > 0 else None
 
 
 def get_ranking_item_display_names_for_session(session_name: str | None = None, task_id: str | None = None) -> dict[str, tuple[str, str]]:
@@ -134,6 +147,8 @@ def serialize_task_config(session_name: str | None = None, task_id: str | None =
             for item in config["items"]
         ],
     }
+    if config.get("ranking_limit"):
+        payload["ranking_limit"] = config["ranking_limit"]
     if config.get("reference_image_src"):
         payload["reference_image_src"] = config["reference_image_src"]
     if config.get("reference_image_alt"):
@@ -153,7 +168,7 @@ def serialize_task_templates() -> list[dict[str, Any]]:
             "description": module.TASK_CONFIG.get("template_description") or module.TASK_TOPIC_DETAIL,
             "is_default": module.TASK_ID == DEFAULT_TASK_ID,
         }
-        for module in TASK_MODULES
+        for module in TASK_TEMPLATE_MODULES
     ]
 
 __all__ = [
@@ -167,10 +182,12 @@ __all__ = [
     "TASK_CONFIGS",
     "TASK_ID",
     "TASK_MODULES",
+    "TASK_TEMPLATE_MODULES",
     "TASK_TITLE",
     "TASK_TOPIC_DETAIL",
     "TOPIC_DESCRIPTION",
     "get_llm_topic_description_for_session",
+    "get_ranking_limit_for_session",
     "get_ranking_item_display_names_for_session",
     "get_ranking_items_for_session",
     "get_similarity_task_context_for_session",

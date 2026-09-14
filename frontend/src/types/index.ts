@@ -1,4 +1,5 @@
 export type IdeaBlockStatus = "generating" | "ready";
+export type TranscriptIdeaBlockProcessingStatus = "captured" | "pending" | "no_idea" | "failed";
 
 export interface IdeaBlock {
 	id: string;
@@ -29,6 +30,7 @@ export interface SharedSimilarityReason {
 	id: string;
 	title: string;
 	summary: string;
+	isSameReason?: boolean;
 	receivedAtMs?: number;
 }
 
@@ -44,14 +46,22 @@ export interface TranscriptLine {
 	isOwn?: boolean;
 	isDraft?: boolean;
 	linkedBlockId?: string;
+	ideaBlockStatus?: TranscriptIdeaBlockProcessingStatus;
 }
 
 export interface SimilarityPairCueData {
 	kind?: "pair";
 	id: string;
+	cueId?: string;
+	similarityId?: number;
 	blockId: string;
+	ownBlockId?: string;
+	otherBlockId?: string;
 	blockSummary: string;
 	isSameReason?: boolean;
+	hasSameReason?: boolean;
+	hasDifferentReason?: boolean;
+	responseStatus?: "shown" | "accepted" | "ignored" | "dismissed" | "shared" | null;
 }
 
 export interface SimilaritySummaryCueData {
@@ -64,6 +74,8 @@ export interface SimilaritySummaryCueData {
 export type SimilarityCueData = SimilarityPairCueData | SimilaritySummaryCueData;
 
 export interface SimilarityReasonSharedData extends SharedSimilarityReason {
+	cueId?: string;
+	similarityId?: number;
 	blockId: string;
 }
 
@@ -77,6 +89,8 @@ export interface PublicChatMessage {
 	timestampMs?: number;
 	isOwn?: boolean;
 	isDeleted?: boolean;
+	isPending?: boolean;
+	clientMessageId?: string;
 }
 
 export type MicMode = "public" | "private";

@@ -124,21 +124,38 @@ class TaskConfigItemResponse(BaseModel):
     image_bg: str
     image_fg: str
     image_mark: str
+    component_id: str | None = None
+    component_label: str | None = None
+    action_id: str | None = None
+    action_label: str | None = None
+    source_user_ids: list[int] | None = None
+
+
+class Phase1BuilderDetailInputResponse(BaseModel):
+    kind: str
+    label_zh: str | None = None
+    placeholder_zh: str | None = None
+    min: int | None = None
 
 
 class Phase1BuilderOptionResponse(BaseModel):
     id: str
     label_zh: str
     label_en: str | None = None
+    category: str | None = None
     description_zh: str | None = None
+    aliases: list[str] | None = None
     template_zh: str | None = None
     allowed_action_ids: list[str] | None = None
+    requires_detail: bool | None = None
+    detail_input: Phase1BuilderDetailInputResponse | None = None
 
 
 class Phase1BuilderResponse(BaseModel):
     enabled: bool = True
     title: str | None = None
     detail_placeholder: str | None = None
+    minimum_items: int | None = None
     components: list[Phase1BuilderOptionResponse]
     actions: list[Phase1BuilderOptionResponse]
 
@@ -159,6 +176,7 @@ class TaskConfigResponse(BaseModel):
     reference_image_alt: str | None = None
     phases: list[TaskPhaseResponse] = Field(default_factory=list)
     phase1_builder: Phase1BuilderResponse | None = None
+    ranking_limit: int | None = None
     items: list[TaskConfigItemResponse]
 
 
@@ -169,3 +187,12 @@ class TaskTemplateResponse(BaseModel):
     phases: list[TaskPhaseResponse] = Field(default_factory=list)
     description: str
     is_default: bool
+
+
+class SpreadsheetTaskItemsParseRequest(BaseModel):
+    filename: str
+    content_base64: str
+
+
+class SpreadsheetTaskItemsParseResponse(BaseModel):
+    items: list[TaskConfigItemResponse]

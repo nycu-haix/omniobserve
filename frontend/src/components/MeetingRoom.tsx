@@ -1,20 +1,54 @@
-import type { DragEndEvent } from "@dnd-kit/core";
-import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import type { DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertCircle, ChevronDown, ChevronLeft, ChevronUp, Columns2, GripVertical, Info, Keyboard, Lock, Maximize, Mic, Minimize, Radio, Rows2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { AlertCircle, Bell, CheckCircle2, ChevronDown, ChevronLeft, ChevronUp, GripVertical, Info, Keyboard, Lock, Maximize, MessageSquare, Mic, Minimize, Radio, Upload } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useAudioStream } from "../hooks/useAudioStream";
 import { useParticipantIdentity } from "../hooks/useParticipantIdentity";
+import { usePresenceWebSocket } from "../hooks/usePresenceWebSocket";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { getKeyboardShortcutTarget, isEditableShortcutTarget, shouldHandleExperimentSpaceShortcut } from "../lib/keyboardShortcuts";
+import { getNextMicModeAfterPublicActivation } from "../lib/micMode";
 import { isValidParticipantId } from "../lib/participantDefaults";
-import { DEFAULT_SESSION_PHASE, isGroupPhase, isPrivatePhase1, isPrivatePhase2, normalizeSessionPhase, normalizeSessionPhaseOptions, type SessionPhase } from "../lib/sessionPhase";
+import { getParticipantTranscriptionEnabled } from "../lib/presenceParticipants";
+import { getRankingComponentGroups } from "../lib/rankingComponentGroups";
+import { getRankingOwnerLabel, isOwnedRankingItem } from "../lib/rankingOwnership";
+import { getRankingInteractionState, type RankingScope } from "../lib/rankingPhasePermissions";
+import {
+	DEFAULT_SESSION_PHASE,
+	getSessionPhaseLabel,
+	isGroupPhase,
+	isPrivatePhase1,
+	isPrivatePhase2,
+	normalizeSessionPhase,
+	normalizeSessionPhaseOptions,
+	type SessionPhase
+} from "../lib/sessionPhase";
+import {
+	getActionDetailHint,
+	getActionReferenceDescription,
+	getComponentReferenceDescription,
+	getComponentReferenceMeta,
+	getTaskReferenceLabel,
+	type TaskReferenceOption
+} from "../lib/taskItemReference";
+import {
+	clampVisibleTaskPaneSplitRatio,
+	getTaskPaneSplitRatioFromKeyboard,
+	getTaskPaneSplitRatioFromPointerDelta,
+	getTaskPaneSplitTracks,
+	TASK_PANE_SEPARATOR_TRACK,
+	type TaskPaneCollapsedSide
+} from "../lib/taskPaneSplit";
+import { buildTaskReferenceImageSrc } from "../lib/taskReferenceImage";
 import { cn } from "../lib/utils";
-import { fetchTaskConfig, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
+import { fetchTaskConfig, parseSpreadsheetTaskItems, type Phase1BuilderConfig, type TaskConfigItem, type TaskPaneLayoutConfig } from "../services/api";
 import type { MicMode } from "../types";
 import { JitsiRoom, type JitsiAudioParticipant, type JitsiAudioSnapshot, type JitsiConnectionStatus } from "./JitsiRoom";
 import { PrivatePhaseTaskItemsPanel } from "./PrivatePhaseTaskItemsPanel";
-import { PrivateBoard } from "./private-board/PrivateBoard";
+import { PrivateBoard, type PrivateBoardHandle } from "./private-board/PrivateBoard";
+import { formatUnreadCount, type IdeaBlockUnreadState } from "./private-board/unreadIdeaBlocks";
 import { Button } from "./ui/Button";
 import { ShortcutKey } from "./ui/ShortcutKey";
 
@@ -27,9 +61,13 @@ interface LostAtSeaItem {
 	imageBg: string;
 	imageFg: string;
 	imageMark: string;
+	componentId: string;
+	componentLabel: string;
+	actionId: string;
+	actionLabel: string;
+	sourceUserIds: number[];
 }
 
-type RankingScope = "public" | "private";
 type TaskPaneContent = "task-instructions" | "phase-task-items" | "private-ranking" | "public-ranking";
 type TaskSplitDirection = "horizontal" | "vertical";
 
@@ -66,24 +104,42 @@ const EMPTY_JITSI_AUDIO_SNAPSHOT: JitsiAudioSnapshot = {
 interface RankingSnapshot {
 	revision: number;
 	items: string[];
+	change_count?: number;
+}
+
+interface RankingCompletionState {
+	type: "ranking_completion_state";
+	current_phase: string;
+	completed_participant_ids?: string[];
+	completed_count: number;
+	total_count: number;
+	is_completed: boolean;
+	has_next_phase: boolean;
+	timestamp_ms?: number;
 }
 
 function isTaskConfigItemList(value: unknown): value is TaskConfigItem[] {
 	return Array.isArray(value) && value.every(item => typeof item === "object" && item !== null && "id" in item && typeof item.id === "string" && "label" in item && typeof item.label === "string");
 }
 
-const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.elvismao.com";
-const DEFAULT_PRIVATE_BOARD_WIDTH = 560;
-const MIN_PRIVATE_BOARD_WIDTH = 520;
-const MIN_MEETING_COLUMN_WIDTH = 720;
+const jitsiBaseUrl = import.meta.env.VITE_JITSI_BASE_URL || "https://meet.omni.observe.tw";
+const DEFAULT_PRIVATE_BOARD_WIDTH = 500;
+const MIN_PRIVATE_BOARD_WIDTH = 420;
+const MIN_MEETING_COLUMN_WIDTH = 640;
 const PRIVATE_BOARD_WIDTH_STORAGE_KEY = "omni.meeting.privateBoardWidth";
-const DEFAULT_JITSI_HEIGHT = 220;
 const MIN_JITSI_HEIGHT = 220;
-const MIN_RANKING_HEIGHT = 220;
-const JITSI_HEIGHT_STORAGE_KEY = "omni.meeting.jitsiHeight";
+const MIN_TASK_WORKSPACE_HEIGHT = 260;
+const PREFERRED_JITSI_VIEWPORT_RATIO = 0.34;
+const MEETING_VERTICAL_PADDING = 32;
+const JITSI_RESIZE_HANDLE_HEIGHT = 16;
+const MIC_CONTROLS_HEIGHT = 40;
+const MEETING_ROW_GAP_HEIGHT = 4;
 const PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD = 3;
 const MAX_TASK_PANES = 3;
-const MIN_TASK_PANE_RATIO = 24;
+const RANKING_CUTOFF_DROP_PREFIX = "ranking-cutoff:";
+const CAPSTONE_TASK_ID = "multimedia-hci-capstone";
+const CAPSTONE_TASK_TITLE = "Multimedia and Human Computer Interaction Capstone";
+const CAPSTONE_TASK_DETAIL = "Upload an XLSX/CSV/TSV item list with topic and discription columns, then rank the uploaded topics by importance. Two-row topic/discription sheets are also supported.";
 const TASK_PANE_CONTENT_LABELS: Record<TaskPaneContent, string> = {
 	"task-instructions": "Task Instructions",
 	"phase-task-items": "Task Items",
@@ -112,6 +168,153 @@ function createInitialItems(items: TaskConfigItem[]): LostAtSeaItem[] {
 	return items.map((item, index) => createLostAtSeaItem(item, index));
 }
 
+function slugifyTaskItemId(value: string, fallback: string) {
+	const slug = value
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return slug || fallback;
+}
+
+function splitDelimitedLine(line: string, delimiter: string) {
+	const cells: string[] = [];
+	let current = "";
+	let quoted = false;
+	for (let index = 0; index < line.length; index += 1) {
+		const character = line[index];
+		const nextCharacter = line[index + 1];
+		if (character === "\"" && quoted && nextCharacter === "\"") {
+			current += "\"";
+			index += 1;
+			continue;
+		}
+		if (character === "\"") {
+			quoted = !quoted;
+			continue;
+		}
+		if (character === delimiter && !quoted) {
+			cells.push(current.trim());
+			current = "";
+			continue;
+		}
+		current += character;
+	}
+	cells.push(current.trim());
+	return cells;
+}
+
+function parseDelimitedTaskItems(text: string): TaskConfigItem[] {
+	const lines = text
+		.replace(/^\uFEFF/, "")
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(Boolean);
+	if (lines.length === 0) {
+		return [];
+	}
+	const delimiter = lines.some(line => line.includes("\t")) ? "\t" : ",";
+	const rows = lines.map(line => splitDelimitedLine(line, delimiter));
+	const transposedItems = parseTransposedTopicItems(rows);
+	if (transposedItems.length > 0) {
+		return transposedItems;
+	}
+	const firstRow = rows[0].map(cell => cell.trim().toLowerCase());
+	const headerKeys = new Set(["id", "topic", "item", "title", "name", "label", "label_zh", "label_en", "discription", "description", "description_zh"]);
+	const headers = firstRow.some(cell => headerKeys.has(cell)) ? firstRow : [];
+	const dataRows = rows.slice(1);
+	const findColumn = (...keys: string[]) => headers.findIndex(header => keys.includes(header));
+	const idColumn = findColumn("id");
+	const labelColumn = findColumn("topic", "item", "title", "name", "label", "label_zh", "label_en");
+	const descriptionColumn = findColumn("discription", "description", "description_zh");
+	const seenIds = new Set<string>();
+
+	return dataRows.flatMap((row, index) => {
+		const rawLabel = (labelColumn >= 0 ? row[labelColumn] : row[0])?.trim() || "";
+		if (!rawLabel) {
+			return [];
+		}
+		const rawId = (idColumn >= 0 ? row[idColumn] : "")?.trim() || rawLabel;
+		const baseId = slugifyTaskItemId(rawId, `capstone_item_${index + 1}`);
+		let id = baseId;
+		let suffix = 2;
+		while (seenIds.has(id)) {
+			id = `${baseId}_${suffix}`;
+			suffix += 1;
+		}
+		seenIds.add(id);
+		const description = (descriptionColumn >= 0 ? row[descriptionColumn] : row[1])?.trim() || "";
+		return [
+			{
+				id,
+				label: rawLabel,
+				label_zh: rawLabel,
+				label_en: rawLabel,
+				description_zh: description,
+				aliases: [],
+				image_title: rawLabel,
+				image_bg: "#f8fafc",
+				image_fg: "#334155",
+				image_mark: String(index + 1)
+			}
+		];
+	});
+}
+
+function parseTransposedTopicItems(rows: string[][]): TaskConfigItem[] {
+	if (rows.length < 2 || rows[0][0]?.trim().toLowerCase() !== "topic") {
+		return [];
+	}
+	const descriptionHeader = rows[1][0]?.trim().toLowerCase();
+	if (!["discription", "description", "description_zh"].includes(descriptionHeader || "")) {
+		return [];
+	}
+	const seenIds = new Set<string>();
+	const items: TaskConfigItem[] = [];
+	const columnCount = Math.max(rows[0].length, rows[1].length);
+	for (let columnIndex = 1; columnIndex < columnCount; columnIndex += 1) {
+		const label = rows[0][columnIndex]?.trim() || "";
+		if (!label) {
+			continue;
+		}
+		const baseId = slugifyTaskItemId(label, `capstone_item_${columnIndex}`);
+		let id = baseId;
+		let suffix = 2;
+		while (seenIds.has(id)) {
+			id = `${baseId}_${suffix}`;
+			suffix += 1;
+		}
+		seenIds.add(id);
+		items.push({
+			id,
+			label,
+			label_zh: label,
+			label_en: label,
+			description_zh: rows[1][columnIndex]?.trim() || "",
+			aliases: [],
+			image_title: label,
+			image_bg: "#f8fafc",
+			image_fg: "#334155",
+			image_mark: String(items.length + 1)
+		});
+	}
+	return items;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+	let binary = "";
+	const bytes = new Uint8Array(buffer);
+	bytes.forEach(byte => {
+		binary += String.fromCharCode(byte);
+	});
+	return window.btoa(binary);
+}
+
+function isCapstoneSessionName(sessionName: string) {
+	const normalizedSessionName = sessionName.trim().toLowerCase();
+	return normalizedSessionName === CAPSTONE_TASK_ID || normalizedSessionName.startsWith(`${CAPSTONE_TASK_ID}-`);
+}
+
 function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem {
 	return {
 		id: item.id,
@@ -121,7 +324,12 @@ function createLostAtSeaItem(item: TaskConfigItem, index: number): LostAtSeaItem
 		imageTitle: item.image_title || item.label_en || item.label,
 		imageBg: item.image_bg || "#f8fafc",
 		imageFg: item.image_fg || "#334155",
-		imageMark: item.image_mark || "ITEM"
+		imageMark: item.image_mark || "ITEM",
+		componentId: item.component_id || "",
+		componentLabel: item.component_label || "",
+		actionId: item.action_id || "",
+		actionLabel: item.action_label || "",
+		sourceUserIds: Array.isArray(item.source_user_ids) ? item.source_user_ids : []
 	};
 }
 
@@ -174,6 +382,37 @@ function JitsiAudioIndicator({ snapshot }: { snapshot: JitsiAudioSnapshot }) {
 					)}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+function CompactPhaseTimer({ phase, endTimeMs }: { phase: SessionPhase; endTimeMs: number }) {
+	const [timeLeft, setTimeLeft] = useState(() => Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+
+	useEffect(() => {
+		const updateTimer = () => {
+			setTimeLeft(Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000)));
+		};
+		updateTimer();
+		const interval = window.setInterval(updateTimer, 1000);
+		return () => window.clearInterval(interval);
+	}, [endTimeMs]);
+
+	const minutes = Math.floor(timeLeft / 60);
+	const seconds = timeLeft % 60;
+	const phaseLabel = getSessionPhaseLabel(phase);
+	const formattedTime = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+	return (
+		<div
+			className={cn(
+				"flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs shadow-sm xl:hidden",
+				isGroupPhase(phase) ? "border-primary/25 text-primary" : "border-muted-foreground/20 text-muted-foreground"
+			)}
+			aria-label={`${phaseLabel} 剩餘時間 ${formattedTime}`}
+		>
+			<span className="max-w-32 truncate font-medium">{phaseLabel}</span>
+			<span className="font-mono text-sm font-semibold tabular-nums text-foreground">{formattedTime}</span>
 		</div>
 	);
 }
@@ -249,33 +488,29 @@ function handleTaskItemImageError(event: React.SyntheticEvent<HTMLImageElement>,
 	event.currentTarget.src = taskItemFallbackImageSrc(item);
 }
 
+function getViewportWidth() {
+	return Math.floor(window.visualViewport?.width ?? window.innerWidth);
+}
+
+function getViewportHeight() {
+	return Math.floor(window.visualViewport?.height ?? window.innerHeight);
+}
+
 function clampPrivateBoardWidth(width: number) {
-	const availableWidth = window.innerWidth - 32 - 16;
-	const maxWidth = Math.max(MIN_PRIVATE_BOARD_WIDTH, availableWidth - MIN_MEETING_COLUMN_WIDTH);
-	return Math.min(Math.max(width, MIN_PRIVATE_BOARD_WIDTH), maxWidth);
+	const availableWidth = getViewportWidth() - 32 - 16;
+	const responsiveMinWidth = Math.min(MIN_PRIVATE_BOARD_WIDTH, Math.max(360, Math.floor(availableWidth * 0.38)));
+	const maxWidth = Math.max(responsiveMinWidth, availableWidth - MIN_MEETING_COLUMN_WIDTH);
+	return Math.min(Math.max(width, responsiveMinWidth), maxWidth);
 }
 
 function clampJitsiHeight(height: number) {
-	const availableHeight = window.innerHeight - 32 - 24 - 24 - 56;
-	const maxHeight = Math.max(MIN_JITSI_HEIGHT, availableHeight - MIN_RANKING_HEIGHT);
+	const fixedHeight = MEETING_VERTICAL_PADDING + JITSI_RESIZE_HANDLE_HEIGHT + MIC_CONTROLS_HEIGHT + MEETING_ROW_GAP_HEIGHT;
+	const maxHeight = Math.max(MIN_JITSI_HEIGHT, getViewportHeight() - fixedHeight - MIN_TASK_WORKSPACE_HEIGHT);
 	return Math.min(Math.max(height, MIN_JITSI_HEIGHT), maxHeight);
 }
 
-function isEditableShortcutTarget(target: EventTarget | null) {
-	if (!(target instanceof HTMLElement)) {
-		return false;
-	}
-
-	const editableElement = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']");
-	if (!editableElement) {
-		return false;
-	}
-
-	if (editableElement instanceof HTMLInputElement) {
-		return editableElement.type !== "button" && editableElement.type !== "checkbox" && editableElement.type !== "radio" && editableElement.type !== "submit";
-	}
-
-	return true;
+function getPreferredJitsiHeight() {
+	return clampJitsiHeight(Math.round(getViewportHeight() * PREFERRED_JITSI_VIEWPORT_RATIO));
 }
 
 function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): string[] {
@@ -284,6 +519,83 @@ function normalizeRankingItemIds(itemIds: string[], defaultItemIds: string[]): s
 	const missingIds = defaultItemIds.filter(id => !rankedValidIds.includes(id));
 
 	return [...rankedValidIds, ...missingIds];
+}
+
+function normalizeRankingLimit(value: unknown): number | undefined {
+	const rankingLimit = Number(value);
+	return Number.isFinite(rankingLimit) && rankingLimit > 0 ? Math.floor(rankingLimit) : undefined;
+}
+
+function shouldDefaultCollapseJitsi() {
+	const roomName = new URLSearchParams(window.location.search)
+		.get("room_name")
+		?.trim()
+		.replace(/^["']|["']$/g, "");
+	return roomName?.startsWith("enhance-the-poster") ?? false;
+}
+
+function getActiveRankingLimit(taskId: string, phase: SessionPhase, configuredLimit: number | undefined, itemCount: number): number | undefined {
+	if (taskId !== "enhance-the-poster" || isPrivatePhase1(phase) || configuredLimit === undefined || itemCount <= 0) {
+		return undefined;
+	}
+	return configuredLimit;
+}
+
+function normalizeRankingChangeCount(value: unknown, rankingLimit: number | undefined, itemCount: number): number | undefined {
+	if (rankingLimit === undefined || itemCount <= 0) {
+		return undefined;
+	}
+	const maxChangeCount = Math.min(rankingLimit, itemCount);
+	const changeCount = Number(value);
+	return Number.isFinite(changeCount) ? Math.max(0, Math.min(Math.floor(changeCount), maxChangeCount)) : maxChangeCount;
+}
+
+function getRankingCutoffDropId(scope: RankingScope) {
+	return `${RANKING_CUTOFF_DROP_PREFIX}${scope}`;
+}
+
+function isRankingCutoffDropId(value: UniqueIdentifier, scope: RankingScope) {
+	return String(value) === getRankingCutoffDropId(scope);
+}
+
+function getNextRankingChangeCount({
+	currentChangeCount,
+	rankingLimit,
+	itemCount,
+	oldIndex,
+	targetIndex
+}: {
+	currentChangeCount: number | undefined;
+	rankingLimit: number | undefined;
+	itemCount: number;
+	oldIndex: number;
+	targetIndex: number;
+}) {
+	if (currentChangeCount === undefined || rankingLimit === undefined) {
+		return currentChangeCount;
+	}
+	const boundedTargetIndex = Math.max(0, Math.min(targetIndex, itemCount));
+	if (oldIndex < currentChangeCount && boundedTargetIndex >= currentChangeCount) {
+		return Math.max(0, currentChangeCount - 1);
+	}
+	if (oldIndex >= currentChangeCount && boundedTargetIndex <= currentChangeCount) {
+		return normalizeRankingChangeCount(currentChangeCount + 1, rankingLimit, itemCount);
+	}
+	return currentChangeCount;
+}
+
+function moveRankingItem(items: LostAtSeaItem[], itemId: UniqueIdentifier, targetIndex: number): LostAtSeaItem[] {
+	const currentOldIndex = items.findIndex(item => item.id === itemId);
+	if (currentOldIndex < 0) {
+		return items;
+	}
+	const nextItems = [...items];
+	const [movedItem] = nextItems.splice(currentOldIndex, 1);
+	nextItems.splice(Math.max(0, Math.min(targetIndex, nextItems.length)), 0, movedItem);
+	return nextItems.map((item, index) => ({
+		...item,
+		rank: index + 1
+	}));
 }
 
 function createRankedItems(itemIds: string[], taskItemsById: Record<string, TaskConfigItem>, defaultItemIds: string[]): LostAtSeaItem[] {
@@ -359,7 +671,7 @@ function createTaskPaneLayoutFromConfig(config: TaskPaneLayoutConfig | undefined
 		type: "split",
 		id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 		direction: config.direction === "vertical" ? "vertical" : "horizontal",
-		ratio: Math.min(Math.max(Number(config.ratio) || 50, MIN_TASK_PANE_RATIO), 100 - MIN_TASK_PANE_RATIO),
+		ratio: clampVisibleTaskPaneSplitRatio(Number(config.ratio) || 50),
 		first,
 		second
 	};
@@ -392,90 +704,22 @@ function createDefaultTaskPaneLayout(phase: SessionPhase, phase1BuilderEnabled =
 		return createTaskPaneLeaf("private-ranking");
 	}
 
+	if (phase === "reflect") {
+		return {
+			type: "split",
+			id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			direction: "horizontal",
+			ratio: 58,
+			first: createTaskPaneLeaf("private-ranking"),
+			second: createTaskPaneLeaf("public-ranking")
+		};
+	}
+
 	return createTaskPaneLeaf("private-ranking");
-}
-
-function getTaskPaneContentOptions(phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent[] {
-	if (isGroupPhase(phase)) {
-		return ["public-ranking", "private-ranking", "task-instructions"];
-	}
-
-	if (isPrivatePhase1(phase)) {
-		return phase1BuilderEnabled ? ["phase-task-items", "task-instructions"] : ["private-ranking", "task-instructions"];
-	}
-
-	return ["private-ranking", "task-instructions"];
 }
 
 function countTaskPaneLeaves(node: TaskPaneNode): number {
 	return node.type === "leaf" ? 1 : countTaskPaneLeaves(node.first) + countTaskPaneLeaves(node.second);
-}
-
-function getFirstTaskPaneLeafId(node: TaskPaneNode): string {
-	return node.type === "leaf" ? node.id : getFirstTaskPaneLeafId(node.first);
-}
-
-function hasTaskPaneContent(node: TaskPaneNode, content: TaskPaneContent): boolean {
-	return node.type === "leaf" ? node.content === content : hasTaskPaneContent(node.first, content) || hasTaskPaneContent(node.second, content);
-}
-
-function chooseNewTaskPaneContent(node: TaskPaneNode, phase: SessionPhase, phase1BuilderEnabled = false): TaskPaneContent {
-	const preferredContents = getTaskPaneContentOptions(phase, phase1BuilderEnabled);
-	return preferredContents.find(content => !hasTaskPaneContent(node, content)) ?? "task-instructions";
-}
-
-function updateTaskPaneNode(node: TaskPaneNode, paneId: string, updater: (leaf: TaskPaneLeaf) => TaskPaneNode): TaskPaneNode {
-	if (node.type === "leaf") {
-		return node.id === paneId ? updater(node) : node;
-	}
-
-	return {
-		...node,
-		first: updateTaskPaneNode(node.first, paneId, updater),
-		second: updateTaskPaneNode(node.second, paneId, updater)
-	};
-}
-
-function updateTaskPaneSplit(node: TaskPaneNode, splitId: string, ratio: number): TaskPaneNode {
-	if (node.type === "leaf") {
-		return node;
-	}
-
-	if (node.id === splitId) {
-		return {
-			...node,
-			ratio: Math.min(100 - MIN_TASK_PANE_RATIO, Math.max(MIN_TASK_PANE_RATIO, ratio))
-		};
-	}
-
-	return {
-		...node,
-		first: updateTaskPaneSplit(node.first, splitId, ratio),
-		second: updateTaskPaneSplit(node.second, splitId, ratio)
-	};
-}
-
-function removeTaskPaneNode(node: TaskPaneNode, paneId: string): TaskPaneNode | null {
-	if (node.type === "leaf") {
-		return node.id === paneId ? null : node;
-	}
-
-	const nextFirst = removeTaskPaneNode(node.first, paneId);
-	const nextSecond = removeTaskPaneNode(node.second, paneId);
-
-	if (!nextFirst) {
-		return nextSecond;
-	}
-
-	if (!nextSecond) {
-		return nextFirst;
-	}
-
-	return {
-		...node,
-		first: nextFirst,
-		second: nextSecond
-	};
 }
 
 function getTaskPaneContentAvailability(content: TaskPaneContent, phase: SessionPhase, phase1BuilderEnabled = false): boolean {
@@ -483,20 +727,59 @@ function getTaskPaneContentAvailability(content: TaskPaneContent, phase: Session
 		return isPrivatePhase1(phase) && phase1BuilderEnabled;
 	}
 	if (content === "private-ranking") {
-		return !isPrivatePhase1(phase) || !phase1BuilderEnabled;
+		return getRankingInteractionState("private", phase, phase1BuilderEnabled) !== "hidden";
 	}
 	if (content === "public-ranking") {
-		return isGroupPhase(phase);
+		return getRankingInteractionState("public", phase, phase1BuilderEnabled) !== "hidden";
 	}
 	return true;
 }
 
-function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[] } {
+function isRankingStateMessage(message: object | null): message is { type: "ranking_state"; scope?: RankingScope; revision: number; items: string[]; change_count?: number } {
 	return !!message && "type" in message && message.type === "ranking_state" && "items" in message && Array.isArray(message.items);
 }
 
 function isRankingSnapshot(value: unknown): value is RankingSnapshot {
-	return typeof value === "object" && value !== null && "revision" in value && typeof value.revision === "number" && "items" in value && Array.isArray(value.items);
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"revision" in value &&
+		typeof value.revision === "number" &&
+		"items" in value &&
+		Array.isArray(value.items) &&
+		(!("change_count" in value) || typeof value.change_count === "number")
+	);
+}
+
+function isRankingCompletionState(value: unknown): value is RankingCompletionState {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"type" in value &&
+		value.type === "ranking_completion_state" &&
+		"current_phase" in value &&
+		typeof value.current_phase === "string" &&
+		"completed_count" in value &&
+		typeof value.completed_count === "number" &&
+		"total_count" in value &&
+		typeof value.total_count === "number" &&
+		"is_completed" in value &&
+		typeof value.is_completed === "boolean" &&
+		"has_next_phase" in value &&
+		typeof value.has_next_phase === "boolean"
+	);
+}
+
+function isRankingCompletionStateMessage(message: object | null): message is RankingCompletionState {
+	return isRankingCompletionState(message);
+}
+
+function isRankingItemsChangedMessage(message: object | null): message is {
+	type: "ranking_items_changed";
+	ranking_items: TaskConfigItem[];
+	public_ranking?: RankingSnapshot;
+} {
+	return !!message && "type" in message && message.type === "ranking_items_changed" && "ranking_items" in message && isTaskConfigItemList(message.ranking_items);
 }
 
 function isBoardStateMessage(message: object | null): message is {
@@ -506,6 +789,7 @@ function isBoardStateMessage(message: object | null): message is {
 	public_ranking?: RankingSnapshot;
 	private_ranking?: RankingSnapshot;
 	ranking_items?: TaskConfigItem[] | null;
+	ranking_completion?: RankingCompletionState | null;
 	current_phase?: unknown;
 	timer_end_time_ms?: number;
 } {
@@ -543,48 +827,128 @@ function isJoinRejectedMessage(message: object | null): message is {
 	return !!message && "type" in message && message.type === "join_rejected";
 }
 
-function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item: LostAtSeaItem; rankDelta?: number; showImage: boolean; onPreview: (item: LostAtSeaItem) => void }) {
+function RankingCutoffSeparator({ scope, limit, changeCount }: { scope: RankingScope; limit: number; changeCount: number }) {
+	const { setNodeRef, isOver } = useDroppable({
+		id: getRankingCutoffDropId(scope)
+	});
+	const label = changeCount >= limit ? `前 ${limit} 個會納入改善排序；以下項目不會改動` : `前 ${changeCount} 個會納入改善排序（最多 ${limit} 個）；以下項目不會改動`;
+	return (
+		<div
+			ref={setNodeRef}
+			className={cn(
+				"grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-md py-1 text-xs font-medium text-muted-foreground transition-colors",
+				isOver && "bg-primary/5 text-primary"
+			)}
+			aria-label="拖到這條線下方代表不改動"
+		>
+			<span className="h-px bg-border" />
+			<span className="max-w-[min(34rem,78vw)] rounded-full border bg-background px-3 py-1 text-center leading-5">{label}</span>
+			<span className="h-px bg-border" />
+		</div>
+	);
+}
+
+function SortableLostAtSeaItem({
+	item,
+	rankDelta,
+	showImage,
+	rankingLimit,
+	changeCount,
+	onPreview,
+	isOwnItem = false,
+	ownerLabel,
+	readOnly = false
+}: {
+	item: LostAtSeaItem;
+	rankDelta?: number;
+	showImage: boolean;
+	rankingLimit?: number;
+	changeCount?: number;
+	onPreview: (item: LostAtSeaItem) => void;
+	isOwnItem?: boolean;
+	ownerLabel: string;
+	readOnly?: boolean;
+}) {
 	const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-		id: item.id
+		id: item.id,
+		disabled: readOnly
 	});
 	const verticalTransform = transform ? { ...transform, x: 0 } : transform;
 	const rankDeltaAmount = typeof rankDelta === "number" ? Math.abs(rankDelta) : 0;
 	const hasRankDelta = rankDeltaAmount > 0;
 	const isRankConflict = rankDeltaAmount > PRIVATE_PUBLIC_RANK_CONFLICT_THRESHOLD;
 	const rankDeltaDirection = typeof rankDelta === "number" && rankDelta < 0 ? "up" : "down";
+	const isBeyondRankingLimit = changeCount !== undefined && item.rank > changeCount;
+	const itemTitle = readOnly
+		? "Public 排序僅供參考，Reflect Phase 只能調整 Private 排序"
+		: isBeyondRankingLimit && rankingLimit !== undefined
+			? `這個項目目前不會改動；拖到分隔線上方可納入排序，最多 ${rankingLimit} 個`
+			: hasRankDelta
+				? `與 Public 排序差 ${rankDeltaAmount} 位`
+				: undefined;
+	const itemAriaLabel = `${isBeyondRankingLimit ? "不改" : item.rank}. ${item.label}${item.componentLabel ? `，元件 ${item.componentLabel}` : ""}${item.actionLabel ? `，動作 ${item.actionLabel}` : ""}${isOwnItem ? `，此項目由 ${ownerLabel} 提出` : ""}`;
 
 	return (
 		<div
 			ref={setNodeRef}
 			className={cn(
-				"flex min-h-10 cursor-grab select-none items-center gap-3 rounded-lg border bg-background px-3 py-2 transition-colors",
+				"grid min-h-10 w-full shrink-0 cursor-grab select-none items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors",
+				showImage ? "grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]",
+				readOnly && "cursor-default bg-muted/20",
 				isRankConflict && "border-muted-foreground/30",
-				isDragging && "opacity-50"
+				isBeyondRankingLimit && "bg-muted/35 text-muted-foreground",
+				isDragging && !readOnly && "opacity-50"
 			)}
 			style={{
 				transform: CSS.Transform.toString(verticalTransform),
 				transition
 			}}
-			title={hasRankDelta ? `與 Public 排序差 ${rankDeltaAmount} 位` : undefined}
-			{...attributes}
-			{...listeners}
+			data-local-space-shortcut="true"
+			aria-label={itemAriaLabel}
+			aria-readonly={readOnly}
+			title={itemTitle}
+			{...(readOnly ? {} : attributes)}
+			{...(readOnly ? {} : listeners)}
 		>
 			{showImage && (
 				<button
 					type="button"
-					className="h-9 w-12 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					className="h-7 w-10 shrink-0 overflow-hidden rounded-md border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					aria-label={`放大查看 ${item.label}`}
 					onClick={event => {
 						event.stopPropagation();
 						onPreview(item);
+					}}
+					onKeyDown={event => {
+						if (event.code === "Space" || event.key === "Enter") {
+							event.stopPropagation();
+						}
 					}}
 					onPointerDown={event => event.stopPropagation()}
 				>
 					<img className="h-full w-full object-cover" src={taskItemImageSrc(item.id)} alt={item.imageTitle} draggable={false} onError={event => handleTaskItemImageError(event, item)} />
 				</button>
 			)}
-			<span className="grid h-6 w-6 place-items-center rounded-full bg-muted text-xs font-semibold text-primary">{item.rank}</span>
-			<span className="min-w-0 flex-1">{item.label}</span>
+			<span className={cn("grid h-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-primary", isBeyondRankingLimit ? "w-10" : "w-6")}>
+				{isBeyondRankingLimit ? "不改" : item.rank}
+			</span>
+			<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 leading-5">
+				{item.componentLabel && (
+					<span className="inline-flex shrink-0 rounded-full border border-muted-foreground/20 bg-muted/60 px-2 py-0.5 text-[11px] font-semibold leading-4 text-muted-foreground">
+						{item.componentLabel}
+					</span>
+				)}
+				<span className="min-w-0 whitespace-normal break-words">{item.label}</span>
+				{item.actionLabel && <span className="shrink-0 text-[11px] font-medium leading-4 text-muted-foreground">{item.actionLabel}</span>}
+				{isOwnItem && (
+					<span
+						className="inline-flex shrink-0 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold leading-4 text-primary"
+						aria-label={`此項目由 ${ownerLabel} 提出`}
+					>
+						{ownerLabel}
+					</span>
+				)}
+			</span>
 			{hasRankDelta && (
 				<span
 					className={cn(
@@ -608,12 +972,13 @@ function SortableLostAtSeaItem({ item, rankDelta, showImage, onPreview }: { item
 					{rankDeltaAmount}
 				</span>
 			)}
-			<GripVertical className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+			{readOnly ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
 		</div>
 	);
 }
 
 function LostAtSeaRankingPanel({
+	scope,
 	title,
 	status,
 	items,
@@ -624,8 +989,14 @@ function LostAtSeaRankingPanel({
 	showImages,
 	onPreviewItem,
 	getRankDelta,
-	scrollContainerRef
+	rankingLimit,
+	changeCount,
+	scrollContainerRef,
+	participantId,
+	participantDisplayName,
+	readOnly = false
 }: {
+	scope: RankingScope;
 	title: string;
 	status: string;
 	items: LostAtSeaItem[];
@@ -636,20 +1007,164 @@ function LostAtSeaRankingPanel({
 	showImages: boolean;
 	onPreviewItem: (item: LostAtSeaItem) => void;
 	getRankDelta?: (item: LostAtSeaItem) => number | undefined;
+	rankingLimit?: number;
+	changeCount?: number;
 	scrollContainerRef?: RefObject<HTMLDivElement | null>;
+	participantId: string;
+	participantDisplayName: string;
+	readOnly?: boolean;
 }) {
+	const ownerLabel = getRankingOwnerLabel(participantDisplayName, participantId);
+	const componentGroups = getRankingComponentGroups(
+		items.map(item => ({
+			id: item.id,
+			componentId: item.componentId,
+			componentLabel: item.componentLabel
+		}))
+	);
+	const itemList = (
+		<div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+			{readOnly && (
+				<div className="flex items-center gap-2 rounded-md border bg-muted/35 px-3 py-2 text-xs font-medium text-muted-foreground">
+					<Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+					<span>Public 排序僅供參考，Reflect Phase 只能調整 Private 排序。</span>
+				</div>
+			)}
+			{componentGroups.length > 1 && (
+				<div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/30 px-2.5 py-2 text-xs" aria-label={`${title} 元件分布`}>
+					<span className="shrink-0 font-semibold text-muted-foreground">元件</span>
+					{componentGroups.map(group => (
+						<span key={group.id} className="inline-flex min-h-6 items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-muted-foreground" title={`${group.label}：${group.count} 個`}>
+							<span className="font-medium text-foreground">{group.label}</span>
+							<span className="tabular-nums">{group.count}</span>
+						</span>
+					))}
+				</div>
+			)}
+			{items.length === 0 && (
+				<div className="grid min-h-32 place-items-center rounded-md border border-dashed bg-muted/30 p-4 text-center text-sm leading-6 text-muted-foreground">
+					Upload an item list to start ranking.
+				</div>
+			)}
+			{items.map((item, index) => (
+				<Fragment key={item.id}>
+					{!readOnly && rankingLimit !== undefined && changeCount !== undefined && index === changeCount && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
+					<SortableLostAtSeaItem
+						item={item}
+						rankDelta={getRankDelta?.(item)}
+						showImage={showImages}
+						rankingLimit={rankingLimit}
+						changeCount={changeCount}
+						onPreview={onPreviewItem}
+						isOwnItem={isOwnedRankingItem(item.sourceUserIds, participantId)}
+						ownerLabel={ownerLabel}
+						readOnly={readOnly}
+					/>
+				</Fragment>
+			))}
+			{!readOnly && rankingLimit !== undefined && changeCount !== undefined && changeCount >= items.length && <RankingCutoffSeparator scope={scope} limit={rankingLimit} changeCount={changeCount} />}
+		</div>
+	);
+
 	return (
-		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={title}>
+		<section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label={title} aria-readonly={readOnly}>
 			<div className="sr-only">{status}</div>
 			<DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragCancel={onDragCancel} onDragEnd={onDragEnd}>
 				<SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-					<div ref={scrollContainerRef} className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto pr-1">
-						{items.map(item => (
-							<SortableLostAtSeaItem key={item.id} item={item} rankDelta={getRankDelta?.(item)} showImage={showImages} onPreview={onPreviewItem} />
-						))}
-					</div>
+					{itemList}
 				</SortableContext>
 			</DndContext>
+		</section>
+	);
+}
+
+function TaskReferenceList({
+	title,
+	items,
+	getDescription,
+	getMeta
+}: {
+	title: string;
+	items: TaskReferenceOption[];
+	getDescription: (item: TaskReferenceOption) => string;
+	getMeta?: (item: TaskReferenceOption) => string;
+}) {
+	return (
+		<div className="grid min-h-0 gap-2">
+			<div className="text-xs font-semibold text-muted-foreground">{title}</div>
+			<div className="grid min-h-0 gap-1.5 overflow-visible">
+				{items.map(item => {
+					const label = getTaskReferenceLabel(item);
+					const description = getDescription(item);
+					const meta = getMeta?.(item) ?? "";
+					return (
+						<div key={item.id} className="grid min-w-0 gap-0.5 rounded-md bg-background/70 px-2.5 py-2">
+							<div className="min-w-0 truncate text-xs font-semibold text-foreground">{label}</div>
+							<div className="text-xs leading-5 text-muted-foreground">{description}</div>
+							{meta && <div className="text-[11px] leading-4 text-muted-foreground/80">{meta}</div>}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+function TaskReferencePanel({ id, builder }: { id: string; builder: Phase1BuilderConfig }) {
+	return (
+		<section id={id} className="grid max-h-52 shrink-0 gap-3 overflow-y-auto rounded-md border bg-muted/35 p-3 sm:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]" aria-label="海報元件與改善動作說明">
+			<TaskReferenceList title="海報元件" items={builder.components} getDescription={getComponentReferenceDescription} getMeta={getComponentReferenceMeta} />
+			<TaskReferenceList title="改善動作" items={builder.actions} getDescription={getActionReferenceDescription} getMeta={getActionDetailHint} />
+		</section>
+	);
+}
+
+function CapstoneUploadButton({ onUpload }: { onUpload: (file: File) => void }) {
+	return (
+		<label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground">
+			<Upload className="h-3.5 w-3.5" aria-hidden="true" />
+			<span>Upload Excel</span>
+			<input
+				type="file"
+				accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/tab-separated-values"
+				className="sr-only"
+				onChange={event => {
+					const file = event.target.files?.[0];
+					event.target.value = "";
+					if (file) {
+						onUpload(file);
+					}
+				}}
+			/>
+		</label>
+	);
+}
+
+function CapstoneTaskItemUploadPanel({
+	itemCount,
+	uploadError,
+	onUpload
+}: {
+	itemCount: number;
+	uploadError: string;
+	onUpload: (file: File) => void;
+}) {
+	return (
+		<section className="grid gap-2 rounded-md border bg-muted/35 p-3" aria-label="Capstone item upload">
+			<div className="flex flex-wrap items-center justify-between gap-2">
+				<div className="grid min-w-0 gap-1">
+					<div className="text-xs font-semibold text-muted-foreground">Item List</div>
+					<div className="text-sm text-foreground">{itemCount > 0 ? `${itemCount} items loaded` : "Upload an XLSX, CSV, or TSV before ranking."}</div>
+				</div>
+				<CapstoneUploadButton onUpload={onUpload} />
+			</div>
+			<p className="text-xs leading-5 text-muted-foreground">Use topic and discription. The first row is treated as headers; two-row topic/discription sheets are also supported.</p>
+			{uploadError && (
+				<div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-background px-2.5 py-2 text-xs text-destructive" role="alert">
+					<AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+					<span>{uploadError}</span>
+				</div>
+			)}
 		</section>
 	);
 }
@@ -665,6 +1180,10 @@ function TaskWorkspace({
 	taskId,
 	phase1Builder,
 	phaseLayoutConfig,
+	compactPhaseTimer,
+	capstoneItemCount,
+	capstoneUploadError,
+	onCapstoneItemUpload,
 	renderPrivateRanking,
 	renderPublicRanking
 }: {
@@ -678,17 +1197,29 @@ function TaskWorkspace({
 	taskId: string;
 	phase1Builder?: Phase1BuilderConfig;
 	phaseLayoutConfig?: TaskPaneLayoutConfig;
+	compactPhaseTimer?: React.ReactNode;
+	capstoneItemCount: number;
+	capstoneUploadError: string;
+	onCapstoneItemUpload: (file: File) => void;
 	renderPrivateRanking: () => React.ReactNode;
 	renderPublicRanking: () => React.ReactNode;
 }) {
 	const phase1BuilderEnabled = !!phase1Builder?.enabled && phase1Builder.components.length > 0 && phase1Builder.actions.length > 0;
-	const [layout, setLayout] = useState<TaskPaneNode>(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig));
-	const [hasUserCustomizedLayout, setHasUserCustomizedLayout] = useState(false);
+	const isCapstoneTask = taskId === CAPSTONE_TASK_ID;
+	const isCapstoneItemListLoaded = isCapstoneTask && capstoneItemCount > 0;
+	const isCapstoneUploadAvailable = isCapstoneTask && (currentPhase === "private" || isPrivatePhase1(currentPhase) || isPrivatePhase2(currentPhase));
+	const taskReferencePanelId = "task-reference-panel";
 	const [isNarrowLayout, setIsNarrowLayout] = useState(() => window.matchMedia("(max-width: 767px)").matches);
-	const defaultLayout = useMemo(() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, phaseLayoutConfig), [currentPhase, phase1BuilderEnabled, phaseLayoutConfig]);
-	const visibleLayout = hasUserCustomizedLayout ? layout : defaultLayout;
-	const paneCount = countTaskPaneLeaves(visibleLayout);
-	const contentOptions = useMemo(() => getTaskPaneContentOptions(currentPhase, phase1BuilderEnabled), [currentPhase, phase1BuilderEnabled]);
+	const [isTaskReferenceOpen, setIsTaskReferenceOpen] = useState(false);
+	const [referenceImageStatus, setReferenceImageStatus] = useState({ src: "", retryToken: 0, failed: false });
+	const normalizedReferenceImageSrc = referenceImageSrc || "";
+	const referenceImageRetryToken = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.retryToken : 0;
+	const isReferenceImageFailed = referenceImageStatus.src === normalizedReferenceImageSrc ? referenceImageStatus.failed : false;
+	const visibleLayout = useMemo(
+		() => createDefaultTaskPaneLayout(currentPhase, phase1BuilderEnabled, isCapstoneItemListLoaded ? undefined : phaseLayoutConfig),
+		[currentPhase, isCapstoneItemListLoaded, phase1BuilderEnabled, phaseLayoutConfig]
+	);
+	const referenceImageDisplaySrc = useMemo(() => buildTaskReferenceImageSrc(normalizedReferenceImageSrc, referenceImageRetryToken), [normalizedReferenceImageSrc, referenceImageRetryToken]);
 
 	useEffect(() => {
 		const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -697,87 +1228,6 @@ function TaskWorkspace({
 		mediaQuery.addEventListener("change", handleChange);
 		return () => mediaQuery.removeEventListener("change", handleChange);
 	}, []);
-
-	useEffect(() => {
-		const timer = window.setTimeout(() => {
-			setLayout(defaultLayout);
-			setHasUserCustomizedLayout(false);
-		}, 0);
-		return () => window.clearTimeout(timer);
-	}, [defaultLayout]);
-
-	const markCustomized = () => setHasUserCustomizedLayout(true);
-
-	const splitPane = (paneId: string, direction: TaskSplitDirection) => {
-		if (paneCount >= MAX_TASK_PANES) {
-			return;
-		}
-
-		markCustomized();
-		setLayout(
-			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-				type: "split",
-				id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-				direction,
-				ratio: 50,
-				first: leaf,
-				second: createTaskPaneLeaf(chooseNewTaskPaneContent(visibleLayout, currentPhase, phase1BuilderEnabled))
-			}))
-		);
-	};
-
-	const changePaneContent = (paneId: string, content: TaskPaneContent) => {
-		markCustomized();
-		setLayout(
-			updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-				...leaf,
-				content
-			}))
-		);
-	};
-
-	const resizeSplit = (splitId: string, ratio: number) => {
-		markCustomized();
-		setLayout(updateTaskPaneSplit(visibleLayout, splitId, ratio));
-	};
-
-	const closePane = (paneId: string) => {
-		if (paneCount <= 1) {
-			return;
-		}
-
-		markCustomized();
-		const nextLayout = removeTaskPaneNode(visibleLayout, paneId);
-		if (!nextLayout) {
-			return;
-		}
-		setLayout(nextLayout);
-	};
-
-	const showTaskInstructions = () => {
-		markCustomized();
-		if (hasTaskPaneContent(visibleLayout, "task-instructions")) {
-			return;
-		}
-
-		if (paneCount < MAX_TASK_PANES) {
-			const paneId = getFirstTaskPaneLeafId(visibleLayout);
-			setLayout(
-				updateTaskPaneNode(visibleLayout, paneId, leaf => ({
-					type: "split",
-					id: `task-split-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-					direction: "horizontal",
-					ratio: 60,
-					first: leaf,
-					second: createTaskPaneLeaf("task-instructions")
-				}))
-			);
-			return;
-		}
-
-		const paneId = getFirstTaskPaneLeafId(visibleLayout);
-		changePaneContent(paneId, "task-instructions");
-	};
 
 	const renderPaneContent = (content: TaskPaneContent) => {
 		if (!getTaskPaneContentAvailability(content, currentPhase, phase1BuilderEnabled)) {
@@ -807,7 +1257,41 @@ function TaskWorkspace({
 		return (
 			<section className="flex h-full min-h-0 flex-col overflow-hidden" aria-label="Task Instructions">
 				<div className="grid min-h-0 flex-1 gap-3 overflow-auto rounded-md bg-muted/40 p-3 text-sm leading-6 text-foreground/80">
-					{referenceImageSrc && <img className="max-h-[80vh] w-full rounded-md border bg-white object-contain" src={referenceImageSrc} alt={referenceImageAlt || taskTitle} />}
+					{referenceImageDisplaySrc && !isReferenceImageFailed && (
+						<img
+							className="max-h-[80vh] w-full rounded-md border bg-white object-contain"
+							src={referenceImageDisplaySrc}
+							alt={referenceImageAlt || taskTitle}
+							onLoad={() => setReferenceImageStatus({ src: normalizedReferenceImageSrc, retryToken: referenceImageRetryToken, failed: false })}
+							onError={() => setReferenceImageStatus({ src: normalizedReferenceImageSrc, retryToken: referenceImageRetryToken, failed: true })}
+						/>
+					)}
+					{referenceImageSrc && isReferenceImageFailed && (
+						<div className="grid gap-3 rounded-md border border-destructive/30 bg-background p-3 text-destructive" role="alert">
+							<div className="flex items-start gap-2">
+								<AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+								<div className="grid gap-1">
+									<div className="font-medium">任務海報圖片載入失敗</div>
+									<p className="text-xs leading-5 text-destructive/80">請重新載入圖片；文字任務說明仍可繼續閱讀。</p>
+								</div>
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-fit border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+								onClick={() => {
+									setReferenceImageStatus(current => ({
+										src: normalizedReferenceImageSrc,
+										retryToken: current.src === normalizedReferenceImageSrc ? current.retryToken + 1 : 1,
+										failed: false
+									}));
+								}}
+							>
+								重新載入圖片
+							</Button>
+						</div>
+					)}
 					{taskDetail ? <p className="whitespace-pre-wrap">{taskDetail}</p> : <p className="text-muted-foreground">尚無任務說明</p>}
 				</div>
 			</section>
@@ -815,211 +1299,129 @@ function TaskWorkspace({
 	};
 
 	return (
-		<section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border p-3" aria-label="Task workspace">
-			<header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
-				<div className="grid min-w-0 gap-1">
+		<section
+			className={cn(
+				"grid min-h-0 gap-3 overflow-hidden rounded-lg border p-3",
+				(isTaskReferenceOpen && phase1BuilderEnabled) || (isCapstoneTask && !isCapstoneItemListLoaded) ? "grid-rows-[auto_auto_minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]"
+			)}
+			aria-label="Task workspace"
+		>
+			<header className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+				<div className="grid min-w-0 flex-1 gap-1">
 					<h2 className="truncate text-base font-semibold">{taskTitle}</h2>
 				</div>
-				<Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={showTaskInstructions}>
-					<Info className="h-4 w-4" />
-					任務說明
-				</Button>
+				<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+					{phase1BuilderEnabled && (
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="h-8 gap-1.5 px-2"
+							aria-expanded={isTaskReferenceOpen}
+							aria-controls={taskReferencePanelId}
+							data-local-space-shortcut="true"
+							title={isTaskReferenceOpen ? "收合元件說明" : "展開元件說明"}
+							onClick={() => setIsTaskReferenceOpen(current => !current)}
+						>
+							<Info className="h-3.5 w-3.5" aria-hidden="true" />
+							<span className="hidden sm:inline">元件說明</span>
+							{isTaskReferenceOpen ? <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />}
+						</Button>
+					)}
+					{isCapstoneItemListLoaded && isCapstoneUploadAvailable && <CapstoneUploadButton onUpload={onCapstoneItemUpload} />}
+					{compactPhaseTimer}
+				</div>
 			</header>
+			{phase1BuilderEnabled && phase1Builder && isTaskReferenceOpen && <TaskReferencePanel id={taskReferencePanelId} builder={phase1Builder} />}
+			{isCapstoneUploadAvailable && !isCapstoneItemListLoaded && <CapstoneTaskItemUploadPanel itemCount={capstoneItemCount} uploadError={capstoneUploadError} onUpload={onCapstoneItemUpload} />}
 			<div className="min-h-0 overflow-hidden">
-				<TaskPaneRenderer
-					node={visibleLayout}
-					currentPhase={currentPhase}
-					paneCount={paneCount}
-					isNarrowLayout={isNarrowLayout}
-					onSplitPane={splitPane}
-					onClosePane={closePane}
-					onChangePaneContent={changePaneContent}
-					onResizeSplit={resizeSplit}
-					contentOptions={contentOptions}
-					phase1BuilderEnabled={phase1BuilderEnabled}
-					renderPaneContent={renderPaneContent}
-				/>
+				<TaskPaneRenderer node={visibleLayout} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} />
 			</div>
 		</section>
 	);
 }
 
+function getTaskPaneNodeLabel(node: TaskPaneNode): string {
+	if (node.type === "leaf") {
+		return TASK_PANE_CONTENT_LABELS[node.content];
+	}
+
+	return `${getTaskPaneNodeLabel(node.first)} / ${getTaskPaneNodeLabel(node.second)}`;
+}
+
 function TaskPaneRenderer({
 	node,
-	currentPhase,
-	paneCount,
 	isNarrowLayout,
-	onSplitPane,
-	onClosePane,
-	onChangePaneContent,
-	onResizeSplit,
-	contentOptions,
-	phase1BuilderEnabled,
-	renderPaneContent
+	renderPaneContent,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
 }: {
 	node: TaskPaneNode;
-	currentPhase: SessionPhase;
-	paneCount: number;
 	isNarrowLayout: boolean;
-	onSplitPane: (paneId: string, direction: TaskSplitDirection) => void;
-	onClosePane: (paneId: string) => void;
-	onChangePaneContent: (paneId: string, content: TaskPaneContent) => void;
-	onResizeSplit: (splitId: string, ratio: number) => void;
-	contentOptions: TaskPaneContent[];
-	phase1BuilderEnabled: boolean;
 	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
 }) {
 	if (node.type === "leaf") {
 		return (
-			<TaskPane
-				pane={node}
-				currentPhase={currentPhase}
-				canSplit={paneCount < MAX_TASK_PANES}
-				canClose={paneCount > 1}
-				onSplit={direction => onSplitPane(node.id, direction)}
-				onClose={() => onClosePane(node.id)}
-				onChangeContent={content => onChangePaneContent(node.id, content)}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-			>
+			<TaskPane pane={node} isCollapsed={isCollapsed} collapsedDirection={collapsedDirection}>
 				{renderPaneContent(node.content)}
 			</TaskPane>
 		);
 	}
 
-	const effectiveDirection = isNarrowLayout ? "vertical" : node.direction;
-	const gridStyle =
-		effectiveDirection === "horizontal"
-			? ({ gridTemplateColumns: `minmax(280px, ${node.ratio}fr) 1rem minmax(280px, ${100 - node.ratio}fr)` } as CSSProperties)
-			: ({ gridTemplateRows: `minmax(180px, ${node.ratio}fr) 1rem minmax(180px, ${100 - node.ratio}fr)` } as CSSProperties);
-
-	return (
-		<div className="grid h-full min-h-0 min-w-0 gap-0" style={gridStyle}>
-			<TaskPaneRenderer
-				node={node.first}
-				currentPhase={currentPhase}
-				paneCount={paneCount}
-				isNarrowLayout={isNarrowLayout}
-				onSplitPane={onSplitPane}
-				onClosePane={onClosePane}
-				onChangePaneContent={onChangePaneContent}
-				onResizeSplit={onResizeSplit}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-				renderPaneContent={renderPaneContent}
-			/>
-			<PaneSeparator split={node} direction={effectiveDirection} onResize={onResizeSplit} />
-			<TaskPaneRenderer
-				node={node.second}
-				currentPhase={currentPhase}
-				paneCount={paneCount}
-				isNarrowLayout={isNarrowLayout}
-				onSplitPane={onSplitPane}
-				onClosePane={onClosePane}
-				onChangePaneContent={onChangePaneContent}
-				onResizeSplit={onResizeSplit}
-				contentOptions={contentOptions}
-				phase1BuilderEnabled={phase1BuilderEnabled}
-				renderPaneContent={renderPaneContent}
-			/>
-		</div>
-	);
+	return <TaskPaneSplitRenderer node={node} isNarrowLayout={isNarrowLayout} renderPaneContent={renderPaneContent} isCollapsed={isCollapsed} collapsedDirection={collapsedDirection} />;
 }
 
-function TaskPane({
-	pane,
-	currentPhase,
-	canSplit,
-	canClose,
-	onSplit,
-	onClose,
-	onChangeContent,
-	contentOptions,
-	phase1BuilderEnabled,
-	children
+function TaskPaneSplitRenderer({
+	node,
+	isNarrowLayout,
+	renderPaneContent,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
 }: {
-	pane: TaskPaneLeaf;
-	currentPhase: SessionPhase;
-	canSplit: boolean;
-	canClose: boolean;
-	onSplit: (direction: TaskSplitDirection) => void;
-	onClose: () => void;
-	onChangeContent: (content: TaskPaneContent) => void;
-	contentOptions: TaskPaneContent[];
-	phase1BuilderEnabled: boolean;
-	children: React.ReactNode;
+	node: TaskPaneSplit;
+	isNarrowLayout: boolean;
+	renderPaneContent: (content: TaskPaneContent) => React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
 }) {
-	const isLocked = !getTaskPaneContentAvailability(pane.content, currentPhase, phase1BuilderEnabled);
+	const [ratioState, setRatioState] = useState(() => ({ nodeId: node.id, ratio: node.ratio }));
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	const effectiveDirection = isNarrowLayout ? "vertical" : node.direction;
+	const ratio = ratioState.nodeId === node.id ? ratioState.ratio : node.ratio;
+	const tracks = getTaskPaneSplitTracks(effectiveDirection, ratio);
+	const firstLabel = getTaskPaneNodeLabel(node.first);
+	const secondLabel = getTaskPaneNodeLabel(node.second);
+	const separatorLabel = `調整 ${firstLabel} 與 ${secondLabel} 大小`;
+	const splitLabel = `${firstLabel} / ${secondLabel}`;
 
-	return (
-		<section className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border bg-card" aria-label={TASK_PANE_CONTENT_LABELS[pane.content]}>
-			<header className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5">
-				<div className="flex min-w-0 items-center gap-2">
-					{canClose && (
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon"
-							className="h-8 w-8 shrink-0"
-							title="Close pane"
-							aria-label={`Close ${TASK_PANE_CONTENT_LABELS[pane.content]} pane`}
-							onClick={event => {
-								event.stopPropagation();
-								onClose();
-							}}
-						>
-							<X className="h-4 w-4" />
-						</Button>
-					)}
-					<select
-						className="h-8 min-w-0 rounded-md border bg-background px-2 text-sm font-medium outline-none focus:ring-1 focus:ring-ring"
-						value={pane.content}
-						aria-label="選擇 pane 內容"
-						onChange={event => onChangeContent(event.target.value as TaskPaneContent)}
-						onPointerDown={event => event.stopPropagation()}
-					>
-						{contentOptions.map(content => (
-							<option key={content} value={content}>
-								{TASK_PANE_CONTENT_LABELS[content]}
-							</option>
-						))}
-					</select>
-					{isLocked && <Lock className="h-4 w-4 shrink-0 text-muted-foreground" aria-label="目前階段鎖定" />}
-				</div>
-				<div className="flex shrink-0 items-center gap-1">
-					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Right" aria-label="Split Right" disabled={!canSplit} onClick={() => onSplit("horizontal")}>
-						<Columns2 className="h-4 w-4" />
-					</Button>
-					<Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Split Down" aria-label="Split Down" disabled={!canSplit} onClick={() => onSplit("vertical")}>
-						<Rows2 className="h-4 w-4" />
-					</Button>
-				</div>
-			</header>
-			<div className="min-h-0 overflow-hidden p-2">{children}</div>
-		</section>
-	);
-}
+	const setSplitRatio = (value: number | ((currentRatio: number) => number)) => {
+		setRatioState(current => {
+			const currentRatio = current.nodeId === node.id ? current.ratio : node.ratio;
+			const nextRatio = typeof value === "function" ? value(currentRatio) : value;
+			return { nodeId: node.id, ratio: nextRatio };
+		});
+	};
 
-function PaneSeparator({ split, direction, onResize }: { split: TaskPaneSplit; direction: TaskSplitDirection; onResize: (splitId: string, ratio: number) => void }) {
-	const handleResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+	const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
-		const separator = event.currentTarget;
-		const container = separator.parentElement;
-		if (!container) {
-			return;
-		}
+		const resizeHandle = event.currentTarget;
+		const containerRect = containerRef.current?.getBoundingClientRect();
+		const containerPixels = effectiveDirection === "horizontal" ? (containerRect?.width ?? 0) : (containerRect?.height ?? 0);
+		const startPointer = effectiveDirection === "horizontal" ? event.clientX : event.clientY;
+		const startRatio = ratio;
 
-		separator.setPointerCapture(event.pointerId);
-		const containerRect = container.getBoundingClientRect();
+		resizeHandle.setPointerCapture(event.pointerId);
 
 		const handlePointerMove = (moveEvent: PointerEvent) => {
-			const nextRatio = direction === "horizontal" ? ((moveEvent.clientX - containerRect.left) / containerRect.width) * 100 : ((moveEvent.clientY - containerRect.top) / containerRect.height) * 100;
-			onResize(split.id, nextRatio);
+			const currentPointer = effectiveDirection === "horizontal" ? moveEvent.clientX : moveEvent.clientY;
+			setSplitRatio(getTaskPaneSplitRatioFromPointerDelta(startRatio, currentPointer - startPointer, containerPixels));
 		};
 
 		const handlePointerUp = () => {
-			if (separator.hasPointerCapture(event.pointerId)) {
-				separator.releasePointerCapture(event.pointerId);
+			if (resizeHandle.hasPointerCapture(event.pointerId)) {
+				resizeHandle.releasePointerCapture(event.pointerId);
 			}
 			document.body.style.cursor = "";
 			document.body.style.userSelect = "";
@@ -1028,43 +1430,144 @@ function PaneSeparator({ split, direction, onResize }: { split: TaskPaneSplit; d
 			window.removeEventListener("pointercancel", handlePointerUp);
 		};
 
-		document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
+		document.body.style.cursor = effectiveDirection === "horizontal" ? "col-resize" : "row-resize";
 		document.body.style.userSelect = "none";
 		window.addEventListener("pointermove", handlePointerMove);
 		window.addEventListener("pointerup", handlePointerUp);
 		window.addEventListener("pointercancel", handlePointerUp);
 	};
 
-	const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-		const isHorizontalKey = event.key === "ArrowLeft" || event.key === "ArrowRight";
-		const isVerticalKey = event.key === "ArrowUp" || event.key === "ArrowDown";
-		if ((direction === "horizontal" && !isHorizontalKey) || (direction === "vertical" && !isVerticalKey)) {
+	const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+		if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
 			return;
 		}
 
 		event.preventDefault();
-		const directionMultiplier = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
-		onResize(split.id, split.ratio + directionMultiplier * 4);
+		setSplitRatio(current => getTaskPaneSplitRatioFromKeyboard(current, event.key, effectiveDirection));
 	};
+
+	const gridStyle =
+		effectiveDirection === "horizontal"
+			? ({ gridTemplateColumns: `${tracks.firstTrack} ${TASK_PANE_SEPARATOR_TRACK} ${tracks.secondTrack}` } as CSSProperties)
+			: ({ gridTemplateRows: `${tracks.firstTrack} ${TASK_PANE_SEPARATOR_TRACK} ${tracks.secondTrack}` } as CSSProperties);
+
+	const splitChildren = (
+		<>
+			<TaskPaneRenderer
+				node={node.first}
+				isNarrowLayout={isNarrowLayout}
+				renderPaneContent={renderPaneContent}
+				isCollapsed={tracks.collapsedSide === "first"}
+				collapsedDirection={effectiveDirection}
+			/>
+			<TaskPaneSeparator direction={effectiveDirection} label={separatorLabel} ratio={ratio} collapsedSide={tracks.collapsedSide} onPointerDown={handlePointerDown} onKeyDown={handleKeyDown} />
+			<TaskPaneRenderer
+				node={node.second}
+				isNarrowLayout={isNarrowLayout}
+				renderPaneContent={renderPaneContent}
+				isCollapsed={tracks.collapsedSide === "second"}
+				collapsedDirection={effectiveDirection}
+			/>
+		</>
+	);
+
+	if (isCollapsed) {
+		return (
+			<CollapsedTaskPaneSummary label={splitLabel} collapsedDirection={collapsedDirection}>
+				<div className="hidden">{splitChildren}</div>
+			</CollapsedTaskPaneSummary>
+		);
+	}
+
+	return (
+		<div ref={containerRef} className="grid h-full min-h-0 min-w-0" style={gridStyle}>
+			{splitChildren}
+		</div>
+	);
+}
+
+function TaskPaneSeparator({
+	direction,
+	label,
+	ratio,
+	collapsedSide,
+	onPointerDown,
+	onKeyDown
+}: {
+	direction: TaskSplitDirection;
+	label: string;
+	ratio: number;
+	collapsedSide: TaskPaneCollapsedSide;
+	onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
+	onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+	const isHorizontalSplit = direction === "horizontal";
+	const firstCollapsedLabel = isHorizontalSplit ? "左側" : "上方";
+	const secondCollapsedLabel = isHorizontalSplit ? "右側" : "下方";
+	const collapsedHint = collapsedSide === "first" ? `，${firstCollapsedLabel}區塊已收合` : collapsedSide === "second" ? `，${secondCollapsedLabel}區塊已收合` : "";
 
 	return (
 		<button
 			type="button"
 			className={cn(
-				"group grid place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-				direction === "horizontal" ? "h-full w-4 cursor-col-resize" : "h-4 w-full cursor-row-resize"
+				"group grid shrink-0 place-items-center rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+				isHorizontalSplit ? "h-full min-h-20 w-4 cursor-col-resize" : "h-4 min-w-20 cursor-row-resize"
 			)}
-			aria-label={direction === "horizontal" ? "調整左右 pane 大小" : "調整上下 pane 大小"}
-			aria-orientation={direction === "horizontal" ? "vertical" : "horizontal"}
-			aria-valuemin={MIN_TASK_PANE_RATIO}
-			aria-valuemax={100 - MIN_TASK_PANE_RATIO}
-			aria-valuenow={Math.round(split.ratio)}
+			aria-label={`${label}${collapsedHint}`}
+			aria-orientation={isHorizontalSplit ? "vertical" : "horizontal"}
+			aria-valuemin={0}
+			aria-valuemax={100}
+			aria-valuenow={Math.round(ratio)}
+			data-local-space-shortcut="true"
 			role="separator"
-			onPointerDown={handleResizeStart}
-			onKeyDown={handleResizeKeyDown}
+			onPointerDown={onPointerDown}
+			onKeyDown={onKeyDown}
 		>
-			<span className={cn("rounded-full bg-border transition-colors group-hover:bg-primary/30", direction === "horizontal" ? "h-20 w-0.5" : "h-0.5 w-20")} aria-hidden="true" />
+			<span className={cn("rounded-full bg-border transition-colors group-hover:bg-primary/30", isHorizontalSplit ? "h-20 w-0.5" : "h-0.5 w-20")} aria-hidden="true" />
 		</button>
+	);
+}
+
+function CollapsedTaskPaneSummary({ label, collapsedDirection, children }: { label: string; collapsedDirection: TaskSplitDirection; children: React.ReactNode }) {
+	return (
+		<section className="relative grid h-full min-h-0 min-w-0 place-items-center overflow-hidden rounded-lg border bg-card text-card-foreground" aria-label={`${label} 已收合`}>
+			<div className={cn("max-w-full truncate px-1 text-xs font-medium text-muted-foreground", collapsedDirection === "horizontal" && "max-h-full [writing-mode:vertical-rl]")}>{label}</div>
+			{children}
+		</section>
+	);
+}
+
+function TaskPane({
+	pane,
+	children,
+	isCollapsed = false,
+	collapsedDirection = "horizontal"
+}: {
+	pane: TaskPaneLeaf;
+	children: React.ReactNode;
+	isCollapsed?: boolean;
+	collapsedDirection?: TaskSplitDirection;
+}) {
+	return (
+		<section
+			className={cn("grid h-full min-h-0 min-w-0 overflow-hidden rounded-lg border bg-card", isCollapsed ? "grid-rows-[minmax(0,1fr)]" : "grid-rows-[auto_minmax(0,1fr)]")}
+			aria-label={isCollapsed ? `${TASK_PANE_CONTENT_LABELS[pane.content]} 已收合` : TASK_PANE_CONTENT_LABELS[pane.content]}
+		>
+			<header className={cn("flex min-h-11 shrink-0 items-center justify-between gap-2 border-b bg-muted/35 px-2 py-1.5", isCollapsed && "min-h-0 justify-center border-b-0 p-1")}>
+				<div className="flex min-w-0 items-center gap-2">
+					<div
+						className={cn(
+							"truncate text-sm font-medium",
+							isCollapsed && "text-xs text-muted-foreground",
+							isCollapsed && collapsedDirection === "horizontal" && "max-h-full [writing-mode:vertical-rl]"
+						)}
+					>
+						{TASK_PANE_CONTENT_LABELS[pane.content]}
+					</div>
+				</div>
+			</header>
+			<div className={cn("min-h-0 overflow-hidden p-2", isCollapsed && "hidden")}>{children}</div>
+		</section>
 	);
 }
 
@@ -1077,11 +1580,16 @@ export default function MeetingRoom() {
 	const [taskReferenceImageSrc, setTaskReferenceImageSrc] = useState("");
 	const [taskReferenceImageAlt, setTaskReferenceImageAlt] = useState("");
 	const [phase1BuilderConfig, setPhase1BuilderConfig] = useState<Phase1BuilderConfig | undefined>();
+	const [taskRankingLimit, setTaskRankingLimit] = useState<number | undefined>();
 	const [taskItems, setTaskItems] = useState<TaskConfigItem[]>([]);
+	const [capstoneUploadError, setCapstoneUploadError] = useState("");
+	const [rankingCompletionState, setRankingCompletionState] = useState<RankingCompletionState | null>(null);
 	const [publicItems, setPublicItems] = useState<LostAtSeaItem[]>([]);
 	const [privateItems, setPrivateItems] = useState<LostAtSeaItem[]>([]);
 	const [publicRankingRevision, setPublicRankingRevision] = useState(0);
 	const [privateRankingRevision, setPrivateRankingRevision] = useState(0);
+	const [publicRankingChangeCount, setPublicRankingChangeCount] = useState<number | undefined>();
+	const [privateRankingChangeCount, setPrivateRankingChangeCount] = useState<number | undefined>();
 	const [currentPhase, setCurrentPhase] = useState<SessionPhase>(DEFAULT_SESSION_PHASE);
 	const [phaseLayoutConfigById, setPhaseLayoutConfigById] = useState<Partial<Record<SessionPhase, TaskPaneLayoutConfig>>>({});
 	const [timerEndTime, setTimerEndTime] = useState(0);
@@ -1090,18 +1598,21 @@ export default function MeetingRoom() {
 	const [jitsiAudioSnapshot, setJitsiAudioSnapshot] = useState<JitsiAudioSnapshot>(EMPTY_JITSI_AUDIO_SNAPSHOT);
 	const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
 	const [isPrivateBoardCollapsed, setIsPrivateBoardCollapsed] = useState(false);
-	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(false);
+	const [privateBoardIdeaBlockUnreadState, setPrivateBoardIdeaBlockUnreadState] = useState<IdeaBlockUnreadState>({ count: 0, latestBlockId: null });
+	const [privateBoardPublicChatUnreadCount, setPrivateBoardPublicChatUnreadCount] = useState(0);
+	const [isJitsiCollapsed, setIsJitsiCollapsed] = useState(shouldDefaultCollapseJitsi);
+	const [isJitsiFocused, setIsJitsiFocused] = useState(false);
 	const [privateBoardWidth, setPrivateBoardWidth] = useState(() => {
 		const storedWidth = Number(window.localStorage.getItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY));
 		return clampPrivateBoardWidth(Number.isFinite(storedWidth) ? storedWidth : DEFAULT_PRIVATE_BOARD_WIDTH);
 	});
 	const [jitsiHeight, setJitsiHeight] = useState(() => {
-		const storedHeight = Number(window.localStorage.getItem(JITSI_HEIGHT_STORAGE_KEY));
-		return clampJitsiHeight(Number.isFinite(storedHeight) ? Math.min(storedHeight, DEFAULT_JITSI_HEIGHT) : DEFAULT_JITSI_HEIGHT);
+		return getPreferredJitsiHeight();
 	});
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [resizeCursor, setResizeCursor] = useState<"col-resize" | "row-resize" | null>(null);
 	const isDraggingRef = useRef<Record<RankingScope, boolean>>({ public: false, private: false });
+	const privateBoardRef = useRef<PrivateBoardHandle | null>(null);
 	const pendingRankingRef = useRef<Record<RankingScope, RankingSnapshot | null>>({ public: null, private: null });
 	const publicRankingScrollRef = useRef<HTMLDivElement | null>(null);
 	const privateRankingScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1111,8 +1622,10 @@ export default function MeetingRoom() {
 	const connectionParticipantId = isParticipantIdValid ? participantId : undefined;
 	const sessionId = roomName;
 	const { sendMessage, lastMessage, isConnected } = useWebSocket(sessionId, connectionParticipantId, displayName);
+	const { participants: presenceParticipants } = usePresenceWebSocket(sessionId, connectionParticipantId, displayName);
+	const participantTranscriptionEnabled = useMemo(() => getParticipantTranscriptionEnabled(presenceParticipants, connectionParticipantId), [presenceParticipants, connectionParticipantId]);
 	const joinRejectedMessage = isJoinRejectedMessage(lastMessage) ? lastMessage.message || "這個 Participant ID 已經在此 session 中，不能重複進入。" : null;
-	const { startAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName);
+	const { startAudioStream, stopAudioStream, isLocalSpeaking, lastAudioMessage, audioError } = useAudioStream(sessionId, connectionParticipantId, displayName, participantTranscriptionEnabled);
 	const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 	const hasAudioConnectionError = !!audioError;
 	const handleJitsiStatusChange = useCallback((status: JitsiConnectionStatus) => {
@@ -1121,10 +1634,16 @@ export default function MeetingRoom() {
 	const handleJitsiAudioParticipantsChange = useCallback((snapshot: JitsiAudioSnapshot) => {
 		setJitsiAudioSnapshot(snapshot);
 	}, []);
+
 	const taskItemsById = useMemo(() => Object.fromEntries(taskItems.map(item => [item.id, item])), [taskItems]);
 	const defaultItemIds = useMemo(() => taskItems.map(item => item.id), [taskItems]);
 	const publicRankIndexById = useMemo(() => createRankIndexById(publicItems), [publicItems]);
-	const shouldHighlightRankConflict = isGroupPhase(currentPhase);
+	const publicRankingInteractionState = getRankingInteractionState("public", currentPhase);
+	const shouldHighlightRankConflict = publicRankingInteractionState !== "hidden";
+	const publicRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, publicItems.length);
+	const privateRankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, privateItems.length);
+	const publicChangeCount = normalizeRankingChangeCount(publicRankingChangeCount, publicRankingLimit, publicItems.length);
+	const privateChangeCount = normalizeRankingChangeCount(privateRankingChangeCount, privateRankingLimit, privateItems.length);
 	const meetingLayoutStyle = {
 		"--private-board-width": `${isPrivateBoardCollapsed ? 18 : privateBoardWidth}px`,
 		"--jitsi-height": `${isJitsiCollapsed ? 0 : jitsiHeight}px`
@@ -1133,6 +1652,11 @@ export default function MeetingRoom() {
 		() => withLocalSpeakingParticipant(jitsiAudioSnapshot, displayName, micMode === "public" && isLocalSpeaking),
 		[displayName, isLocalSpeaking, jitsiAudioSnapshot, micMode]
 	);
+	const showRankingCompleteButton = taskId === CAPSTONE_TASK_ID && taskItems.length > 0 && currentPhase !== "reflect" && rankingCompletionState?.has_next_phase === true;
+	const rankingCompletionCount = rankingCompletionState?.completed_count ?? 0;
+	const rankingCompletionTotal = rankingCompletionState?.total_count ?? 0;
+	const isRankingCompleteVoted = rankingCompletionState?.is_completed ?? false;
+	const publicMicToggleLabel = micMode === "public" ? "切回悄悄話" : "切到公開發言";
 
 	useEffect(() => {
 		const queryPermission = async () => {
@@ -1170,6 +1694,15 @@ export default function MeetingRoom() {
 
 		const loadTaskConfig = async () => {
 			try {
+				if (isCapstoneSessionName(roomName)) {
+					setTaskId(CAPSTONE_TASK_ID);
+					setTaskTitle(CAPSTONE_TASK_TITLE);
+					setTaskDetail(CAPSTONE_TASK_DETAIL);
+					setTaskReferenceImageSrc("");
+					setTaskReferenceImageAlt(CAPSTONE_TASK_TITLE);
+					setPhase1BuilderConfig(undefined);
+					setTaskRankingLimit(undefined);
+				}
 				const taskConfig = await fetchTaskConfig({ sessionName: roomName, signal: abortController.signal });
 				const nextTaskItemsById = Object.fromEntries(taskConfig.items.map(item => [item.id, item]));
 				const nextDefaultItemIds = taskConfig.items.map(item => item.id);
@@ -1182,6 +1715,7 @@ export default function MeetingRoom() {
 				setTaskReferenceImageSrc(taskConfig.reference_image_src || "");
 				setTaskReferenceImageAlt(taskConfig.reference_image_alt || taskConfig.title);
 				setPhase1BuilderConfig(taskConfig.phase1_builder);
+				setTaskRankingLimit(normalizeRankingLimit(taskConfig.ranking_limit));
 				const nextTaskPhases = normalizeSessionPhaseOptions(taskConfig.phases);
 				setPhaseLayoutConfigById(createPhaseLayoutConfigById(taskConfig.phases));
 				setCurrentPhase(current => (nextTaskPhases.some(phase => phase.id === current) ? current : (nextTaskPhases[0]?.id ?? DEFAULT_SESSION_PHASE)));
@@ -1208,6 +1742,15 @@ export default function MeetingRoom() {
 				if (error instanceof DOMException && error.name === "AbortError") {
 					return;
 				}
+				if (isCapstoneSessionName(roomName)) {
+					setTaskId(CAPSTONE_TASK_ID);
+					setTaskTitle(CAPSTONE_TASK_TITLE);
+					setTaskDetail(CAPSTONE_TASK_DETAIL);
+					setTaskReferenceImageSrc("");
+					setTaskReferenceImageAlt(CAPSTONE_TASK_TITLE);
+					setPhase1BuilderConfig(undefined);
+					setTaskRankingLimit(undefined);
+				}
 				console.error("Failed to load task config", error);
 			}
 		};
@@ -1233,14 +1776,85 @@ export default function MeetingRoom() {
 			const shouldRetryCurrentMode = micMode === mode && hasAudioConnectionError;
 			const nextMode = shouldRetryCurrentMode ? mode : mode;
 
+			if (participantTranscriptionEnabled !== true) {
+				await startAudioStream(nextMode);
+				return;
+			}
+
 			setMicMode(nextMode);
 			await startAudioStream(nextMode);
 		},
-		[hasAudioConnectionError, micMode, startAudioStream]
+		[hasAudioConnectionError, micMode, participantTranscriptionEnabled, startAudioStream]
 	);
 
+	const handleAudioReconnect = useCallback(() => {
+		void handleMic(micMode);
+	}, [handleMic, micMode]);
+
+	const handlePublicMicActivation = useCallback(() => {
+		void handleMic(getNextMicModeAfterPublicActivation(micMode));
+	}, [handleMic, micMode]);
+
+	const applyUploadedTaskItems = useCallback((nextTaskItems: TaskConfigItem[]) => {
+		const nextTaskItemsById = Object.fromEntries(nextTaskItems.map(item => [item.id, item]));
+		const nextDefaultItemIds = nextTaskItems.map(item => item.id);
+		setTaskItems(nextTaskItems);
+		setPublicItems(createRankedItems(nextDefaultItemIds, nextTaskItemsById, nextDefaultItemIds));
+		setPrivateItems(createRankedItems(nextDefaultItemIds, nextTaskItemsById, nextDefaultItemIds));
+		setPublicRankingRevision(current => current + 1);
+		setPrivateRankingRevision(current => current + 1);
+		setPublicRankingChangeCount(undefined);
+		setPrivateRankingChangeCount(undefined);
+		pendingRankingRef.current.public = null;
+		pendingRankingRef.current.private = null;
+	}, []);
+
+	const handleCapstoneItemUpload = useCallback(
+		(file: File) => {
+			setCapstoneUploadError("");
+			const load = async () => {
+				try {
+					const buffer = await file.arrayBuffer();
+					const parsed = await parseSpreadsheetTaskItems(file.name, arrayBufferToBase64(buffer));
+					applyUploadedTaskItems(parsed.items);
+					sendMessage({
+						type: "set_ranking_items",
+						items: parsed.items
+					});
+				} catch (error) {
+					try {
+						const text = await file.text();
+						const nextTaskItems = parseDelimitedTaskItems(text);
+						if (nextTaskItems.length === 0) {
+							throw error;
+						}
+						applyUploadedTaskItems(nextTaskItems);
+						sendMessage({
+							type: "set_ranking_items",
+							items: nextTaskItems
+						});
+					} catch {
+						console.error("Failed to parse capstone task items", error);
+						setCapstoneUploadError("No items found. Upload an XLSX/CSV/TSV with topic and discription columns.");
+					}
+				}
+			};
+			void load();
+		},
+		[applyUploadedTaskItems, sendMessage]
+	);
+
+	const handleRankingComplete = useCallback(() => {
+		if (!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0) {
+			return;
+		}
+		sendMessage({
+			type: "ranking_complete"
+		});
+	}, [isConnected, isRankingCompleteVoted, rankingCompletionTotal, sendMessage]);
+
 	useEffect(() => {
-		if (!connectionParticipantId || joinRejectedMessage) {
+		if (!connectionParticipantId || joinRejectedMessage || participantTranscriptionEnabled !== true) {
 			return;
 		}
 
@@ -1252,23 +1866,65 @@ export default function MeetingRoom() {
 		autoStartedMicKeyRef.current = autoStartKey;
 		setMicMode("private");
 		void startAudioStream("private");
-	}, [connectionParticipantId, joinRejectedMessage, sessionId, startAudioStream]);
+	}, [connectionParticipantId, joinRejectedMessage, participantTranscriptionEnabled, sessionId, startAudioStream]);
+
+	useEffect(() => {
+		if (participantTranscriptionEnabled !== false) {
+			return;
+		}
+		const timer = window.setTimeout(() => {
+			setMicMode("private");
+			void stopAudioStream();
+		}, 0);
+		return () => window.clearTimeout(timer);
+	}, [participantTranscriptionEnabled, stopAudioStream]);
 
 	useEffect(() => {
 		const handleMicShortcutKeyDown = (event: KeyboardEvent) => {
-			if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) {
+			const shortcutTarget = getKeyboardShortcutTarget(event.target);
+			if (
+				shouldHandleExperimentSpaceShortcut({
+					code: event.code,
+					key: event.key,
+					repeat: event.repeat,
+					metaKey: event.metaKey,
+					ctrlKey: event.ctrlKey,
+					altKey: event.altKey,
+					target: shortcutTarget
+				})
+			) {
+				event.preventDefault();
+				event.stopPropagation();
+				void handleMic(getNextMicModeAfterPublicActivation(micMode));
 				return;
 			}
 
-			if (event.code === "Space") {
+			if (event.defaultPrevented || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(shortcutTarget)) {
+				return;
+			}
+
+			if (isJitsiFocused && event.key === "Escape") {
 				event.preventDefault();
-				void handleMic(micMode === "public" ? "private" : "public");
+				setIsJitsiFocused(false);
+				setJitsiHeight(getPreferredJitsiHeight());
 			}
 		};
 
-		window.addEventListener("keydown", handleMicShortcutKeyDown);
-		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown);
-	}, [handleMic, micMode]);
+		window.addEventListener("keydown", handleMicShortcutKeyDown, true);
+		return () => window.removeEventListener("keydown", handleMicShortcutKeyDown, true);
+	}, [handleMic, isJitsiFocused, micMode]);
+
+	useEffect(() => {
+		if (!isJitsiFocused) {
+			return;
+		}
+
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [isJitsiFocused]);
 
 	const applyRankingSnapshot = useCallback(
 		(scope: RankingScope, snapshot: RankingSnapshot) => {
@@ -1279,11 +1935,13 @@ export default function MeetingRoom() {
 			if (scope === "private") {
 				setPrivateRankingRevision(snapshot.revision);
 				setPrivateItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+				setPrivateRankingChangeCount(snapshot.change_count);
 				return;
 			}
 
 			setPublicRankingRevision(snapshot.revision);
 			setPublicItems(createRankedItems(snapshot.items, taskItemsById, defaultItemIds));
+			setPublicRankingChangeCount(snapshot.change_count);
 		},
 		[defaultItemIds, taskItemsById]
 	);
@@ -1323,11 +1981,21 @@ export default function MeetingRoom() {
 
 		const currentItems = scope === "private" ? privateItems : publicItems;
 		const currentRevision = scope === "private" ? privateRankingRevision : publicRankingRevision;
+		const currentChangeCount = scope === "private" ? privateChangeCount : publicChangeCount;
 		const oldIndex = currentItems.findIndex(item => item.id === active.id);
-		const newIndex = currentItems.findIndex(item => item.id === over.id);
-		if (oldIndex < 0 || newIndex < 0) {
+		const isCutoffDrop = isRankingCutoffDropId(over.id, scope);
+		const newIndex = isCutoffDrop ? currentChangeCount : currentItems.findIndex(item => item.id === over.id);
+		if (oldIndex < 0 || newIndex === undefined || newIndex < 0) {
 			return;
 		}
+		const rankingLimit = getActiveRankingLimit(taskId, currentPhase, taskRankingLimit, currentItems.length);
+		const nextChangeCount = getNextRankingChangeCount({
+			currentChangeCount,
+			rankingLimit,
+			itemCount: currentItems.length,
+			oldIndex,
+			targetIndex: newIndex
+		});
 
 		sendMessage({
 			type: "ranking_move",
@@ -1338,21 +2006,15 @@ export default function MeetingRoom() {
 		});
 
 		const updateItems = (current: LostAtSeaItem[]) => {
-			const currentOldIndex = current.findIndex(item => item.id === active.id);
-			const currentNewIndex = current.findIndex(item => item.id === over.id);
-			if (currentOldIndex < 0 || currentNewIndex < 0) {
-				return current;
-			}
-			return arrayMove(current, currentOldIndex, currentNewIndex).map((item, index) => ({
-				...item,
-				rank: index + 1
-			}));
+			return moveRankingItem(current, active.id, newIndex);
 		};
 
 		if (scope === "private") {
 			setPrivateItems(updateItems);
+			setPrivateRankingChangeCount(nextChangeCount);
 		} else {
 			setPublicItems(updateItems);
+			setPublicRankingChangeCount(nextChangeCount);
 		}
 	};
 
@@ -1361,18 +2023,19 @@ export default function MeetingRoom() {
 			setPrivateBoardWidth(current => clampPrivateBoardWidth(current));
 			setJitsiHeight(current => clampJitsiHeight(current));
 		};
+		const visualViewport = window.visualViewport;
 
 		window.addEventListener("resize", handleResize);
-		return () => window.removeEventListener("resize", handleResize);
+		visualViewport?.addEventListener("resize", handleResize);
+		return () => {
+			window.removeEventListener("resize", handleResize);
+			visualViewport?.removeEventListener("resize", handleResize);
+		};
 	}, []);
 
 	useEffect(() => {
 		window.localStorage.setItem(PRIVATE_BOARD_WIDTH_STORAGE_KEY, String(privateBoardWidth));
 	}, [privateBoardWidth]);
-
-	useEffect(() => {
-		window.localStorage.setItem(JITSI_HEIGHT_STORAGE_KEY, String(jitsiHeight));
-	}, [jitsiHeight]);
 
 	const handlePrivateBoardResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
@@ -1415,8 +2078,24 @@ export default function MeetingRoom() {
 		setPrivateBoardWidth(current => clampPrivateBoardWidth(current + direction * 24));
 	};
 
+	const openPrivateBoard = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.markVisiblePublicChatRead(), 0);
+	}, []);
+
+	const openUnreadIdeaBlocks = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openLatestUnreadIdeaBlock(), 0);
+	}, []);
+
+	const openUnreadPublicChat = useCallback(() => {
+		setIsPrivateBoardCollapsed(false);
+		window.setTimeout(() => privateBoardRef.current?.openPublicChat(), 0);
+	}, []);
+
 	const handleJitsiResizeStart = (event: React.PointerEvent<HTMLButtonElement>) => {
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const resizeHandle = event.currentTarget;
 		resizeHandle.setPointerCapture(event.pointerId);
 		const startY = event.clientY;
@@ -1452,15 +2131,42 @@ export default function MeetingRoom() {
 		}
 
 		event.preventDefault();
+		setIsJitsiFocused(false);
 		const direction = event.key === "ArrowUp" ? 1 : -1;
 		setJitsiHeight(current => clampJitsiHeight(current + direction * 24));
 	};
 
+	const handleJitsiFocusToggle = () => {
+		const shouldFocusJitsi = !isJitsiFocused;
+		setIsJitsiCollapsed(false);
+		setIsJitsiFocused(shouldFocusJitsi);
+		if (!shouldFocusJitsi) {
+			setJitsiHeight(getPreferredJitsiHeight());
+		}
+	};
+
 	useEffect(() => {
+		if (!lastMessage) {
+			return;
+		}
+
 		if (isPhaseChangedMessage(lastMessage)) {
 			const timer = window.setTimeout(() => {
 				const nextPhase = normalizeSessionPhase(lastMessage.phase);
-				if (nextPhase) setCurrentPhase(nextPhase);
+				if (nextPhase) {
+					setCurrentPhase(nextPhase);
+					setRankingCompletionState(current =>
+						current
+							? {
+									...current,
+									current_phase: nextPhase,
+									completed_participant_ids: [],
+									completed_count: 0,
+									is_completed: false
+								}
+							: current
+					);
+				}
 				setTimerEndTime(lastMessage.end_time_ms || 0);
 			}, 0);
 			return () => window.clearTimeout(timer);
@@ -1478,8 +2184,11 @@ export default function MeetingRoom() {
 		if (isBoardStateMessage(lastMessage)) {
 			let phaseTimer: number | null = null;
 			const timerEndTimeMs = lastMessage.timer_end_time_ms;
-			if (lastMessage.current_phase || typeof timerEndTimeMs === "number") {
+			if (lastMessage.current_phase || typeof timerEndTimeMs === "number" || "ranking_completion" in lastMessage) {
 				phaseTimer = window.setTimeout(() => {
+					if ("ranking_completion" in lastMessage) {
+						setRankingCompletionState(isRankingCompletionState(lastMessage.ranking_completion) ? lastMessage.ranking_completion : null);
+					}
 					const nextPhase = normalizeSessionPhase(lastMessage.current_phase);
 					if (nextPhase) setCurrentPhase(nextPhase);
 					if (typeof timerEndTimeMs === "number") setTimerEndTime(timerEndTimeMs);
@@ -1497,10 +2206,12 @@ export default function MeetingRoom() {
 					if (publicRanking) {
 						setPublicRankingRevision(publicRanking.revision);
 						setPublicItems(createRankedItems(publicRanking.items, nextTaskItemsById, nextDefaultItemIds));
+						setPublicRankingChangeCount(publicRanking.change_count);
 					}
 					if (privateRanking) {
 						setPrivateRankingRevision(privateRanking.revision);
 						setPrivateItems(createRankedItems(privateRanking.items, nextTaskItemsById, nextDefaultItemIds));
+						setPrivateRankingChangeCount(privateRanking.change_count);
 					}
 				}, 0);
 				return () => {
@@ -1532,11 +2243,25 @@ export default function MeetingRoom() {
 			};
 		}
 
+		if (isRankingCompletionStateMessage(lastMessage)) {
+			const timer = window.setTimeout(() => setRankingCompletionState(lastMessage), 0);
+			return () => window.clearTimeout(timer);
+		}
+
+		if (isRankingItemsChangedMessage(lastMessage)) {
+			applyUploadedTaskItems(lastMessage.ranking_items);
+			if (isRankingSnapshot(lastMessage.public_ranking)) {
+				applyRankingSnapshot("public", lastMessage.public_ranking);
+			}
+			return;
+		}
+
 		if (isRankingStateMessage(lastMessage)) {
 			const scope = lastMessage.scope === "private" ? "private" : "public";
 			const nextRanking = {
 				revision: lastMessage.revision,
-				items: lastMessage.items
+				items: lastMessage.items,
+				change_count: lastMessage.change_count
 			};
 			if (isDraggingRef.current[scope]) {
 				pendingRankingRef.current[scope] = nextRanking;
@@ -1544,7 +2269,11 @@ export default function MeetingRoom() {
 			}
 			applyRankingSnapshot(scope, nextRanking);
 		}
-	}, [applyRankingSnapshot, lastMessage]);
+	}, [applyRankingSnapshot, applyUploadedTaskItems, lastMessage]);
+
+	const privateBoardUnreadCount = privateBoardIdeaBlockUnreadState.count;
+	const privateBoardUnreadCountLabel = formatUnreadCount(privateBoardUnreadCount);
+	const privateBoardPublicChatUnreadCountLabel = formatUnreadCount(privateBoardPublicChatUnreadCount);
 
 	if (!isParticipantIdValid) {
 		return (
@@ -1584,11 +2313,11 @@ export default function MeetingRoom() {
 
 	return (
 		<main
-			className="grid min-h-screen grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-screen xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)]"
+			className="grid min-h-[100dvh] grid-cols-1 gap-4 bg-background p-4 text-foreground xl:h-[100dvh] xl:max-h-[100dvh] xl:grid-cols-[minmax(0,1fr)_var(--private-board-width)] xl:overflow-hidden"
 			style={meetingLayoutStyle}
 		>
 			{resizeCursor && <div className="fixed inset-0 z-50 touch-none select-none" style={{ cursor: resizeCursor }} />}
-			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2rem] gap-y-0.5 text-card-foreground xl:min-h-0">
+			<section className="grid min-w-0 grid-rows-[minmax(0,1fr)_auto_var(--jitsi-height)_2.5rem] gap-y-0.5 text-card-foreground xl:min-h-0">
 				<TaskWorkspace
 					currentPhase={currentPhase}
 					taskTitle={taskTitle}
@@ -1600,8 +2329,13 @@ export default function MeetingRoom() {
 					taskId={taskId}
 					phase1Builder={phase1BuilderConfig}
 					phaseLayoutConfig={phaseLayoutConfigById[currentPhase]}
+					compactPhaseTimer={timerEndTime > 0 ? <CompactPhaseTimer phase={currentPhase} endTimeMs={timerEndTime} /> : null}
+					capstoneItemCount={taskItems.length}
+					capstoneUploadError={capstoneUploadError}
+					onCapstoneItemUpload={handleCapstoneItemUpload}
 					renderPublicRanking={() => (
 						<LostAtSeaRankingPanel
+							scope="public"
 							title="Public 排序"
 							status="協作中"
 							items={publicItems}
@@ -1613,11 +2347,17 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("public", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={publicRankingLimit}
+							changeCount={publicChangeCount}
 							scrollContainerRef={publicRankingScrollRef}
+							participantId={participantId}
+							participantDisplayName={displayName}
+							readOnly={publicRankingInteractionState === "readonly"}
 						/>
 					)}
 					renderPrivateRanking={() => (
 						<LostAtSeaRankingPanel
+							scope="private"
 							title="Private 排序"
 							status={`${displayName} (${participantId})`}
 							items={privateItems}
@@ -1629,7 +2369,11 @@ export default function MeetingRoom() {
 							onDragEnd={event => handleRankingDragEnd("private", event)}
 							showImages={taskId !== "enhance-the-poster"}
 							onPreviewItem={setPreviewItem}
+							rankingLimit={privateRankingLimit}
+							changeCount={privateChangeCount}
 							scrollContainerRef={privateRankingScrollRef}
+							participantId={participantId}
+							participantDisplayName={displayName}
 							getRankDelta={item => {
 								if (!shouldHighlightRankConflict) {
 									return undefined;
@@ -1661,30 +2405,59 @@ export default function MeetingRoom() {
 					<div />
 				</div>
 
-				<div className={cn("relative min-h-0 overflow-hidden rounded-lg border bg-muted", isJitsiCollapsed && "border-transparent bg-transparent")}>
+				<div
+					className={cn(
+						"relative min-h-0 overflow-hidden bg-muted",
+						!isJitsiFocused && "rounded-lg border",
+						isJitsiFocused && "fixed inset-0 z-[70] h-[100dvh] w-[100vw] bg-black",
+						isJitsiCollapsed && !isJitsiFocused && "border-transparent bg-transparent"
+					)}
+					role={isJitsiFocused ? "dialog" : undefined}
+					aria-label={isJitsiFocused ? "Jitsi 放大模式" : undefined}
+					aria-modal={isJitsiFocused ? "true" : undefined}
+				>
 					<div className={cn("absolute inset-0", isJitsiCollapsed && "pointer-events-none opacity-0")}>
 						<JitsiRoom
 							meetingDomain={jitsiBaseUrl}
 							roomName={roomName}
 							displayName={displayName}
 							micMode={micMode}
+							isLocalSpeaking={isLocalSpeaking}
+							allowInteraction={isJitsiFocused}
 							onStatusChange={handleJitsiStatusChange}
 							onAudioParticipantsChange={handleJitsiAudioParticipantsChange}
 						/>
 					</div>
 					{!isJitsiCollapsed && (
 						<>
+							{!isJitsiFocused && (
+								<Button
+									type="button"
+									variant="outline"
+									size="icon"
+									className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+									aria-label="收合 Jitsi"
+									title="收合 Jitsi"
+									aria-expanded="true"
+									onClick={() => {
+										setIsJitsiFocused(false);
+										setIsJitsiCollapsed(true);
+									}}
+								>
+									<ChevronDown className="h-4 w-4" />
+								</Button>
+							)}
 							<Button
 								type="button"
 								variant="outline"
 								size="icon"
-								className="absolute left-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
-								aria-label="收合 Jitsi"
-								title="收合 Jitsi"
-								aria-expanded="true"
-								onClick={() => setIsJitsiCollapsed(true)}
+								className="absolute right-2 top-2 z-40 h-8 w-8 bg-background/90 shadow-sm backdrop-blur"
+								aria-label={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								title={isJitsiFocused ? "退出 Jitsi 放大模式" : "放大 Jitsi"}
+								aria-pressed={isJitsiFocused}
+								onClick={handleJitsiFocusToggle}
 							>
-								<ChevronDown className="h-4 w-4" />
+								{isJitsiFocused ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
 							</Button>
 						</>
 					)}
@@ -1700,15 +2473,19 @@ export default function MeetingRoom() {
 					<div className="hidden">
 						<div className="flex flex-wrap items-center justify-center gap-2 rounded-md bg-background/85 p-1.5 shadow-sm backdrop-blur">
 							<Button
+								type="button"
 								variant={micMode === "public" ? "destructive" : "outline"}
 								className={cn("gap-2", micMode !== "public" && "border-destructive bg-background/90 text-destructive hover:bg-destructive/10 hover:text-destructive")}
-								onClick={() => void handleMic("public")}
+								aria-pressed={micMode === "public"}
+								aria-label={publicMicToggleLabel}
+								title={publicMicToggleLabel}
+								onClick={handlePublicMicActivation}
 							>
 								<Mic className="h-4 w-4" />
 								公開麥克風
 								<ShortcutKey label="Space" />
 							</Button>
-							<Button className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+							<Button type="button" className="bg-background/90" variant={micMode === "private" ? "default" : "outline"} aria-pressed={micMode === "private"} onClick={() => void handleMic("private")}>
 								<Radio className="h-4 w-4" />
 								<span className="text-sm">悄悄話</span>
 							</Button>
@@ -1733,23 +2510,46 @@ export default function MeetingRoom() {
 					</div>
 					<div className="flex flex-wrap items-center justify-center gap-2.5">
 						<Button
+							type="button"
 							variant={micMode === "public" ? "destructive" : "outline"}
 							className={cn("h-9 gap-2 px-4 text-sm", micMode !== "public" && "border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive")}
-							onClick={() => void handleMic("public")}
+							aria-pressed={micMode === "public"}
+							aria-label={publicMicToggleLabel}
+							title={publicMicToggleLabel}
+							onClick={handlePublicMicActivation}
 						>
 							<Mic className="h-4 w-4" />
 							公開發言
 							<ShortcutKey label="Space" />
 						</Button>
-						<Button className="h-9 gap-2 px-4 text-sm" variant={micMode === "private" ? "default" : "outline"} onClick={() => void handleMic("private")}>
+						<Button
+							type="button"
+							className="h-9 gap-2 px-4 text-sm"
+							variant={micMode === "private" ? "default" : "outline"}
+							aria-pressed={micMode === "private"}
+							onClick={() => void handleMic("private")}
+						>
 							<Radio className="h-4 w-4" />
 							<span className="text-sm">悄悄話</span>
 						</Button>
 					</div>
 					{hasAudioConnectionError && (
-						<AlertCircle className="absolute right-24 h-4 w-4 text-destructive" aria-label="音訊後端連線失敗" role="img">
-							<title>{audioError}</title>
-						</AlertCircle>
+						<div
+							className="absolute bottom-full right-0 z-30 mb-2 flex max-w-[min(30rem,calc(100vw-2rem))] items-center gap-2 rounded-md border border-destructive/30 bg-background px-3 py-2 text-xs text-destructive shadow-md"
+							role="alert"
+						>
+							<AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+							<span className="min-w-0 flex-1 text-left leading-snug">{audioError}</span>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="h-7 shrink-0 border-destructive/30 px-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+								onClick={handleAudioReconnect}
+							>
+								重新連線音訊
+							</Button>
+						</div>
 					)}
 					{isJitsiCollapsed && (
 						<Button
@@ -1760,7 +2560,11 @@ export default function MeetingRoom() {
 							aria-label="展開 Jitsi"
 							title="展開 Jitsi"
 							aria-expanded="false"
-							onClick={() => setIsJitsiCollapsed(current => !current)}
+							onClick={() => {
+								setIsJitsiFocused(false);
+								setIsJitsiCollapsed(false);
+								setJitsiHeight(getPreferredJitsiHeight());
+							}}
 						>
 							<ChevronUp className="h-4 w-4" />
 						</Button>
@@ -1768,7 +2572,26 @@ export default function MeetingRoom() {
 					<div className="absolute bottom-0 left-0 flex w-[calc(50%-9rem)] min-w-0 max-w-[13.5rem] items-center sm:w-[calc(50%-8.5rem)]">
 						<JitsiAudioIndicator snapshot={displayedJitsiAudioSnapshot} />
 					</div>
-					<div className="absolute bottom-0 right-0 hidden xl:block">
+					<div className="absolute bottom-0 right-0 hidden items-end gap-2 xl:flex">
+						{showRankingCompleteButton && (
+							<Button
+								type="button"
+								variant={isRankingCompleteVoted ? "default" : "outline"}
+								size="sm"
+								className="h-8 min-w-24 flex-col gap-0 px-2.5 py-1 leading-none"
+								aria-pressed={isRankingCompleteVoted}
+								disabled={!isConnected || isRankingCompleteVoted || rankingCompletionTotal <= 0}
+								onClick={handleRankingComplete}
+							>
+								<span className="flex items-center gap-1 text-xs">
+									{isRankingCompleteVoted && <CheckCircle2 className="h-3 w-3" aria-hidden="true" />}
+									已完成排序
+								</span>
+								<span className="text-[10px] font-medium opacity-80">
+									{rankingCompletionCount}/{rankingCompletionTotal}
+								</span>
+							</Button>
+						)}
 						<Button
 							type="button"
 							variant="ghost"
@@ -1823,7 +2646,7 @@ export default function MeetingRoom() {
 				</div>
 			)}
 
-			<aside className="relative min-h-0 min-w-[var(--private-board-width)]">
+			<aside className="relative min-h-0 min-w-0 xl:min-w-[var(--private-board-width)]">
 				{!isPrivateBoardCollapsed && (
 					<button
 						type="button"
@@ -1840,21 +2663,52 @@ export default function MeetingRoom() {
 					</button>
 				)}
 				{isPrivateBoardCollapsed && (
-					<Button
-						type="button"
-						variant="outline"
-						size="icon"
-						className="absolute -right-2 top-3 z-20 h-8 w-8 shadow-sm"
-						aria-label="展開 Private Board"
-						title="展開 Private Board"
-						aria-expanded="false"
-						onClick={() => setIsPrivateBoardCollapsed(false)}
-					>
-						<ChevronLeft className="h-4 w-4" />
-					</Button>
+					<div className="fixed right-3 top-20 z-50 grid justify-items-end gap-2 xl:absolute xl:-right-2 xl:top-3 xl:z-20">
+						<Button
+							type="button"
+							variant="outline"
+							size="icon"
+							className="h-8 w-8 shadow-sm"
+							aria-label="展開 Private Board"
+							title="展開 Private Board"
+							aria-expanded="false"
+							onClick={openPrivateBoard}
+						>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						{privateBoardUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardUnreadCount} 個新的 Idea Blocks，開啟最新項目`}
+								title="開啟新的 Idea Blocks"
+								onClick={openUnreadIdeaBlocks}
+							>
+								<Bell className="h-3.5 w-3.5" />
+								{privateBoardUnreadCountLabel}
+							</Button>
+						)}
+						{privateBoardPublicChatUnreadCount > 0 && (
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								className="h-8 min-w-8 gap-1 rounded-full px-2 text-xs font-semibold shadow-sm"
+								aria-label={`${privateBoardPublicChatUnreadCount} 則未讀聊天室訊息，開啟聊天室`}
+								title="開啟聊天室"
+								onClick={openUnreadPublicChat}
+							>
+								<MessageSquare className="h-3.5 w-3.5" />
+								{privateBoardPublicChatUnreadCountLabel}
+							</Button>
+						)}
+					</div>
 				)}
 				<div className={cn("h-full", isPrivateBoardCollapsed && "hidden")}>
 					<PrivateBoard
+						ref={privateBoardRef}
 						sessionId={sessionId}
 						participantId={participantId}
 						lastMessage={lastMessage}
@@ -1868,7 +2722,9 @@ export default function MeetingRoom() {
 						timerEndTime={timerEndTime}
 						onCollapse={() => setIsPrivateBoardCollapsed(true)}
 						isCollapsed={isPrivateBoardCollapsed}
-						onRequestOpen={() => setIsPrivateBoardCollapsed(false)}
+						onRequestOpen={openPrivateBoard}
+						onIdeaBlockUnreadStateChange={setPrivateBoardIdeaBlockUnreadState}
+						onPublicChatUnreadCountChange={setPrivateBoardPublicChatUnreadCount}
 					/>
 				</div>
 			</aside>

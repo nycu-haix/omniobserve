@@ -1,29 +1,23 @@
-import { Eye, Lightbulb, Send, X } from "lucide-react";
+import { Eye, Lightbulb, UserRound, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { SimilarityCueData } from "../../types";
+import { NOTIFICATION_AUTO_DISMISS_MS } from "../../lib/notificationTiming";
+import { shouldAutoDismissSimilarityCue } from "../../lib/similarityCueLifecycle";
+import type { SimilarityCueData, SimilarityPairCueData } from "../../types";
 import { Button } from "../ui/Button";
 
 interface SimilarityCueProps {
 	cues: SimilarityCueData[];
-	onJump: (blockId: string) => void;
-	onDismiss: (cueId: string) => void;
+	onJump: (cue: SimilarityPairCueData) => void;
+	onDismiss: (cue: SimilarityCueData, status: "dismissed" | "ignored") => void;
 	onShareReason: (cue: SimilarityCueData) => void;
+	canJumpToBlock?: (blockId: string) => boolean;
 	topContent?: ReactNode;
+	busy?: boolean;
+	error?: string | null;
 }
 
-const CUE_AUTO_DISMISS_MS = 5000;
-const DIFFERENT_REASON_CUE_AUTO_DISMISS_MS = 12000;
-const SUMMARY_CUE_AUTO_DISMISS_MS = 8000;
-
-function getCueAutoDismissMs(cue: SimilarityCueData): number {
-	if (cue.kind === "phase-transition-summary") {
-		return SUMMARY_CUE_AUTO_DISMISS_MS;
-	}
-	return cue.isSameReason === false ? DIFFERENT_REASON_CUE_AUTO_DISMISS_MS : CUE_AUTO_DISMISS_MS;
-}
-
-export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topContent }: SimilarityCueProps) {
+export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, canJumpToBlock, topContent, busy = false, error }: SimilarityCueProps) {
 	const onDismissRef = useRef(onDismiss);
 
 	useEffect(() => {
@@ -35,7 +29,12 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 			return;
 		}
 
-		const timers = cues.map(cue => window.setTimeout(() => onDismissRef.current(cue.id), getCueAutoDismissMs(cue)));
+		const autoDismissCues = cues.filter(shouldAutoDismissSimilarityCue);
+		if (autoDismissCues.length === 0) {
+			return;
+		}
+
+		const timers = autoDismissCues.map(cue => window.setTimeout(() => onDismissRef.current(cue, "ignored"), NOTIFICATION_AUTO_DISMISS_MS));
 		return () => timers.forEach(timer => window.clearTimeout(timer));
 	}, [cues]);
 
@@ -61,7 +60,7 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 								</div>
 							</div>
 							<div className="flex justify-end">
-								<Button aria-label="Dismiss similarity cue summary" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
+								<Button aria-label="Dismiss similarity cue summary" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
 									<X className="h-4 w-4" />
 								</Button>
 							</div>
@@ -70,28 +69,40 @@ export function SimilarityCue({ cues, onJump, onDismiss, onShareReason, topConte
 				}
 
 				const isDifferentReason = cue.isSameReason === false;
+				const canJump = canJumpToBlock ? canJumpToBlock(cue.blockId) : true;
 				const message = isDifferentReason ? "有人和你有相似的想法但原因略有不同。" : "有人和你想法一樣，要不要試著發表？";
 				return (
-					<div className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
+					<div role="status" aria-label="Similarity cue" data-cue-id={cue.id} className="animate-in slide-in-from-right-4 fade-in-0 rounded-lg border bg-background p-3 shadow-lg" key={cue.id}>
 						<div className="mb-3 flex items-start gap-2 text-sm">
 							<Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
 							<div className="grid gap-1">
 								<span>{message}</span>
+								<span className="text-muted-foreground">{cue.blockSummary}</span>
 								{isDifferentReason && <span className="text-muted-foreground">AI：你想不想讓別人知道你的理由？</span>}
 							</div>
 						</div>
+						{error && (
+							<p role="alert" className="mb-2 text-sm text-destructive">
+								{error}
+							</p>
+						)}
 						<div className="flex flex-wrap justify-end gap-2">
-							{isDifferentReason && (
-								<Button className="gap-1.5" size="sm" onClick={() => onShareReason(cue)}>
-									<Send className="h-3.5 w-3.5" />
-									分享我的理由
-								</Button>
-							)}
-							<Button className="gap-1.5" size="sm" variant={isDifferentReason ? "outline" : "default"} onClick={() => onJump(cue.blockId)}>
+							<Button disabled={busy} className="gap-1.5" size="sm" title="分享給相似想法對象" onClick={() => onShareReason(cue)}>
+								<UserRound className="h-3.5 w-3.5" />
+								分享我的理由
+							</Button>
+							<Button
+								className="gap-1.5"
+								size="sm"
+								variant={isDifferentReason ? "outline" : "default"}
+								onClick={() => canJump && onJump(cue)}
+								disabled={busy || !canJump}
+								title={canJump ? "查看相關想法" : "找不到可跳轉的 idea block"}
+							>
 								<Eye className="h-3.5 w-3.5" />
 								查看想法
 							</Button>
-							<Button aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue.id)}>
+							<Button disabled={busy} aria-label="Dismiss similarity cue" size="icon" variant="ghost" onClick={() => onDismiss(cue, "dismissed")}>
 								<X className="h-4 w-4" />
 							</Button>
 						</div>

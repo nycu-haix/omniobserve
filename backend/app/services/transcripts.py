@@ -45,7 +45,12 @@ async def save_ws_transcript_segment(
         visibility.value,
         len(transcript.transcript),
     )
-    return StreamTranscript(segment_id=str(transcript.id), text=transcript.transcript)
+    return StreamTranscript(
+        segment_id=str(transcript.id),
+        text=transcript.transcript,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
 
 
 def _numeric_id(value: str) -> int:

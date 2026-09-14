@@ -6,7 +6,7 @@ This folder is the Dokploy-ready replacement for the current local Jitsi Compose
 /Users/skyhong/Documents/jitsi-docker-jitsi-meet-5499476
 ```
 
-The current machine has Caddy listening on `80/443`, Jitsi web published on `8000/8443`, and JVB published on `10000/udp`. This deployment is adjusted for Dokploy so Traefik owns `80/443`, routes `meet.omni.elvismao.com` to the Jitsi `web` container, and keeps JVB media on `10000/udp`.
+The current machine has Caddy listening on `80/443`, Jitsi web published on `8000/8443`, and JVB published on `10000/udp`. This deployment is adjusted for Dokploy so Traefik owns `80/443`, routes `meet.omni.observe.tw` to the Jitsi `web` container, and keeps JVB media on `10000/udp`.
 
 ## Files
 
@@ -54,21 +54,21 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
 7. Deploy and verify:
 
    ```bash
-   curl -I https://meet.omni.elvismao.com/
-   curl -i https://meet.omni.elvismao.com/http-bind
+   curl -I https://meet.omni.observe.tw/
+   curl -i https://meet.omni.observe.tw/http-bind
    curl --http1.1 -i \
      -H 'Connection: Upgrade' \
      -H 'Upgrade: websocket' \
      -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
      -H 'Sec-WebSocket-Version: 13' \
      -H 'Sec-WebSocket-Protocol: xmpp' \
-     https://meet.omni.elvismao.com/xmpp-websocket
+     https://meet.omni.observe.tw/xmpp-websocket
    ```
 
 8. Confirm the public runtime config exposes the expected media fallback settings:
 
    ```bash
-   curl -s https://meet.omni.elvismao.com/config.js \
+   curl -s https://meet.omni.observe.tw/config.js \
      | grep -E 'websocket|bridgeChannel|resolution'
    ```
 
@@ -76,7 +76,7 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
    the OmniObserve frontend:
 
    ```text
-   https://meet.omni.elvismao.com/jitsi-smoke-test
+   https://meet.omni.observe.tw/jitsi-smoke-test
    ```
 
    In browser devtools, the failure mode this deployment is intended to prevent
@@ -91,7 +91,7 @@ Do not run the old Jitsi stack and this stack at the same time. Both need `10000
 
 ## Operational notes
 
-- `JVB_ADVERTISE_IPS` is currently set to `203.145.220.54`, which is the public IP resolved by `meet.omni.elvismao.com`. Update it if the host public IP changes.
+- `JVB_ADVERTISE_IPS` is currently set to `203.145.220.54`, which is the public IP resolved by `meet.omni.observe.tw`. Update it if the host public IP changes.
 - `JVB_ADVERTISE_PRIVATE_CANDIDATES=0` is intentional for this public Docker deployment. Without it, JVB can advertise Docker-internal candidates such as `172.x.x.x:10000`, which public clients cannot use.
 - `10000/udp` must remain reachable from the internet. HTTP reverse proxies do not carry this media traffic. The Jitsi Docker handbook lists `10000/udp` as the RTP media port: https://jitsi.github.io/handbook/docs/devops-guide/devops-guide-docker/#architecture
 - `ENABLE_COLIBRI_WEBSOCKET=1` with `JVB_PREFER_SCTP=0` keeps the JVB bridge channel on HTTPS/WebSocket instead of relying on SCTP over the media peer connection. Jitsi's FAQ recommends bridge websockets for modern deployments: https://jitsi.github.io/handbook/docs/devops-guide/faq/#how-to-migrate-away-from-multiplexing-and-enable-bridge-websockets

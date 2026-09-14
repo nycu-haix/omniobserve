@@ -25,7 +25,7 @@ Use `localhost` or `127.0.0.1` in the browser. `0.0.0.0` is only the server bind
 On the deployed service:
 
 ```text
-https://ai.omni.elvismao.com/
+https://ai.omni.observe.tw/
 ```
 
 ## Docker Run
@@ -60,7 +60,7 @@ WhisperLiveKit is launched with `--backend whisper --model-path /models/Breeze-A
 
 Use the diagnostic page to test the whole pipeline manually:
 
-1. Open `http://localhost:8000/` locally or `https://ai.omni.elvismao.com/` on deployment.
+1. Open `http://localhost:8000/` locally or `https://ai.omni.observe.tw/` on deployment.
 2. Keep the default WebSocket URL unless testing a different backend.
 3. Set `Session / roomName`, `Participant ID`, and `Display Name` if needed.
 4. Press `Start microphone` and allow microphone access.
@@ -96,7 +96,7 @@ For the deployed service:
 
 ```bash
 python test_pcm_sender.py /path/to/test.wav \
-  --ws wss://ai.omni.elvismao.com/ws/audio \
+  --ws wss://ai.omni.observe.tw/ws/audio \
   --room smoke-test \
   --participant-id cli_user \
   --display-name "CLI User"
@@ -172,7 +172,7 @@ reset_outputs_done
 For the deployed backend:
 
 ```bash
-curl -i https://ai.omni.elvismao.com/healthz
+curl -i https://ai.omni.observe.tw/healthz
 ```
 
 Expected:

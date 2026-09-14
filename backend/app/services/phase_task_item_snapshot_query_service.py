@@ -48,6 +48,7 @@ async def get_latest_phase_task_item_snapshot_response(
                 "component_label": item.component_label,
                 "action_id": item.action_id,
                 "action_label": item.action_label,
+                "detail": item.detail,
                 "statement": item.statement,
                 "source_user_ids": list(item.source_user_ids or []),
                 "source_priorities": list(item.source_priorities or []),
@@ -56,4 +57,3 @@ async def get_latest_phase_task_item_snapshot_response(
             for item in sorted(snapshot.items, key=lambda value: (value.position, value.id))
         ],
     }
-

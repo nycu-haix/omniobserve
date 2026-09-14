@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AUDIO_TRANSCRIPT_STALL_MESSAGE, observeAudioTranscriptChunk, shouldAcceptTranscriptWatchdogMessage, shouldReportAudioTranscriptStall } from "../lib/audioTranscriptWatchdog";
+import { normalizeAudioWsBaseUrl } from "../lib/audioWsBaseUrl";
 
 export type AudioStreamMode = "public" | "private";
 
@@ -18,8 +20,12 @@ interface ActiveAudioMeta {
 
 const TARGET_SAMPLE_RATE = 16000;
 const OUTPUT_CHUNK_SIZE = 512;
+const FINAL_AUDIO_DRAIN_MS = 150;
+const FINAL_AUDIO_PADDING_SAMPLES = OUTPUT_CHUNK_SIZE;
 const LOCAL_SPEAKING_RMS_THRESHOLD = 0.012;
 const LOCAL_SPEAKING_RELEASE_MS = 650;
+const AUDIO_TRANSCRIPTION_DISABLED_MESSAGE = "Audio transcription is disabled for this role.";
+const AUDIO_TRANSCRIPTION_PENDING_MESSAGE = "Waiting for participant role before starting audio.";
 
 function makeClientId(): string {
 	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -37,7 +43,7 @@ function getAudioWsBaseUrl(): string {
 
 	const baseUrl = audioBaseUrl || generalWsBaseUrl || `${protocol}://${window.location.host}`;
 
-	return baseUrl.replace(/\/+$/, "");
+	return normalizeAudioWsBaseUrl(baseUrl, { frontendHostname: window.location.hostname });
 }
 
 function getPipelineWsBaseUrl(): string | null {
@@ -106,7 +112,8 @@ function calculateRms(audio: Float32Array): number {
 export function useAudioStream(
 	sessionId: string,
 	participantId?: string,
-	displayName?: string
+	displayName?: string,
+	transcriptionEnabled?: boolean
 ): {
 	startAudioStream: (mode: AudioStreamMode) => Promise<void>;
 	stopAudioStream: (keepAudioResources?: boolean) => Promise<void>;
@@ -135,6 +142,9 @@ export function useAudioStream(
 	const activeMetaRef = useRef<ActiveAudioMeta | null>(null);
 	const isLocalSpeakingRef = useRef(false);
 	const localSpeakingReleaseTimerRef = useRef<number | null>(null);
+	const spokenAudioAtRef = useRef<number | null>(null);
+	const lastTranscriptAtRef = useRef<number | null>(null);
+	const lastTranscriptStallReportedAtRef = useRef<number | null>(null);
 
 	const setLocalSpeakingState = useCallback((nextSpeaking: boolean) => {
 		if (isLocalSpeakingRef.current === nextSpeaking) {
@@ -152,9 +162,52 @@ export function useAudioStream(
 		}
 	}, []);
 
+	const resetTranscriptWatchdog = useCallback(() => {
+		spokenAudioAtRef.current = null;
+		lastTranscriptStallReportedAtRef.current = null;
+	}, []);
+
+	const markTranscriptReceived = useCallback(() => {
+		lastTranscriptAtRef.current = Date.now();
+		resetTranscriptWatchdog();
+		setAudioError(current => (current === AUDIO_TRANSCRIPT_STALL_MESSAGE ? null : current));
+	}, [resetTranscriptWatchdog]);
+
+	const updateTranscriptWatchdog = useCallback((samples: Float32Array) => {
+		if (samples.length === 0) {
+			return;
+		}
+
+		const rms = calculateRms(samples);
+		const now = Date.now();
+		spokenAudioAtRef.current = observeAudioTranscriptChunk({
+			chunkRms: rms,
+			speechThreshold: LOCAL_SPEAKING_RMS_THRESHOLD,
+			spokenAudioAt: spokenAudioAtRef.current,
+			now
+		});
+
+		if (spokenAudioAtRef.current === null) {
+			return;
+		}
+
+		if (
+			shouldReportAudioTranscriptStall({
+				isAudioConnected: socketRef.current?.readyState === WebSocket.OPEN,
+				spokenAudioAt: spokenAudioAtRef.current,
+				lastTranscriptAt: lastTranscriptAtRef.current,
+				lastReportedAt: lastTranscriptStallReportedAtRef.current,
+				now
+			})
+		) {
+			lastTranscriptStallReportedAtRef.current = now;
+			setAudioError(AUDIO_TRANSCRIPT_STALL_MESSAGE);
+		}
+	}, []);
+
 	const updateLocalSpeaking = useCallback(
 		(samples: Float32Array) => {
-			if (activeMetaRef.current?.mode !== "public") {
+			if (!activeMetaRef.current) {
 				clearLocalSpeakingReleaseTimer();
 				setLocalSpeakingState(false);
 				return;
@@ -204,9 +257,10 @@ export function useAudioStream(
 		audioContextRef.current = null;
 		pendingSamplesRef.current = new Float32Array(0);
 		sentChunksRef.current = 0;
+		resetTranscriptWatchdog();
 		clearLocalSpeakingReleaseTimer();
 		setLocalSpeakingState(false);
-	}, [clearLocalSpeakingReleaseTimer, setLocalSpeakingState]);
+	}, [clearLocalSpeakingReleaseTimer, resetTranscriptWatchdog, setLocalSpeakingState]);
 
 	const waitForAudioStopAck = useCallback((socket: WebSocket): Promise<void> => {
 		if (socket.readyState === WebSocket.CLOSED) {
@@ -260,6 +314,8 @@ export function useAudioStream(
 						socket.send(chunk.buffer);
 					}
 
+					socket.send(new Float32Array(FINAL_AUDIO_PADDING_SAMPLES).buffer);
+
 					if (meta) {
 						const stopMessage = {
 							type: "stop",
@@ -294,26 +350,46 @@ export function useAudioStream(
 		[waitForAudioStopAck]
 	);
 
-	const drainActiveAudioSocket = useCallback((): Promise<void> => {
+	const releaseActiveAudioSocketForDrain = useCallback(async (): Promise<{ drainPromise: Promise<void> }> => {
 		const socket = socketRef.current;
 		const meta = activeMetaRef.current;
-		const pendingSamples = pendingSamplesRef.current;
 
-		socketRef.current = null;
-		activeMetaRef.current = null;
+		if (socket?.readyState === WebSocket.OPEN && audioContextRef.current?.state === "running") {
+			await new Promise(resolve => window.setTimeout(resolve, FINAL_AUDIO_DRAIN_MS));
+		}
+
+		const pendingSamples = pendingSamplesRef.current;
+		if (socketRef.current === socket) {
+			socketRef.current = null;
+		}
+		if (activeMetaRef.current === meta) {
+			activeMetaRef.current = null;
+		}
 		pendingSamplesRef.current = new Float32Array(0);
 
 		if (!socket) {
-			return Promise.resolve();
+			return { drainPromise: Promise.resolve() };
 		}
 
-		return drainAudioSocket(socket, meta, pendingSamples);
+		return { drainPromise: drainAudioSocket(socket, meta, pendingSamples) };
 	}, [drainAudioSocket]);
+
+	const drainActiveAudioSocket = useCallback(
+		async (waitForCompletion = true): Promise<void> => {
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
+			if (waitForCompletion) {
+				await drainPromise;
+			} else {
+				void drainPromise;
+			}
+		},
+		[releaseActiveAudioSocketForDrain]
+	);
 
 	const stopAudioStream = useCallback(
 		async (keepAudioResources = false) => {
 			stoppingRef.current = true;
-			const drainPromise = drainActiveAudioSocket();
+			const { drainPromise } = await releaseActiveAudioSocketForDrain();
 
 			if (!keepAudioResources) {
 				cleanupAudioResources();
@@ -325,7 +401,7 @@ export function useAudioStream(
 			setLocalSpeakingState(false);
 			await drainPromise;
 		},
-		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, drainActiveAudioSocket, setLocalSpeakingState]
+		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, releaseActiveAudioSocketForDrain, setLocalSpeakingState]
 	);
 
 	const sendAudioSamples = useCallback(
@@ -356,6 +432,7 @@ export function useAudioStream(
 				const chunk = currentPending.slice(offset, offset + OUTPUT_CHUNK_SIZE);
 				offset += OUTPUT_CHUNK_SIZE;
 
+				updateTranscriptWatchdog(chunk);
 				updateLocalSpeaking(chunk);
 				socket.send(chunk.buffer);
 
@@ -373,11 +450,18 @@ export function useAudioStream(
 
 			pendingSamplesRef.current = currentPending.slice(offset);
 		},
-		[updateLocalSpeaking]
+		[updateLocalSpeaking, updateTranscriptWatchdog]
 	);
 
 	const startAudioStream = useCallback(
 		async (mode: AudioStreamMode) => {
+			if (transcriptionEnabled !== true) {
+				setAudioError(transcriptionEnabled === false ? AUDIO_TRANSCRIPTION_DISABLED_MESSAGE : AUDIO_TRANSCRIPTION_PENDING_MESSAGE);
+				setIsAudioConnected(false);
+				setIsAudioStreaming(false);
+				return;
+			}
+
 			if (!sessionId) {
 				setAudioError("Cannot start audio stream: sessionId is empty.");
 				return;
@@ -389,10 +473,11 @@ export function useAudioStream(
 			}
 
 			const hasExistingAudio = !!mediaStreamRef.current;
-			void drainActiveAudioSocket();
+			await drainActiveAudioSocket(false);
 
 			stoppingRef.current = false;
 			setAudioError(null);
+			resetTranscriptWatchdog();
 			clearLocalSpeakingReleaseTimer();
 			setLocalSpeakingState(false);
 
@@ -543,6 +628,9 @@ export function useAudioStream(
 							const error = typeof parsedMessage.error === "string" ? parsedMessage.error : undefined;
 							setAudioError(error || reason || "Audio transcript was not saved.");
 						}
+						if (shouldAcceptTranscriptWatchdogMessage({ isCurrentSocket: socketRef.current === socket, message: parsedMessage })) {
+							markTranscriptReceived();
+						}
 						setLastAudioMessage(parsedMessage);
 					} catch {
 						console.info("[audio-ws] receive raw", event.data);
@@ -587,8 +675,31 @@ export function useAudioStream(
 				setIsAudioStreaming(false);
 			}
 		},
-		[cleanupAudioResources, clearLocalSpeakingReleaseTimer, displayName, drainActiveAudioSocket, participantId, sendAudioSamples, sessionId, setLocalSpeakingState]
+		[
+			cleanupAudioResources,
+			clearLocalSpeakingReleaseTimer,
+			displayName,
+			drainActiveAudioSocket,
+			markTranscriptReceived,
+			participantId,
+			resetTranscriptWatchdog,
+			sendAudioSamples,
+			sessionId,
+			setLocalSpeakingState,
+			transcriptionEnabled
+		]
 	);
+
+	useEffect(() => {
+		if (transcriptionEnabled !== false) {
+			return;
+		}
+		const timer = window.setTimeout(() => {
+			void stopAudioStream();
+			setAudioError(AUDIO_TRANSCRIPTION_DISABLED_MESSAGE);
+		}, 0);
+		return () => window.clearTimeout(timer);
+	}, [stopAudioStream, transcriptionEnabled]);
 
 	useEffect(() => {
 		return () => {

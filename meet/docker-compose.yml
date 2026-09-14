@@ -6,12 +6,13 @@ services:
       - .env
     volumes:
       - web-config:/config
+      - ./custom-config.js:/config/custom-config.js:ro
       - web-crontabs:/var/spool/cron/crontabs
       - transcripts:/usr/share/jitsi-meet/transcripts
       - web-load-test:/usr/share/jitsi-meet/load-test
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.observe.tw}
       DISABLE_HTTPS: ${DISABLE_HTTPS:-1}
       ENABLE_HTTP_REDIRECT: ${ENABLE_HTTP_REDIRECT:-0}
       ENABLE_LETSENCRYPT: ${ENABLE_LETSENCRYPT:-0}
@@ -41,13 +42,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${DOKPLOY_NETWORK:-dokploy-network}"
-      - "traefik.http.routers.meet.rule=Host(`${MEET_DOMAIN:-meet.omni.elvismao.com}`)"
+      - "traefik.http.routers.meet.rule=Host(`${MEET_DOMAIN:-meet.omni.observe.tw}`) || Host(`${MEET_ALT_DOMAIN:-jitsi.omni.observe.tw}`)"
       - "traefik.http.routers.meet.entrypoints=websecure"
       - "traefik.http.routers.meet.tls=true"
       - "traefik.http.routers.meet.tls.certresolver=letsencrypt"
       - "traefik.http.routers.meet.service=meet"
       - "traefik.http.services.meet.loadbalancer.server.port=80"
-      - "traefik.http.routers.meet-http.rule=Host(`${MEET_DOMAIN:-meet.omni.elvismao.com}`)"
+      - "traefik.http.routers.meet-http.rule=Host(`${MEET_DOMAIN:-meet.omni.observe.tw}`) || Host(`${MEET_ALT_DOMAIN:-jitsi.omni.observe.tw}`)"
       - "traefik.http.routers.meet-http.entrypoints=web"
       - "traefik.http.routers.meet-http.middlewares=meet-https"
       - "traefik.http.middlewares.meet-https.redirectscheme.scheme=https"
@@ -74,7 +75,7 @@ services:
       - prosody-plugins-custom:/prosody-plugins-custom
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.observe.tw}
       AUTH_TYPE: ${AUTH_TYPE:-internal}
       ENABLE_AUTH: ${ENABLE_AUTH:-0}
       ENABLE_GUESTS: ${ENABLE_GUESTS:-1}
@@ -139,16 +140,16 @@ services:
       - jvb-config:/config
     environment:
       TZ: ${TZ:-Asia/Taipei}
-      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.elvismao.com}
+      PUBLIC_URL: https://${MEET_DOMAIN:-meet.omni.observe.tw}
       COLIBRI_REST_ENABLED: ${COLIBRI_REST_ENABLED:-1}
       ENABLE_COLIBRI_WEBSOCKET: "1"
-      JVB_ADVERTISE_IPS: ${JVB_ADVERTISE_IPS:-203.145.220.54}
+      JVB_ADVERTISE_IPS: ${JVB_ADVERTISE_IPS:?Set the VM public IP for Jitsi media}
       JVB_ADVERTISE_PRIVATE_CANDIDATES: "0"
       JVB_AUTH_USER: ${JVB_AUTH_USER:-jvb}
       JVB_AUTH_PASSWORD: ${JVB_AUTH_PASSWORD}
       JVB_BREWERY_MUC: ${JVB_BREWERY_MUC:-jvbbrewery}
       JVB_PORT: ${JVB_PORT:-10000}
-      JVB_WS_DOMAIN: ${MEET_DOMAIN:-meet.omni.elvismao.com}
+      JVB_WS_DOMAIN: ${MEET_DOMAIN:-meet.omni.observe.tw}
       JVB_WS_SERVER_ID: jvb
       JVB_WS_TLS: "1"
       XMPP_AUTH_DOMAIN: ${XMPP_AUTH_DOMAIN:-auth.meet.jitsi}

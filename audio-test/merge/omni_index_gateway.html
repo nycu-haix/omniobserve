@@ -312,19 +312,19 @@
   <script>
     window.OMNI_DEFAULTS = {
       roomName: "lost-at-sea",
-      jitsiBaseUrl: "https://meet.omni.elvismao.com",
+      jitsiBaseUrl: "https://meet.omni.observe.tw",
 
       // ws://localhost:8000/sessions/{roomName}/audio-stream?participant_id={userId}
     //   apiBaseWsUrl: "ws://localhost:8000",
 
     apiBaseWsUrl:
       location.protocol === "https:"
-        ? "wss://ai.omni.elvismao.com"
+        ? "wss://ai.omni.observe.tw"
         : "ws://" + window.location.hostname + ":8001",
 
     transcriptBaseWsUrl:
       location.protocol === "https:"
-        ? "wss://ai.omni.elvismao.com"
+        ? "wss://ai.omni.observe.tw"
         : "ws://" + window.location.hostname + ":8000",
         
       userId: "user_001",

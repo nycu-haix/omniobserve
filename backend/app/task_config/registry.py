@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import enhance_the_poster, lost_at_sea
+from . import enhance_the_poster, lost_at_sea, multimedia_hci_capstone
 
 
 DEFAULT_TASK_NAME = lost_at_sea.TASK_ID
@@ -71,14 +71,14 @@ class TaskPromptConfig:
     idea_block_topic_context: str
     similarity_system_prompt: str
     task_items: list[dict[str, Any]]
-    poster_components: list[dict[str, str]] | None = None
-    actions: list[dict[str, str]] | None = None
-    advanced_actions: list[dict[str, str]] | None = None
+    poster_components: list[dict[str, Any]] | None = None
+    actions: list[dict[str, Any]] | None = None
+    advanced_actions: list[dict[str, Any]] | None = None
 
 
 def normalize_task_name(task_name: str | None) -> str:
     value = (task_name or DEFAULT_TASK_NAME).strip()
-    if value not in {lost_at_sea.TASK_ID, enhance_the_poster.TASK_ID}:
+    if value not in {lost_at_sea.TASK_ID, enhance_the_poster.TASK_ID, multimedia_hci_capstone.TASK_ID}:
         raise HTTPException(status_code=400, detail=f"Unsupported task_name: {value}")
     return value
 
@@ -86,7 +86,7 @@ def normalize_task_name(task_name: str | None) -> str:
 def get_task_prompt_config(task_name: str | None) -> TaskPromptConfig:
     normalized_task_name = normalize_task_name(task_name)
     if normalized_task_name == enhance_the_poster.TASK_ID:
-        return _enhance_the_poster_prompt_config()
+        return _poster_prompt_config(normalized_task_name)
     return _lost_at_sea_prompt_config()
 
 
@@ -110,21 +110,21 @@ def _lost_at_sea_prompt_config() -> TaskPromptConfig:
     )
 
 
-def _enhance_the_poster_prompt_config() -> TaskPromptConfig:
+def _poster_prompt_config(task_name: str) -> TaskPromptConfig:
+    task_module = multimedia_hci_capstone if task_name == multimedia_hci_capstone.TASK_ID else enhance_the_poster
     task_context = """
-Participants are improving an ugly poster. In private phase 1, each participant proposes four poster task items. Each task item is a structured edit:
-- poster_component: the poster element being changed
-- action: add, remove, or edit
-- advanced_action: the specific edit method such as enlarge, shrink, reposition, rewrite, change_color, change_font, or replace
+Participants are improving an ugly poster. In Private Phase 1, each participant proposes at least four poster task items, with no maximum. Each task item combines:
+- component_id: the poster element being changed
+- action_id: the specific edit action such as remove, move, enlarge, shrink, change_color, change_font, adjust_spacing, unify, replace, or transparency
 
-In phase 2, participants rank the deduplicated set of proposed poster task items by importance.
+In Private Phase 2 and Public Phase, participants rank only the top 10 most important proposed poster task items. Items below the top 10 are treated as not changed.
 """.strip()
     return TaskPromptConfig(
-        task_name=enhance_the_poster.TASK_ID,
-        task_title=enhance_the_poster.TASK_TITLE,
+        task_name=task_module.TASK_ID,
+        task_title=task_module.TASK_TITLE,
         idea_block_topic_context=task_context,
         similarity_system_prompt=SHARED_SIMILARITY_SYSTEM_PROMPT_TEMPLATE.format(
-            task_title=enhance_the_poster.TASK_TITLE,
+            task_title=task_module.TASK_TITLE,
             task_context=task_context,
             similarity_definition=(
                 "A candidate idea is similar only when it shares a compatible poster-improvement stance with the core idea. "
@@ -137,7 +137,7 @@ In phase 2, participants rank the deduplicated set of proposed poster task items
             ),
         ),
         task_items=[],
-        poster_components=[dict(item) for item in enhance_the_poster.POSTER_COMPONENTS],
-        actions=[dict(item) for item in enhance_the_poster.ACTIONS],
-        advanced_actions=[dict(item) for item in enhance_the_poster.ADVANCED_ACTIONS],
+        poster_components=[dict(item) for item in task_module.PHASE1_POSTER_COMPONENTS],
+        actions=[dict(item) for item in task_module.PHASE1_ACTION_ITEMS],
+        advanced_actions=[],
     )

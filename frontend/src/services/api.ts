@@ -17,7 +17,9 @@ export interface TaskConfigItem {
 	image_fg: string;
 	image_mark: string;
 	component_id?: string;
+	component_label?: string;
 	action_id?: string;
+	action_label?: string;
 	source_user_ids?: number[];
 }
 
@@ -25,15 +27,27 @@ export interface Phase1BuilderOption {
 	id: string;
 	label_zh: string;
 	label_en?: string;
+	category?: string;
 	description_zh?: string;
+	aliases?: string[];
 	template_zh?: string;
 	allowed_action_ids?: string[];
+	requires_detail?: boolean | null;
+	detail_input?: Phase1BuilderDetailInput | null;
+}
+
+export interface Phase1BuilderDetailInput {
+	kind: "library_number" | string;
+	label_zh?: string | null;
+	placeholder_zh?: string | null;
+	min?: number | null;
 }
 
 export interface Phase1BuilderConfig {
 	enabled: boolean;
 	title?: string;
 	detail_placeholder?: string;
+	minimum_items?: number;
 	components: Phase1BuilderOption[];
 	actions: Phase1BuilderOption[];
 }
@@ -67,6 +81,7 @@ export interface TaskConfig {
 	reference_image_alt?: string;
 	phases?: TaskPhaseConfig[];
 	phase1_builder?: Phase1BuilderConfig;
+	ranking_limit?: number;
 	items: TaskConfigItem[];
 }
 
@@ -148,6 +163,18 @@ export async function fetchTaskConfig(options: FetchTaskConfigOptions = {}) {
 		throw new Error(`Failed to fetch task config: ${response.status}`);
 	}
 	return (await response.json()) as TaskConfig;
+}
+
+export async function parseSpreadsheetTaskItems(filename: string, contentBase64: string) {
+	const response = await fetch(apiUrl("/api/task-items/parse-spreadsheet"), {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ filename, content_base64: contentBase64 })
+	});
+	if (!response.ok) {
+		throw new Error(await getResponseErrorMessage(response, "Failed to parse spreadsheet task items"));
+	}
+	return (await response.json()) as { items: TaskConfigItem[] };
 }
 
 export async function fetchPrivatePhaseTaskItems(options: { sessionName: string; userId: string | number; signal?: AbortSignal }) {

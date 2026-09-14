@@ -1,22 +1,25 @@
 import hashlib
 import random
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..config import logger
 from ..models import PhaseTaskItemSnapshot, PhaseTaskItemSnapshotItem, PrivatePhaseTaskItem
 from ..task_config import resolve_task_id
+from .participant_roles import is_non_analysis_participant_role, list_session_participant_roles
 
 ENHANCE_THE_POSTER_TASK_ID = "enhance-the-poster"
 PRIVATE_PHASE_1 = "private_phase_1"
 PRIVATE_PHASE_2 = "private_phase_2"
 GROUP_PHASE = "group"
 SNAPSHOT_ITEM_ID_PREFIX = "snapshot-item:"
+CUSTOM_DETAIL_ACTION_ID = "custom_detail"
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,34 @@ def is_snapshot_task(session_name: str) -> bool:
 
 def snapshot_item_id(item_id: int) -> str:
     return f"{SNAPSHOT_ITEM_ID_PREFIX}{item_id}"
+
+
+def _canonicalize_custom_detail(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value or "").casefold()
+    canonical = "".join(
+        character
+        for character in normalized
+        if not character.isspace() and not unicodedata.category(character).startswith("P")
+    )
+    return canonical or " ".join(normalized.strip().split())
+
+
+def _snapshot_dedupe_key(item: PrivatePhaseTaskItem) -> tuple[str, str, str]:
+    detail = item.detail or ""
+    if item.action_id == CUSTOM_DETAIL_ACTION_ID:
+        detail = _canonicalize_custom_detail(detail)
+    return (item.component_id, item.action_id, detail)
+
+
+def _source_priorities_for_dedupe_key(
+    source_items: list[PrivatePhaseTaskItem],
+    item_dedupe_key: tuple[str, str, str],
+) -> list[dict[str, int]]:
+    return [
+        {"user_id": source.user_id, "priority": source.priority, "private_phase_task_item_id": source.id}
+        for source in source_items
+        if _snapshot_dedupe_key(source) == item_dedupe_key
+    ]
 
 
 async def initialize_phase_rankings(
@@ -68,6 +99,7 @@ async def initialize_phase_rankings(
         task_id=task_id,
         from_phase=from_phase,
         to_phase=PRIVATE_PHASE_2,
+        participant_ids=participant_ids,
         force_new=to_phase == PRIVATE_PHASE_2 and from_phase == PRIVATE_PHASE_1,
     )
     ranking_items = serialize_snapshot_ranking_items(snapshot.items)
@@ -124,6 +156,7 @@ async def get_or_create_phase_snapshot(
     task_id: str,
     from_phase: str,
     to_phase: str,
+    participant_ids: list[str] | None = None,
     force_new: bool = False,
 ) -> PhaseTaskItemSnapshot:
     if not force_new:
@@ -154,10 +187,16 @@ async def get_or_create_phase_snapshot(
     db.add(snapshot)
     await db.flush()
 
-    source_items = await load_top_private_phase_items(db, session_name=session_name, task_id=task_id)
+    participant_roles = await list_session_participant_roles(db, session_name=session_name)
+    source_items = await load_private_phase_items(
+        db,
+        session_name=session_name,
+        task_id=task_id,
+        excluded_participant_ids=_observer_participant_ids(participant_roles),
+    )
     deduplicated_items = deduplicate_private_phase_items(source_items)
     logger.info(
-        "phase_snapshot_create_start session_name=%s task_id=%s from_phase=%s to_phase=%s snapshot_id=%s source_top4_count=%s deduped_count=%s",
+        "phase_snapshot_create_start session_name=%s task_id=%s from_phase=%s to_phase=%s snapshot_id=%s source_item_count=%s deduped_count=%s",
         session_name,
         task_id,
         from_phase,
@@ -167,11 +206,8 @@ async def get_or_create_phase_snapshot(
         len(deduplicated_items),
     )
     for position, item in enumerate(deduplicated_items, start=1):
-        source_priorities = [
-            {"user_id": source.user_id, "priority": source.priority, "private_phase_task_item_id": source.id}
-            for source in source_items
-            if source.component_id == item.component_id and source.action_id == item.action_id
-        ]
+        item_dedupe_key = _snapshot_dedupe_key(item)
+        source_priorities = _source_priorities_for_dedupe_key(source_items, item_dedupe_key)
         source_user_ids = sorted({int(source["user_id"]) for source in source_priorities})
         db.add(
             PhaseTaskItemSnapshotItem(
@@ -181,6 +217,7 @@ async def get_or_create_phase_snapshot(
                 component_label=item.component_label,
                 action_id=item.action_id,
                 action_label=item.action_label,
+                detail=item.detail or "",
                 statement=item.statement,
                 source_user_ids=source_user_ids,
                 source_priorities=source_priorities,
@@ -224,17 +261,22 @@ async def get_phase_snapshot(
     return result.scalar_one_or_none()
 
 
-async def load_top_private_phase_items(
+async def load_private_phase_items(
     db: AsyncSession,
     *,
     session_name: str,
     task_id: str,
+    participant_ids: list[str] | None = None,
+    excluded_participant_ids: list[str] | None = None,
 ) -> list[PrivatePhaseTaskItem]:
-    result = await db.execute(
+    participant_user_ids = _participant_user_id_filter(participant_ids)
+    excluded_user_ids = set(_participant_user_id_filter(excluded_participant_ids) or [])
+    stmt = (
         select(PrivatePhaseTaskItem)
         .where(
             PrivatePhaseTaskItem.session_name == session_name,
             PrivatePhaseTaskItem.task_id == task_id,
+            PrivatePhaseTaskItem.user_id > 0,
         )
         .order_by(
             PrivatePhaseTaskItem.user_id.asc(),
@@ -242,12 +284,19 @@ async def load_top_private_phase_items(
             PrivatePhaseTaskItem.id.asc(),
         )
     )
+    if participant_user_ids is not None:
+        if participant_user_ids:
+            stmt = stmt.where(PrivatePhaseTaskItem.user_id.in_(participant_user_ids))
+        else:
+            stmt = stmt.where(false())
+    if excluded_user_ids:
+        stmt = stmt.where(~PrivatePhaseTaskItem.user_id.in_(excluded_user_ids))
+    result = await db.execute(stmt)
     grouped: dict[int, list[PrivatePhaseTaskItem]] = defaultdict(list)
     for item in result.scalars().all():
-        if len(grouped[item.user_id]) < 4:
-            grouped[item.user_id].append(item)
+        grouped[item.user_id].append(item)
     logger.info(
-        "phase_snapshot_source_top4_loaded session_name=%s task_id=%s users=%s total_selected=%s",
+        "phase_snapshot_source_items_loaded session_name=%s task_id=%s users=%s total_selected=%s",
         session_name,
         task_id,
         {str(user_id): [item.id for item in items] for user_id, items in grouped.items()},
@@ -256,17 +305,40 @@ async def load_top_private_phase_items(
     return [item for user_items in grouped.values() for item in user_items]
 
 
+def _participant_user_id_filter(participant_ids: list[str] | None) -> list[int] | None:
+    if participant_ids is None:
+        return None
+    user_ids: set[int] = set()
+    for participant_id in participant_ids:
+        try:
+            parsed = int(str(participant_id).strip())
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            user_ids.add(parsed)
+    return sorted(user_ids)
+
+
+def _observer_participant_ids(participant_roles: dict[str, str]) -> list[str]:
+    return sorted(
+        participant_id
+        for participant_id, participant_role in participant_roles.items()
+        if is_non_analysis_participant_role(participant_role)
+    )
+
+
 def deduplicate_private_phase_items(items: list[PrivatePhaseTaskItem]) -> list[PrivatePhaseTaskItem]:
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     deduplicated: list[PrivatePhaseTaskItem] = []
     for item in items:
-        key = (item.component_id, item.action_id)
+        key = _snapshot_dedupe_key(item)
         if key in seen:
             logger.info(
-                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s user_id=%s priority=%s",
+                "phase_snapshot_dedupe_drop private_phase_task_item_id=%s component_id=%s action_id=%s detail=%s user_id=%s priority=%s",
                 item.id,
                 item.component_id,
                 item.action_id,
+                item.detail,
                 item.user_id,
                 item.priority,
             )
@@ -328,7 +400,9 @@ def serialize_snapshot_ranking_items(items: list[PhaseTaskItemSnapshotItem]) -> 
             "image_fg": "#334155",
             "image_mark": item.component_id[:8].upper(),
             "component_id": item.component_id,
+            "component_label": item.component_label,
             "action_id": item.action_id,
+            "action_label": item.action_label,
             "source_user_ids": list(item.source_user_ids or []),
         }
         for item in sorted(items, key=lambda value: (value.position, value.id))

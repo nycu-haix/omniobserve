@@ -18,10 +18,10 @@ const fallbackTaskTemplates: TaskTemplate[] = [
 		is_default: true
 	},
 	{
-		task_id: "enhance-the-poster",
-		title: "Enhance the Poster",
-		session_prefix: "enhance-the-poster",
-		description: "海報改善面向排序任務。",
+		task_id: "multimedia-hci-capstone",
+		title: "Multimedia and Human Computer Interaction Capstone",
+		session_prefix: "multimedia-hci-capstone",
+		description: "期末專題題目討論。",
 		is_default: false
 	}
 ];
@@ -199,16 +199,14 @@ export function HomePage() {
 											key={template.task_id}
 											type="button"
 											className={cn(
-												"grid min-h-24 content-start gap-2 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+												"relative grid min-h-24 content-start gap-2 rounded-lg border bg-background p-3 text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 												isSelected && "border-primary bg-primary/5"
 											)}
 											aria-pressed={isSelected}
 											onClick={() => selectTemplate(template.task_id)}
 										>
-											<span className="flex items-center justify-between gap-2">
-												<span className="min-w-0 truncate text-sm font-semibold">{template.title}</span>
-												{isSelected && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
-											</span>
+											<span className="min-w-0 break-words pr-6 text-sm font-semibold leading-snug">{template.title}</span>
+											{isSelected && <Check className="absolute right-3 top-3 h-4 w-4 text-primary" aria-hidden="true" />}
 											<span className="break-all font-mono text-xs text-muted-foreground">{template.session_prefix}</span>
 											<span className="text-xs leading-5 text-muted-foreground">{template.description}</span>
 										</button>

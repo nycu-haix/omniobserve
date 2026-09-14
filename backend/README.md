@@ -8,7 +8,7 @@ All production WebSocket endpoints use the same participant addressing pattern:
 connections[session_id][participant_id] = websocket
 ```
 
-For local testing, replace `wss://meet.omni.elvismao.com` with `ws://localhost:8000`.
+For local testing, replace `wss://meet.omni.observe.tw` with `ws://localhost:8000`.
 
 ## Endpoint Summary
 
@@ -23,7 +23,7 @@ For local testing, replace `wss://meet.omni.elvismao.com` with `ws://localhost:8
 ## 1. Audio WebSocket
 
 ```text
-wss://meet.omni.elvismao.com/ws/sessions/{session_id}/audio?participant_id={participant_id}
+wss://meet.omni.observe.tw/ws/sessions/{session_id}/audio?participant_id={participant_id}
 ```
 
 Local:
@@ -96,7 +96,7 @@ audio ws transcript session_id=... participant_id=... segment_id=...
 ## 2. Board WebSocket
 
 ```text
-wss://meet.omni.elvismao.com/ws/sessions/{session_id}/board?participant_id={participant_id}
+wss://meet.omni.observe.tw/ws/sessions/{session_id}/board?participant_id={participant_id}
 ```
 
 Local:
@@ -216,7 +216,7 @@ board ws disconnected session_id=... participant_id=...
 ## 3. Cue WebSocket
 
 ```text
-wss://meet.omni.elvismao.com/ws/sessions/{session_id}/cue?participant_id={participant_id}
+wss://meet.omni.observe.tw/ws/sessions/{session_id}/cue?participant_id={participant_id}
 ```
 
 Local:
@@ -279,7 +279,7 @@ cue_manager.send_to(session_id, participant_id, message)
 ## 4. Presence WebSocket
 
 ```text
-wss://meet.omni.elvismao.com/ws/sessions/{session_id}/presence?participant_id={participant_id}
+wss://meet.omni.observe.tw/ws/sessions/{session_id}/presence?participant_id={participant_id}
 ```
 
 Local:
@@ -350,7 +350,7 @@ Server messages:
 ## 5. Legacy Audio Stream
 
 ```text
-wss://meet.omni.elvismao.com/sessions/{session_id}/audio-stream?participant_id={participant_id}
+wss://meet.omni.observe.tw/sessions/{session_id}/audio-stream?participant_id={participant_id}
 ```
 
 Local:
@@ -424,30 +424,30 @@ The URL is built from:
 
 ```env
 VITE_WS_BASE_URL=ws://localhost:8000
-VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+VITE_JITSI_BASE_URL=https://meet.omni.observe.tw
 VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 For production:
 
 ```env
-VITE_WS_BASE_URL=wss://meet.omni.elvismao.com
-VITE_JITSI_BASE_URL=https://meet.omni.elvismao.com
+VITE_WS_BASE_URL=wss://meet.omni.observe.tw
+VITE_JITSI_BASE_URL=https://meet.omni.observe.tw
 VITE_DEFAULT_ROOM_NAME=lost-at-sea
 ```
 
 The session id and participant id come from the URL query:
 
 ```text
-https://omni.elvismao.com?room_name=lost-at-sea&id=1
-https://omni.elvismao.com?room_name=lost-at-sea&id=2
+https://omni.observe.tw?room_name=lost-at-sea&id=1
+https://omni.observe.tw?room_name=lost-at-sea&id=2
 ```
 
 The frontend uses `room_name` as the WebSocket `session_id` and also builds the Jitsi meeting URL:
 
 ```text
-Jitsi URL: https://meet.omni.elvismao.com/{room_name}
-Board WS: wss://meet.omni.elvismao.com/ws/sessions/{room_name}/board?participant_id={id}
+Jitsi URL: https://meet.omni.observe.tw/{room_name}
+Board WS: wss://meet.omni.observe.tw/ws/sessions/{room_name}/board?participant_id={id}
 ```
 
 If `room_name` is missing, the frontend falls back to `VITE_DEFAULT_ROOM_NAME`.

@@ -1,0 +1,28 @@
+# TURN TLS uses the existing HTTPS port with hostname-based TCP passthrough.
+# Certificate issuance/renewal remains DNS-01; no TLS validation is weakened.
+# Keep the certificate-only HTTP router on a distinct hostname. An overlapping
+# HTTP TLS router can consume the TURN ClientHello and leave STUN requests hanging.
+http:
+  routers:
+    omni-turn-certificate:
+      rule: Host(`omni-turn-certificate.invalid`)
+      entryPoints: [websecure]
+      service: noop@internal
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: turn.omni.observe.tw
+tcp:
+  routers:
+    omni-turn-tls:
+      rule: HostSNI(`turn.omni.observe.tw`)
+      entryPoints: [websecure]
+      service: omni-turn-tls
+      priority: 10000
+      tls:
+        passthrough: true
+  services:
+    omni-turn-tls:
+      loadBalancer:
+        servers:
+          - address: 10.0.0.120:5349

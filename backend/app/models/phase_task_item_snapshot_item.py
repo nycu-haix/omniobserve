@@ -17,6 +17,7 @@ class PhaseTaskItemSnapshotItem(Base):
             "snapshot_id",
             "component_id",
             "action_id",
+            "detail",
             name="uq_phase_task_item_snapshot_items_dedupe_key",
         ),
         Index("idx_phase_task_item_snapshot_items_snapshot_position", "snapshot_id", "position"),
@@ -40,6 +41,7 @@ class PhaseTaskItemSnapshotItem(Base):
     component_label: Mapped[str] = mapped_column(String(120), nullable=False)
     action_id: Mapped[str] = mapped_column(String(80), nullable=False)
     action_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
     statement: Mapped[str] = mapped_column(Text, nullable=False)
     source_user_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list)
     source_priorities: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)

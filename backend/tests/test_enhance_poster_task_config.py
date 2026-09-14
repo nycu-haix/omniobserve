@@ -1,0 +1,285 @@
+import unittest
+
+from fastapi import HTTPException
+
+from app.schemas.board import TaskConfigResponse
+from app.services.private_phase_task_item_service import _build_statement, _resolve_component_action
+from app.services.task_item_generation import (
+    _format_builder_option_line,
+    _normalize_poster_component_action_mappings,
+    build_poster_component_ids_by_keyword,
+)
+from app.task_config.enhance_the_poster import (
+    CUSTOM_DETAIL_ACTION_ID,
+    PHASE1_ACTION_ITEMS,
+    PHASE1_POSTER_COMPONENTS,
+    QR_AREA_LAYOUT_ACTION_IDS,
+    RANKING_IMPORTANCE_LIMIT,
+    REFERENCE_IMAGE_SRC,
+    TASK_PHASES,
+    TASK_TOPIC_DETAIL,
+    TOPIC_DESCRIPTION,
+)
+from app.task_config import resolve_task_id, serialize_task_config, serialize_task_templates
+
+
+def _option_by_id(options, option_id: str):
+    return next(item for item in options if item["id"] == option_id)
+
+
+class EnhancePosterTaskConfigTests(unittest.TestCase):
+    def test_capstone_template_replaces_enhance_poster_in_new_meeting_options(self) -> None:
+        templates = serialize_task_templates()
+        template_ids = [template["task_id"] for template in templates]
+
+        self.assertIn("lost-at-sea", template_ids)
+        self.assertIn("multimedia-hci-capstone", template_ids)
+        self.assertNotIn("enhance-the-poster", template_ids)
+        self.assertEqual(resolve_task_id(task_id="enhance-the-poster"), "enhance-the-poster")
+
+    def test_capstone_uses_lost_at_sea_ranking_layout_with_uploaded_items(self) -> None:
+        capstone_payload = serialize_task_config(task_id="multimedia-hci-capstone")
+        lost_at_sea_payload = serialize_task_config(task_id="lost-at-sea")
+
+        self.assertEqual(capstone_payload["task_id"], "multimedia-hci-capstone")
+        self.assertEqual(capstone_payload["title"], "Multimedia and Human Computer Interaction Capstone")
+        self.assertEqual(capstone_payload["phases"], lost_at_sea_payload["phases"])
+        self.assertEqual(capstone_payload["items"], [])
+        self.assertNotIn("phase1_builder", capstone_payload)
+        self.assertNotIn("ranking_limit", capstone_payload)
+        self.assertNotIn("reference_image_src", capstone_payload)
+
+    def test_custom_detail_statement_omits_action_words(self) -> None:
+        component = {"label_zh": "Component"}
+        action = _option_by_id(PHASE1_ACTION_ITEMS, CUSTOM_DETAIL_ACTION_ID)
+
+        self.assertEqual(_build_statement(component, action, "留言"), "「Component」：留言")
+
+    def test_background_component_supports_color_changes(self) -> None:
+        background = _option_by_id(PHASE1_POSTER_COMPONENTS, "background")
+        change_color = _option_by_id(PHASE1_ACTION_ITEMS, "change_color")
+
+        self.assertEqual(background["label_zh"], "背景圖／底色")
+        self.assertEqual(background["label_en"], "Background image/color")
+        self.assertEqual(background["category"], "background")
+        self.assertIn("整張海報", background["description_zh"])
+        self.assertIn("底色", background["aliases"])
+        self.assertIn("change_color", background["allowed_action_ids"])
+        self.assertIn("transparency", background["allowed_action_ids"])
+        self.assertNotIn("remove", background["allowed_action_ids"])
+        self.assertNotIn("move", background["allowed_action_ids"])
+        self.assertNotIn("enlarge", background["allowed_action_ids"])
+        self.assertNotIn("shrink", background["allowed_action_ids"])
+        self.assertNotIn(CUSTOM_DETAIL_ACTION_ID, background["allowed_action_ids"])
+        self.assertIn("背景圖／底色", change_color["description_zh"])
+        self.assertEqual(_build_statement(background, change_color, ""), "改「背景圖／底色」顏色")
+
+    def test_task_config_response_preserves_component_category(self) -> None:
+        payload = serialize_task_config(task_id="enhance-the-poster")
+        self.assertEqual(payload["ranking_limit"], 10)
+        response_payload = TaskConfigResponse.model_validate(payload).model_dump()
+        background = _option_by_id(response_payload["phase1_builder"]["components"], "background")
+
+        self.assertEqual(response_payload["ranking_limit"], 10)
+        self.assertEqual(background["category"], "background")
+
+    def test_background_component_rejects_fixed_context_actions(self) -> None:
+        for action_id in ("remove", "move", CUSTOM_DETAIL_ACTION_ID):
+            with self.subTest(action_id=action_id), self.assertRaises(HTTPException) as raised:
+                _resolve_component_action(
+                    session_name="enhance-the-poster-issue95",
+                    task_id="enhance-the-poster",
+                    component_id="background",
+                    action_id=action_id,
+                )
+
+            self.assertEqual(raised.exception.status_code, 422)
+            self.assertEqual(raised.exception.detail, "Action item is not available for this poster component")
+
+    def test_private_phases_show_task_instructions_on_the_right(self) -> None:
+        phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
+
+        expected_left_pane_by_phase = {
+            "private_phase_1": {"type": "leaf", "content": "phase-task-items"},
+            "private_phase_2": {"type": "leaf", "content": "private-ranking"},
+        }
+
+        for phase_id, expected_left_pane in expected_left_pane_by_phase.items():
+            with self.subTest(phase_id=phase_id):
+                layout = phases_by_id[phase_id]["default_layout"]
+
+                self.assertEqual(layout["type"], "split")
+                self.assertEqual(layout["ratio"], 58)
+                self.assertEqual(layout["first"], expected_left_pane)
+                self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
+
+    def test_public_phase_keeps_rankings_and_task_instructions_visible(self) -> None:
+        phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
+        layout = phases_by_id["group"]["default_layout"]
+
+        self.assertEqual(layout["type"], "split")
+        self.assertEqual(layout["direction"], "horizontal")
+        self.assertEqual(layout["ratio"], 62)
+        self.assertEqual(layout["second"], {"type": "leaf", "content": "task-instructions"})
+
+        ranking_stack = layout["first"]
+        self.assertEqual(ranking_stack["type"], "split")
+        self.assertEqual(ranking_stack["direction"], "vertical")
+        self.assertEqual(ranking_stack["first"], {"type": "leaf", "content": "public-ranking"})
+        self.assertEqual(ranking_stack["second"], {"type": "leaf", "content": "private-ranking"})
+
+    def test_reflect_phase_shows_public_ranking_reference(self) -> None:
+        phases_by_id = {phase["id"]: phase for phase in TASK_PHASES}
+        layout = phases_by_id["reflect"]["default_layout"]
+
+        self.assertEqual(layout["type"], "split")
+        self.assertEqual(layout["direction"], "horizontal")
+        self.assertEqual(layout["first"], {"type": "leaf", "content": "private-ranking"})
+        self.assertEqual(layout["second"], {"type": "leaf", "content": "public-ranking"})
+
+    def test_task_description_uses_pdf_page_three_asset_and_required_copy(self) -> None:
+        self.assertEqual(REFERENCE_IMAGE_SRC, "/task-assets/enhance-poster-task-brief-page-3.png?v=20260613-main")
+        self.assertEqual(RANKING_IMPORTANCE_LIMIT, 10)
+        self.assertIn("2026 NYCU 世界淨灘日｜南寮海岸淨灘行動", TASK_TOPIC_DETAIL)
+        self.assertIn("背景不得留白，必須使用背景顏色或背景圖像", TASK_TOPIC_DETAIL)
+        self.assertIn("Private Phase 2 有 7 分鐘", TOPIC_DESCRIPTION)
+        self.assertIn("請務必先完成自己的前 10 項排序", TOPIC_DESCRIPTION)
+        self.assertIn("Private Phase 2 有 7 分鐘", TASK_TOPIC_DETAIL)
+        self.assertIn("請務必在進入 Public Phase 前完成自己的前 10 項排序", TASK_TOPIC_DETAIL)
+
+    def test_poster_components_include_detection_metadata(self) -> None:
+        components_by_id = {component["id"]: component for component in PHASE1_POSTER_COMPONENTS}
+
+        for component in PHASE1_POSTER_COMPONENTS:
+            with self.subTest(component_id=component["id"]):
+                self.assertIsInstance(component.get("description_zh"), str)
+                self.assertTrue(component["description_zh"].strip())
+                self.assertIsInstance(component.get("aliases"), list)
+                self.assertTrue(component["aliases"])
+
+        self.assertNotIn("qr_code_group", components_by_id)
+        self.assertIn("右下角報名區", components_by_id["qr_code"]["aliases"])
+        self.assertIn("右下角報名區", components_by_id["qr_caption"]["aliases"])
+        self.assertIn("左上角那張圖", components_by_id["activity_icon1"]["aliases"])
+        self.assertIn("底部資訊", components_by_id["info_group2"]["aliases"])
+
+    def test_poster_component_keyword_matching_uses_aliases_and_descriptions(self) -> None:
+        cases = [
+            ("右下角報名區應該靠近參與資訊", ["qr_code", "qr_caption"]),
+            ("左上角那張圖可以換成更像淨灘的圖", "activity_icon1"),
+            ("下面那個單位資訊不要太搶眼", "info_group2"),
+            ("第一個場次的時間地點說明需要更好讀", "description1"),
+            ("整張海報底色可以改成更有海洋感的藍色", "background"),
+        ]
+
+        for text, expected_component_id_or_ids in cases:
+            with self.subTest(text=text):
+                matched_ids = build_poster_component_ids_by_keyword(
+                    text,
+                    task_name="enhance-the-poster",
+                )
+                expected_component_ids = (
+                    expected_component_id_or_ids
+                    if isinstance(expected_component_id_or_ids, list)
+                    else [expected_component_id_or_ids]
+                )
+                for expected_component_id in expected_component_ids:
+                    self.assertIn(expected_component_id, matched_ids)
+
+    def test_qr_area_aliases_resolve_to_components_with_available_layout_actions(self) -> None:
+        cases = [
+            ("調整 QR 碼區間距", "adjust_spacing"),
+            ("集合右下角報名區", "assemble"),
+            ("右下角報名區向左對齊", "align_left"),
+        ]
+
+        for text, action_id in cases:
+            with self.subTest(text=text, action_id=action_id):
+                matched_ids = build_poster_component_ids_by_keyword(
+                    text,
+                    task_name="enhance-the-poster",
+                )
+                self.assertIn("qr_code", matched_ids)
+                self.assertIn("qr_caption", matched_ids)
+
+                for component_id in ("qr_code", "qr_caption"):
+                    _, component, action = _resolve_component_action(
+                        session_name="enhance-the-poster-issue99",
+                        task_id="enhance-the-poster",
+                        component_id=component_id,
+                        action_id=action_id,
+                    )
+                    self.assertEqual(component["id"], component_id)
+                    self.assertEqual(action["id"], action_id)
+
+    def test_component_action_mappings_filter_unavailable_component_actions(self) -> None:
+        valid_action_ids = {
+            str(action["id"])
+            for action in PHASE1_ACTION_ITEMS
+            if action.get("id") and not action.get("requires_detail") and not action.get("detail_input")
+        }
+        allowed_action_ids_by_component = {
+            str(component["id"]): [
+                str(action_id)
+                for action_id in component["allowed_action_ids"]
+                if str(action_id) in valid_action_ids
+            ]
+            for component in PHASE1_POSTER_COMPONENTS
+        }
+
+        normalized = _normalize_poster_component_action_mappings(
+            [
+                {"component_id": "qr_code", "action_id": "adjust_spacing"},
+                {"component_id": "qr_caption", "action_id": "assemble"},
+                {"component_id": "background", "action_id": "move"},
+                {"component_id": "contact_info", "action_id": "adjust_spacing"},
+                {"component_id": "background", "action_id": "change_color"},
+                {"component_id": "qr_code", "action_id": "adjust_spacing"},
+                {"component_id": "qr_code", "action_id": CUSTOM_DETAIL_ACTION_ID},
+                {"component_id": "qr_code_group", "action_id": "move"},
+            ],
+            valid_component_ids={str(component["id"]) for component in PHASE1_POSTER_COMPONENTS},
+            valid_action_ids=valid_action_ids,
+            allowed_action_ids_by_component=allowed_action_ids_by_component,
+        )
+
+        self.assertEqual(
+            normalized,
+            [
+                {"component_id": "qr_code", "action_id": "adjust_spacing"},
+                {"component_id": "qr_caption", "action_id": "assemble"},
+                {"component_id": "background", "action_id": "change_color"},
+            ],
+        )
+
+    def test_builder_prompt_lines_keep_qr_code_and_caption_separate(self) -> None:
+        qr_code = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_code")
+        qr_caption = _option_by_id(PHASE1_POSTER_COMPONENTS, "qr_caption")
+
+        qr_code_allowed_action_ids = [
+            action_id for action_id in qr_code["allowed_action_ids"] if action_id != CUSTOM_DETAIL_ACTION_ID
+        ]
+        qr_caption_allowed_action_ids = [
+            action_id for action_id in qr_caption["allowed_action_ids"] if action_id != CUSTOM_DETAIL_ACTION_ID
+        ]
+        qr_code_line = _format_builder_option_line(qr_code, allowed_action_ids=qr_code_allowed_action_ids)
+        qr_caption_line = _format_builder_option_line(qr_caption, allowed_action_ids=qr_caption_allowed_action_ids)
+
+        self.assertIn('id="qr_code"', qr_code_line)
+        self.assertIn('description="報名 QR code 圖像本身，觀眾掃描後進入報名或了解更多資訊。"', qr_code_line)
+        self.assertIn("右下角報名區", qr_code_line)
+        self.assertIn("allowed_actions=", qr_code_line)
+        for action_id in QR_AREA_LAYOUT_ACTION_IDS:
+            self.assertIn(action_id, qr_code_line)
+        self.assertIn('id="qr_caption"', qr_caption_line)
+        self.assertIn('description="QR code 附近的說明文字或行動呼籲，例如報名連結、掃描報名。"', qr_caption_line)
+        self.assertIn("QR 下方文字", qr_caption_line)
+        self.assertIn("allowed_actions=", qr_caption_line)
+        for action_id in QR_AREA_LAYOUT_ACTION_IDS:
+            self.assertIn(action_id, qr_caption_line)
+        self.assertNotIn(CUSTOM_DETAIL_ACTION_ID, "\n".join([qr_code_line, qr_caption_line]))
+        self.assertNotIn("qr_code_group", "\n".join(_format_builder_option_line(component) for component in PHASE1_POSTER_COMPONENTS))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,1 @@
+export const NOTIFICATION_AUTO_DISMISS_MS = 10000;

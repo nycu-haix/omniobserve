@@ -17,6 +17,10 @@ from ..schemas import (
     IdeaBlockGenerateResponse,
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
+    ParticipantRoleResponse,
+    ParticipantRoleUpdateRequest,
+    SpreadsheetTaskItemsParseRequest,
+    SpreadsheetTaskItemsParseResponse,
     TaskConfigResponse,
     TaskTemplateResponse,
     TopicDescriptionResponse,
@@ -27,8 +31,10 @@ from ..services.board_payloads import (
     serialize_frontend_board_idea_block_update,
 )
 from ..services.idea_blocks import generate_and_save_idea_blocks, update_idea_block_fields
-from ..services.participant_status import get_participant_presence
-from ..services.realtime import board_manager, presence_manager
+from ..services.participant_roles import list_session_participant_roles, set_session_participant_role
+from ..services.participant_status import get_participant_presence, sync_participant_roles, update_participant_role
+from ..services.realtime import board_manager, broadcast_admin_ranking_state, broadcast_presence_state, presence_manager
+from ..services.spreadsheet_task_items import parse_spreadsheet_task_items
 from ..services.transcript_pipeline import generate_idea_blocks_with_task_items_from_text
 from ..utils import to_iso_z
 
@@ -77,6 +83,23 @@ async def get_task_config(
     task_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     return serialize_task_config(session_name=session_name, task_id=task_id)
+
+
+@router.post(
+    "/api/task-items/parse-spreadsheet",
+    response_model=SpreadsheetTaskItemsParseResponse,
+    responses=COMMON_ERROR_RESPONSES,
+    summary="Parse Spreadsheet Task Items",
+    description="Parses an uploaded CSV, TSV, or XLSX file into ranking task items.",
+)
+async def parse_spreadsheet_task_items_endpoint(payload: SpreadsheetTaskItemsParseRequest) -> dict[str, Any]:
+    try:
+        items = parse_spreadsheet_task_items(payload.filename, payload.content_base64)
+    except Exception as exc:
+        raise ApiError(400, "INVALID_SPREADSHEET", "Could not parse spreadsheet task items") from exc
+    if not items:
+        raise ApiError(400, "INVALID_SPREADSHEET", "No task items found in spreadsheet")
+    return {"items": items}
 
 
 def serialize_idea_block(block: Any) -> dict[str, Any]:
@@ -239,24 +262,77 @@ async def create_frontend_board_block(
     return {"accepted": True, "generated_count": len(idea_blocks)}
 
 
-@router.get(
-    "/api/sessions/{session_name}/presence",
-    summary="Get Session Presence",
-    description="Returns current participants with microphone status for the session.",
-)
-async def get_session_presence(session_name: str) -> dict[str, Any]:
-    participant_ids = sorted(
+def _session_active_participant_ids(session_name: str) -> list[str]:
+    return sorted(
         {
             *presence_manager.get_participants(session_name),
             *board_manager.get_participants(session_name),
         }
     )
 
+
+def _session_presence_diagnostic_participant_ids(session_name: str, participant_roles: dict[str, str]) -> list[str]:
+    return sorted({*_session_active_participant_ids(session_name), *participant_roles.keys()})
+
+
+@router.get(
+    "/api/sessions/{session_name}/presence",
+    summary="Get Session Presence",
+    description="Returns current participants with microphone status for the session.",
+)
+async def get_session_presence(
+    session_name: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    participant_roles = await list_session_participant_roles(db, session_name=session_name)
+    participant_ids = _session_active_participant_ids(session_name)
+    diagnostic_participant_ids = _session_presence_diagnostic_participant_ids(session_name, participant_roles)
+
+    sync_participant_roles(session_name, participant_roles)
+
     return {
         "session_name": session_name,
         "participant_ids": participant_ids,
-        "participants": get_participant_presence(session_name, participant_ids),
+        "participants": get_participant_presence(session_name, diagnostic_participant_ids, participant_roles),
     }
+
+
+@router.patch(
+    "/api/sessions/{session_name}/participants/{participant_id}/role",
+    response_model=ParticipantRoleResponse,
+    responses=COMMON_ERROR_RESPONSES,
+    summary="Set Participant Role",
+    description="Manually marks a session member as participant, confederate, observer, facilitator, or test for admin filtering and exports.",
+)
+async def update_session_participant_role(
+    session_name: str,
+    participant_id: str,
+    payload: ParticipantRoleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ParticipantRoleResponse:
+    try:
+        role = await set_session_participant_role(
+            db,
+            session_name=session_name,
+            participant_id=participant_id,
+            participant_role=payload.role,
+        )
+        await db.commit()
+    except ApiError:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        raise ApiError(500, "INTERNAL_SERVER_ERROR", "Unexpected server error") from exc
+
+    update_participant_role(session_name, participant_id, role.participant_role)
+    await broadcast_presence_state(session_name)
+    await broadcast_admin_ranking_state(session_name)
+    return ParticipantRoleResponse(
+        session_name=session_name,
+        participant_id=participant_id,
+        participant_role=role.participant_role,
+    )
 
 
 @router.post(

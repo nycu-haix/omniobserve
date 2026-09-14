@@ -12,6 +12,7 @@ from ..schemas import ApiError, IdeaBlockCreate, IdeaBlockUpdate
 from ..task_config.registry import normalize_task_name
 from .embedding_service import create_text_embedding
 from .idea_block_deduplication import find_duplicate_idea_block
+from .idea_block_generation_limits import bound_generated_idea_blocks
 from .idea_block_similarity_context import attach_similarity_reason_flags
 from .idea_blocks import build_idea_blocks_with_llm
 from .similarity_detection import trigger_similarity_detection
@@ -32,7 +33,9 @@ async def create_idea_block_from_content(
     if not normalized_content:
         raise ApiError(400, "INVALID_PAYLOAD", "content cannot be empty")
 
-    generated_blocks = await build_idea_blocks_with_llm(normalized_content, session_name=session_name, task_name=task_name)
+    generated_blocks = bound_generated_idea_blocks(
+        await build_idea_blocks_with_llm(normalized_content, session_name=session_name, task_name=task_name)
+    )
     if not generated_blocks:
         raise ApiError(422, "IDEA_GENERATION_FAILED", "Idea block could not be generated")
 
@@ -284,6 +287,16 @@ async def delete_idea_block(idea_block_id: int, db: AsyncSession) -> None:
     await db.commit()
 
 
+async def restore_idea_block(idea_block_id: int, db: AsyncSession) -> IdeaBlock:
+    idea_block = await get_idea_block(idea_block_id, db)
+    if not idea_block.is_deleted:
+        return idea_block
+
+    idea_block.is_deleted = False
+    await db.commit()
+    return await get_idea_block(idea_block_id, db)
+
+
 async def _create_embedding_or_none(text: str) -> list[float] | None:
     try:
         return await create_text_embedding(text)
@@ -327,6 +340,32 @@ async def delete_scoped_idea_block(
     )
     idea_block.is_deleted = True
     await db.commit()
+
+
+async def restore_scoped_idea_block(
+    idea_block_id: int,
+    *,
+    session_name: str,
+    user_id: int,
+    db: AsyncSession,
+) -> IdeaBlock:
+    idea_block = await get_scoped_idea_block(
+        idea_block_id,
+        session_name=session_name,
+        user_id=user_id,
+        db=db,
+    )
+    if not idea_block.is_deleted:
+        return idea_block
+
+    idea_block.is_deleted = False
+    await db.commit()
+    return await get_scoped_idea_block(
+        idea_block_id,
+        session_name=session_name,
+        user_id=user_id,
+        db=db,
+    )
 
 
 async def _delete_similarity_references(idea_block_id: int, db: AsyncSession) -> None:

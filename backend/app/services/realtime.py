@@ -1,9 +1,11 @@
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -17,7 +19,10 @@ from ..models import IdeaBlock, Similarity, Visibility
 from ..schemas import ChatMessageCreate
 from ..task_config import (
     get_default_phase_for_session,
+    get_ranking_limit_for_session,
     get_ranking_items_for_session,
+    get_task_phases_for_session,
+    get_task_config_for_session,
     normalize_phase_for_session,
 )
 from ..utils import utc_now
@@ -25,16 +30,40 @@ from .asr import transcribe_ws_chunk
 from .chat_message_service import create_chat_message
 from .idea_blocks import generate_idea_blocks_from_stream_transcripts
 from .participant_status import (
+    get_cached_participant_role,
     get_participant_display_name,
     get_participant_presence,
+    is_cached_non_analysis_participant,
     mark_audio_disconnected,
+    sync_participant_roles,
     update_participant_metadata,
     update_audio_status,
 )
-from .public_context_matching import find_public_context_matches
+from .participant_roles import CONFEDERATE_ROLE, PARTICIPANT_ROLE, is_audio_transcription_role, list_session_participant_roles
+from .pipeline_latency import record_audio_transcript_latency_events, record_public_now_latency_events
+from .public_context_matching import (
+    PublicContextMatch,
+    find_public_context_component_matches,
+    find_public_context_matches,
+    find_public_context_task_item_matches,
+)
 from .phase_task_item_snapshot_service import initialize_phase_rankings
+from .ranking_phase_snapshot_service import (
+    create_phase_boundary_ranking_snapshots,
+    create_reflect_ranking_move_snapshot,
+)
 from .ranking_move_service import create_ranking_checkpoint, create_ranking_move
+from .ranking_cutoff import (
+    build_ranking_items_with_cutoff,
+    normalize_ranking_change_count,
+    split_ranking_items,
+)
 from .ranking_state_query_service import get_effective_ranking_state
+from .similarity_cue_event_service import (
+    mark_latest_similarity_cue_shared,
+    record_similarity_reason_share_delivery,
+    safe_record_similarity_cue_response,
+)
 from .transcripts import save_ws_transcript_segment
 
 DUPLICATE_CONNECTION_CLOSE_CODE = 1008
@@ -47,6 +76,7 @@ ADMIN_PARTICIPANT_ID_PREFIX = f"{ADMIN_PARTICIPANT_ID}-"
 PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS = 4
 PUBLIC_CONTEXT_MATCH_WINDOW_MAX_CHARS = 700
 PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS = 0.75
+CAPSTONE_TASK_ID = "multimedia-hci-capstone"
 _public_context_windows: dict[str, deque[str]] = defaultdict(
     lambda: deque(maxlen=PUBLIC_CONTEXT_MATCH_WINDOW_SEGMENTS)
 )
@@ -58,6 +88,51 @@ def _is_admin_participant_id(participant_id: str | None) -> bool:
     return normalized_id == ADMIN_PARTICIPANT_ID or normalized_id.startswith(
         ADMIN_PARTICIPANT_ID_PREFIX
     )
+
+
+def _is_real_participant_id(participant_id: str | None) -> bool:
+    participant_text = str(participant_id or "").strip()
+    return bool(participant_text) and participant_text != "0" and participant_text.isdigit()
+
+
+def _is_participant_ranking_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
+        return False
+    return not is_cached_non_analysis_participant(session_id, str(participant_id or ""))
+
+
+def _is_admin_monitor_ranking_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
+        return False
+    return get_cached_participant_role(session_id, str(participant_id or "")) in {
+        PARTICIPANT_ROLE,
+        CONFEDERATE_ROLE,
+    }
+
+
+def _is_audio_transcription_subject(session_id: str, participant_id: str | None) -> bool:
+    if _is_admin_participant_id(participant_id) or not _is_real_participant_id(participant_id):
+        return False
+    return is_audio_transcription_role(get_cached_participant_role(session_id, str(participant_id or "")))
+
+
+def _transcription_disabled_message(session_id: str, participant_id: str, participant_role: str, scope: str | None = None) -> dict[str, Any]:
+    return {
+        "type": "transcription_disabled",
+        "reason": "role_excluded_from_asr",
+        "session_name": session_id,
+        "participant_id": participant_id,
+        "participant_role": participant_role,
+        "scope": scope,
+    }
+
+
+def _phase_snapshot_participant_ids(participant_ids: list[str]) -> list[str]:
+    return [
+        participant_id
+        for participant_id in participant_ids
+        if not _is_admin_participant_id(participant_id) and _is_real_participant_id(participant_id)
+    ]
 
 
 class ConnectionManager:
@@ -176,7 +251,10 @@ class AudioConnectionState:
     mic_mode: str = "private"
     display_name: str | None = None
     is_speaking: bool = False
+    transcription_disabled_notified: bool = False
     audio_buffer: bytearray = field(default_factory=bytearray)
+    audio_buffer_started_at: datetime | None = None
+    audio_buffer_bytes: int = 0
 
 
 audio_manager = ConnectionManager()
@@ -199,10 +277,28 @@ session_timers: dict[str, dict[str, Any]] = defaultdict(
     lambda: {"end_time_ms": 0, "duration_s": 0}
 )
 session_cue_conditions: dict[str, str] = defaultdict(lambda: "experimental")
+session_public_context_state: dict[str, dict[str, Any]] = {}
+session_ranking_completion: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _optional_ms(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _elapsed_ms(started_at_ms: int | None, ended_at_ms: int | None) -> int | None:
+    if started_at_ms is None or ended_at_ms is None:
+        return None
+    return max(0, ended_at_ms - started_at_ms)
 
 
 def _get_session_phase(session_id: str) -> str:
@@ -224,6 +320,14 @@ def _normalize_cue_condition(value: Any) -> str:
 
 def is_similarity_cue_enabled(session_id: str) -> bool:
     return session_cue_conditions[session_id] == "experimental"
+
+
+def get_session_cue_condition(session_id: str) -> str:
+    return session_cue_conditions[session_id]
+
+
+def get_session_phase(session_id: str) -> str:
+    return _get_session_phase(session_id)
 
 
 def _phase_state_message(session_id: str) -> dict[str, Any]:
@@ -257,6 +361,118 @@ def _phase_changed_message(session_id: str) -> dict[str, Any]:
         "cue_condition": session_cue_conditions[session_id],
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
         "timestamp_ms": _now_ms(),
+    }
+
+
+def _is_capstone_session(session_id: str) -> bool:
+    return get_task_config_for_session(session_name=session_id).get("task_id") == CAPSTONE_TASK_ID
+
+
+def _get_next_session_phase(session_id: str) -> str | None:
+    phases = get_task_phases_for_session(session_name=session_id)
+    phase_ids = [str(phase["id"]) for phase in phases]
+    current_phase = _get_session_phase(session_id)
+    try:
+        current_index = phase_ids.index(current_phase)
+    except ValueError:
+        return None
+    next_index = current_index + 1
+    return phase_ids[next_index] if next_index < len(phase_ids) else None
+
+
+def _ranking_completion_subject_ids(session_id: str) -> list[str]:
+    return sorted(
+        participant_id
+        for participant_id in board_manager.get_participants(session_id)
+        if _is_participant_ranking_subject(session_id, participant_id)
+    )
+
+
+def _ranking_completion_message(session_id: str, participant_id: str | None = None) -> dict[str, Any]:
+    phase = _get_session_phase(session_id)
+    subject_ids = _ranking_completion_subject_ids(session_id)
+    subject_id_set = set(subject_ids)
+    completed_ids = sorted(session_ranking_completion[session_id][phase] & subject_id_set)
+    return {
+        "type": "ranking_completion_state",
+        "current_phase": phase,
+        "completed_participant_ids": completed_ids,
+        "completed_count": len(completed_ids),
+        "total_count": len(subject_ids),
+        "is_completed": participant_id in completed_ids if participant_id is not None else False,
+        "has_next_phase": _get_next_session_phase(session_id) is not None,
+        "timestamp_ms": _now_ms(),
+    }
+
+
+async def _broadcast_ranking_completion_state(session_id: str) -> None:
+    if not _is_capstone_session(session_id):
+        return
+    for participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            _ranking_completion_message(session_id, participant_id),
+        )
+
+
+def _public_context_component_state_message(session_id: str) -> dict[str, Any]:
+    state = session_public_context_state.get(session_id) or {}
+    component_ids = list(state.get("component_ids") or [])
+    task_item_ids = list(state.get("task_item_ids") or [])
+    state_updated_at_ms = _optional_ms(state.get("timestamp_ms"))
+    event_timestamp_ms = _optional_ms(state.get("event_timestamp_ms"))
+    matching_started_at_ms = _optional_ms(state.get("matching_started_at_ms"))
+    matching_completed_at_ms = _optional_ms(state.get("matching_completed_at_ms")) or state_updated_at_ms
+    admin_broadcast_at_ms = _now_ms()
+    event_to_state_ms = _optional_ms(state.get("event_to_state_ms")) or _elapsed_ms(
+        event_timestamp_ms,
+        matching_completed_at_ms,
+    )
+    return {
+        "type": "public_context_component_state",
+        "componentIds": component_ids,
+        "component_ids": component_ids,
+        "taskItemIds": task_item_ids,
+        "task_item_ids": task_item_ids,
+        "source": state.get("source"),
+        "matchCount": _normalize_int(state.get("match_count"), 0),
+        "match_count": _normalize_int(state.get("match_count"), 0),
+        "deliveredCount": _normalize_int(state.get("delivered_count"), 0),
+        "delivered_count": _normalize_int(state.get("delivered_count"), 0),
+        "timestamp_ms": state_updated_at_ms,
+        "stateUpdatedAtMs": state_updated_at_ms,
+        "state_updated_at_ms": state_updated_at_ms,
+        "eventTimestampMs": event_timestamp_ms,
+        "event_timestamp_ms": event_timestamp_ms,
+        "matchingStartedAtMs": matching_started_at_ms,
+        "matching_started_at_ms": matching_started_at_ms,
+        "matchingCompletedAtMs": matching_completed_at_ms,
+        "matching_completed_at_ms": matching_completed_at_ms,
+        "adminBroadcastAtMs": admin_broadcast_at_ms,
+        "admin_broadcast_at_ms": admin_broadcast_at_ms,
+        "debounceMs": _optional_ms(state.get("debounce_ms")),
+        "debounce_ms": _optional_ms(state.get("debounce_ms")),
+        "queueDelayMs": _optional_ms(state.get("queue_delay_ms")),
+        "queue_delay_ms": _optional_ms(state.get("queue_delay_ms")),
+        "matchingDurationMs": _optional_ms(state.get("matching_duration_ms")),
+        "matching_duration_ms": _optional_ms(state.get("matching_duration_ms")),
+        "eventToStateMs": event_to_state_ms,
+        "event_to_state_ms": event_to_state_ms,
+        "eventToAdminBroadcastMs": _elapsed_ms(event_timestamp_ms, admin_broadcast_at_ms),
+        "event_to_admin_broadcast_ms": _elapsed_ms(event_timestamp_ms, admin_broadcast_at_ms),
+        "textChars": _optional_ms(state.get("text_chars")),
+        "text_chars": _optional_ms(state.get("text_chars")),
+        "contextChars": _optional_ms(state.get("context_chars")),
+        "context_chars": _optional_ms(state.get("context_chars")),
+        "targetParticipantCount": _optional_ms(state.get("target_participant_count")),
+        "target_participant_count": _optional_ms(state.get("target_participant_count")),
+        "boardConnectionCount": _optional_ms(state.get("board_connection_count")),
+        "board_connection_count": _optional_ms(state.get("board_connection_count")),
+        "adminConnectionCount": _optional_ms(state.get("admin_connection_count")),
+        "admin_connection_count": _optional_ms(state.get("admin_connection_count")),
+        "transcriptSegmentId": state.get("transcript_segment_id"),
+        "transcript_segment_id": state.get("transcript_segment_id"),
     }
 
 
@@ -307,6 +523,35 @@ async def broadcast_admin_transcript(
     )
 
 
+async def broadcast_admin_terminal_error(
+    session_id: str,
+    *,
+    error_type: str,
+    participant_id: str,
+    reason: str,
+    scope: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str | int | None] | None = None,
+    client_segment_id: str | int | None = None,
+    client_segment_ids: list[str | int | None] | None = None,
+) -> None:
+    await admin_manager.broadcast(
+        session_id,
+        {
+            "type": error_type,
+            "session_name": session_id,
+            "participant_id": participant_id,
+            "reason": reason,
+            "scope": scope,
+            "transcript_segment_id": transcript_segment_id,
+            "transcript_segment_ids": transcript_segment_ids or [],
+            "client_segment_id": client_segment_id,
+            "client_segment_ids": client_segment_ids or [],
+            "timestamp_ms": _now_ms(),
+        },
+    )
+
+
 def _presence_state_message(session_id: str) -> dict[str, Any]:
     participant_ids = sorted(
         {
@@ -323,9 +568,24 @@ def _presence_state_message(session_id: str) -> dict[str, Any]:
     }
 
 
+async def _sync_cached_participant_roles(session_id: str) -> None:
+    async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
+
+
 async def broadcast_presence_state(session_id: str) -> None:
-    await presence_manager.broadcast(session_id, _presence_state_message(session_id))
-    await admin_manager.broadcast(session_id, _presence_state_message(session_id))
+    await _sync_cached_participant_roles(session_id)
+    message = _presence_state_message(session_id)
+    await presence_manager.broadcast(session_id, message)
+    await admin_manager.broadcast(session_id, message)
+
+
+async def broadcast_admin_ranking_state(session_id: str) -> None:
+    await _sync_cached_participant_roles(session_id)
+    await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
 
 
 async def broadcast_admin_idea_blocks_update(
@@ -333,16 +593,32 @@ async def broadcast_admin_idea_blocks_update(
     *,
     participant_id: str,
     idea_blocks: list[dict[str, Any]],
+    duplicate_idea_blocks: list[dict[str, Any]] | None = None,
+    scope: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    transcript_segment_ids: list[str | int | None] | None = None,
+    client_segment_id: str | int | None = None,
+    client_segment_ids: list[str | int | None] | None = None,
+    generation_complete: bool | None = None,
 ) -> None:
+    payload: dict[str, Any] = {
+        "type": "idea_blocks_update",
+        "session_name": session_id,
+        "participant_id": participant_id,
+        "idea_blocks": idea_blocks,
+        "duplicate_idea_blocks": duplicate_idea_blocks or [],
+        "scope": scope,
+        "transcript_segment_id": transcript_segment_id,
+        "transcript_segment_ids": transcript_segment_ids or [],
+        "client_segment_id": client_segment_id,
+        "client_segment_ids": client_segment_ids or [],
+        "timestamp_ms": _now_ms(),
+    }
+    if generation_complete is not None:
+        payload["generation_complete"] = generation_complete
     await admin_manager.broadcast(
         session_id,
-        {
-            "type": "idea_blocks_update",
-            "session_name": session_id,
-            "participant_id": participant_id,
-            "idea_blocks": idea_blocks,
-            "timestamp_ms": _now_ms(),
-        },
+        payload,
     )
 
 
@@ -373,6 +649,7 @@ async def broadcast_public_transcript_line(
     transcript_segment_id: str | int | None = None,
 ) -> None:
     display_name = get_participant_display_name(session_id, participant_id)
+    timestamp_ms = _now_ms()
     await board_manager.broadcast(
         session_id,
         {
@@ -380,12 +657,12 @@ async def broadcast_public_transcript_line(
             "payload": {
                 "id": str(transcript_segment_id)
                 if transcript_segment_id is not None
-                else f"public-{participant_id}-{_now_ms()}",
+                else f"public-{participant_id}-{timestamp_ms}",
                 "source": "public",
                 "origin": "live",
                 "userId": participant_id,
                 "displayName": display_name,
-                "timestampMs": _now_ms(),
+                "timestampMs": timestamp_ms,
                 "text": text,
             },
         },
@@ -395,6 +672,7 @@ async def broadcast_public_transcript_line(
         participant_id=participant_id,
         text=text,
         transcript_segment_id=transcript_segment_id,
+        event_timestamp_ms=timestamp_ms,
     )
 
 
@@ -404,49 +682,71 @@ def _schedule_public_context_matching(
     participant_id: str,
     text: str,
     transcript_segment_id: str | int | None,
+    event_timestamp_ms: int,
 ) -> None:
     if not text.strip():
         return
     match_text = _append_public_context_text(session_id, text)
+    scheduled_at_ms = _now_ms()
+    debounce_ms = round(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS * 1000)
 
     async def run_matching() -> None:
         try:
             await asyncio.sleep(PUBLIC_CONTEXT_MATCH_DEBOUNCE_SECONDS)
+            matching_started_at_ms = _now_ms()
             async with SessionLocal() as db:
                 matches = await find_public_context_matches(
                     db,
                     session_name=session_id,
                     public_text=match_text,
                 )
+            matching_completed_at_ms = _now_ms()
             if not matches:
                 return
 
-            matches_by_user: dict[str, list[Any]] = {}
-            for match in matches:
-                matches_by_user.setdefault(str(match.user_id), []).append(match)
-
-            for target_participant_id, user_matches in matches_by_user.items():
-                await board_manager.send_to(
-                    session_id,
-                    target_participant_id,
-                    {
-                        "type": "public_context_matches",
-                        "payload": {
-                            "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
-                            "participantId": participant_id,
-                            "textChars": len(text),
-                            "contextChars": len(match_text),
-                            "matches": [
-                                {
-                                    "ideaBlockId": str(match.idea_block_id),
-                                    "userId": str(match.user_id),
-                                    "score": match.score,
-                                    "reason": match.reason,
-                                    "taskItemIds": match.task_item_ids,
-                                }
-                                for match in user_matches
-                            ],
-                        },
+            state = await _publish_public_context_matches(
+                session_id,
+                matches=matches,
+                source="auto",
+                participant_id=participant_id,
+                transcript_segment_id=transcript_segment_id,
+                text_chars=len(text),
+                context_chars=len(match_text),
+                latency_metadata={
+                    "event_timestamp_ms": event_timestamp_ms,
+                    "scheduled_at_ms": scheduled_at_ms,
+                    "debounce_ms": debounce_ms,
+                    "queue_delay_ms": _elapsed_ms(scheduled_at_ms, matching_started_at_ms),
+                    "matching_started_at_ms": matching_started_at_ms,
+                    "matching_completed_at_ms": matching_completed_at_ms,
+                    "matching_duration_ms": _elapsed_ms(matching_started_at_ms, matching_completed_at_ms),
+                    "event_to_state_ms": _elapsed_ms(event_timestamp_ms, matching_completed_at_ms),
+                    "transcript_segment_id": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                },
+            )
+            async with SessionLocal() as db:
+                await record_public_now_latency_events(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    phase=_get_session_phase(session_id),
+                    transcript_id=_normalize_optional_int(transcript_segment_id),
+                    transcript_chars=len(text),
+                    context_chars=len(match_text),
+                    source="auto",
+                    event_to_state_ms=_optional_ms(state.get("event_to_state_ms")),
+                    matching_duration_ms=_optional_ms(state.get("matching_duration_ms")),
+                    queue_delay_ms=_optional_ms(state.get("queue_delay_ms")),
+                    debounce_ms=_optional_ms(state.get("debounce_ms")),
+                    match_count=_normalize_int(state.get("match_count"), 0),
+                    delivered_count=_normalize_int(state.get("delivered_count"), 0),
+                    target_participant_count=_normalize_int(state.get("target_participant_count"), 0),
+                    board_connection_count=_normalize_int(state.get("board_connection_count"), 0),
+                    admin_connection_count=_normalize_int(state.get("admin_connection_count"), 0),
+                    component_ids=list(state.get("component_ids") or []),
+                    task_item_ids=list(state.get("task_item_ids") or []),
+                    metadata={
+                        "transcript_segment_id": str(transcript_segment_id) if transcript_segment_id is not None else None,
                     },
                 )
         except asyncio.CancelledError:
@@ -476,6 +776,108 @@ def _schedule_public_context_matching(
     if previous_task is not None and not previous_task.done():
         previous_task.cancel()
     _public_context_matching_tasks[session_id] = asyncio.create_task(run_matching())
+
+
+async def _publish_public_context_matches(
+    session_id: str,
+    *,
+    matches: list[PublicContextMatch],
+    source: str,
+    participant_id: str | None = None,
+    transcript_segment_id: str | int | None = None,
+    text_chars: int = 0,
+    context_chars: int = 0,
+    component_ids: list[str] | None = None,
+    task_item_ids: list[int] | None = None,
+    latency_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_component_ids = _unique_strings(
+        component_ids if component_ids is not None else [component_id for match in matches for component_id in match.component_ids]
+    )
+    resolved_task_item_ids = _unique_ints(
+        task_item_ids if task_item_ids is not None else [task_item_id for match in matches for task_item_id in match.task_item_ids]
+    )
+    matches_by_user: dict[str, list[PublicContextMatch]] = {}
+    for match in matches:
+        matches_by_user.setdefault(str(match.user_id), []).append(match)
+
+    delivered_count = 0
+    board_participant_ids = board_manager.get_participants(session_id)
+    target_participant_ids = [
+        target_participant_id
+        for target_participant_id in board_participant_ids
+        if _is_participant_ranking_subject(session_id, target_participant_id)
+    ]
+    for target_participant_id in target_participant_ids:
+        user_matches = matches_by_user.get(target_participant_id, [])
+        sent = await board_manager.send_to(
+            session_id,
+            target_participant_id,
+            {
+                "type": "public_context_matches",
+                "payload": {
+                    "transcriptId": str(transcript_segment_id) if transcript_segment_id is not None else None,
+                    "participantId": participant_id,
+                    "textChars": text_chars,
+                    "contextChars": context_chars,
+                    "replaceExisting": True,
+                    "pinMode": "public_context_topic",
+                    "componentIds": resolved_component_ids,
+                    "taskItemIds": resolved_task_item_ids,
+                    "source": source,
+                    "matches": [_public_context_match_payload(match) for match in user_matches],
+                },
+            },
+        )
+        if sent:
+            delivered_count += 1
+
+    timestamp_ms = _now_ms()
+    next_state = {
+        "component_ids": resolved_component_ids,
+        "task_item_ids": resolved_task_item_ids,
+        "source": source,
+        "match_count": len(matches),
+        "delivered_count": delivered_count,
+        "timestamp_ms": timestamp_ms,
+        "text_chars": text_chars,
+        "context_chars": context_chars,
+        "target_participant_count": len(target_participant_ids),
+        "board_connection_count": len(board_participant_ids),
+        "admin_connection_count": len(admin_manager.get_participants(session_id)),
+    }
+    next_state.update(latency_metadata or {})
+    session_public_context_state[session_id] = next_state
+    logger.info(
+        (
+            "public_context_now_latency session_id=%s source=%s event_to_state_ms=%s "
+            "matching_duration_ms=%s queue_delay_ms=%s match_count=%s delivered_count=%s "
+            "targets=%s text_chars=%s context_chars=%s"
+        ),
+        session_id,
+        source,
+        next_state.get("event_to_state_ms"),
+        next_state.get("matching_duration_ms"),
+        next_state.get("queue_delay_ms"),
+        len(matches),
+        delivered_count,
+        len(target_participant_ids),
+        text_chars,
+        context_chars,
+    )
+    await admin_manager.broadcast(session_id, _public_context_component_state_message(session_id))
+    return next_state
+
+
+def _public_context_match_payload(match: PublicContextMatch) -> dict[str, Any]:
+    return {
+        "ideaBlockId": str(match.idea_block_id),
+        "userId": str(match.user_id),
+        "score": match.score,
+        "reason": match.reason,
+        "taskItemIds": match.task_item_ids,
+        "componentIds": match.component_ids,
+    }
 
 
 def _append_public_context_text(session_id: str, text: str) -> str:
@@ -510,13 +912,82 @@ def _normalize_optional_int(value: Any) -> int | None:
     return parsed if parsed >= 0 else None
 
 
-def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
+def _unique_strings(values: list[Any]) -> list[str]:
+    normalized_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        normalized_value = str(value or "").strip()
+        if not normalized_value or normalized_value in seen_values:
+            continue
+        seen_values.add(normalized_value)
+        normalized_values.append(normalized_value)
+    return normalized_values
+
+
+def _unique_ints(values: list[Any]) -> list[int]:
+    normalized_values: list[int] = []
+    seen_values: set[int] = set()
+    for value in values:
+        parsed_value = _normalize_optional_int(value)
+        if parsed_value is None or parsed_value in seen_values:
+            continue
+        seen_values.add(parsed_value)
+        normalized_values.append(parsed_value)
+    return normalized_values
+
+
+def _normalize_public_context_component_ids(session_id: str, value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_component_ids = [value]
+    elif isinstance(value, list):
+        raw_component_ids = value
+    else:
+        raw_component_ids = []
+
+    task_config = get_task_config_for_session(session_name=session_id)
+    builder = task_config.get("phase1_builder") or {}
+    valid_component_ids = {str(item["id"]) for item in builder.get("components", []) if item.get("id")}
+    return [component_id for component_id in _unique_strings(raw_component_ids) if component_id in valid_component_ids]
+
+
+def _normalize_public_context_task_item_ids(session_id: str, value: Any) -> list[int]:
+    if isinstance(value, (int, str)):
+        raw_task_item_ids = [value]
+    elif isinstance(value, list):
+        raw_task_item_ids = value
+    else:
+        raw_task_item_ids = []
+
+    ranking_items = get_ranking_items_for_session(session_name=session_id)
+    task_item_id_by_config_id = {str(item_id): index for index, item_id in enumerate(ranking_items, start=1)}
+    normalized_task_item_ids: list[int] = []
+    seen_task_item_ids: set[int] = set()
+    for raw_task_item_id in raw_task_item_ids:
+        parsed_task_item_id: int | None = None
+        if isinstance(raw_task_item_id, int):
+            parsed_task_item_id = raw_task_item_id
+        else:
+            raw_text = str(raw_task_item_id or "").strip()
+            if raw_text.isdigit():
+                parsed_task_item_id = int(raw_text)
+            else:
+                parsed_task_item_id = task_item_id_by_config_id.get(raw_text)
+        if parsed_task_item_id is None or parsed_task_item_id < 1 or parsed_task_item_id > len(ranking_items):
+            continue
+        if parsed_task_item_id in seen_task_item_ids:
+            continue
+        seen_task_item_ids.add(parsed_task_item_id)
+        normalized_task_item_ids.append(parsed_task_item_id)
+    return normalized_task_item_ids
+
+
+def _chat_message_payload(chat_message: Any, client_message_id: str | None = None) -> dict[str, Any]:
     timestamp_ms = (
         int(chat_message.time_stamp.timestamp() * 1000)
         if chat_message.time_stamp
         else _now_ms()
     )
-    return {
+    payload = {
         "id": str(chat_message.id),
         "sessionName": chat_message.session_name,
         "userId": str(chat_message.user_id),
@@ -525,19 +996,52 @@ def _chat_message_payload(chat_message: Any) -> dict[str, Any]:
         "timestampMs": timestamp_ms,
         "isDeleted": chat_message.is_deleted,
     }
+    if client_message_id:
+        payload["clientMessageId"] = client_message_id
+    return payload
+
+
+def _public_chat_error_message(
+    reason: str,
+    client_message_id: str | None = None,
+) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "type": "public_chat_error",
+        "reason": reason,
+    }
+    if client_message_id:
+        message["clientMessageId"] = client_message_id
+    return message
+
+
+async def _send_similarity_reason_share_error(
+    session_id: str,
+    participant_id: str,
+    *,
+    reason: str,
+    block_id: int | None = None,
+) -> None:
+    message: dict[str, Any] = {
+        "type": "similarity_reason_share_error",
+        "reason": reason,
+    }
+    if block_id is not None and block_id >= 0:
+        message["blockId"] = str(block_id)
+
+    await board_manager.send_to(session_id, participant_id, message)
 
 
 async def _handle_similarity_reason_share(
     session_id: str, participant_id: str, payload: dict[str, Any]
 ) -> None:
+    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
+    source_cue_id = str(payload.get("cueId") or payload.get("cue_id") or "").strip()
     if not is_similarity_cue_enabled(session_id):
-        await board_manager.send_to(
+        await _send_similarity_reason_share_error(
             session_id,
             participant_id,
-            {
-                "type": "similarity_reason_share_error",
-                "reason": "similarity cues are disabled",
-            },
+            reason="similarity cues are disabled",
+            block_id=block_id,
         )
         logger.info(
             "similarity_reason_share_suppressed session_id=%s participant_id=%s cue_condition=%s",
@@ -547,16 +1051,13 @@ async def _handle_similarity_reason_share(
         )
         return
 
-    block_id = _normalize_int(payload.get("blockId") or payload.get("block_id"), -1)
     participant_user_id = _normalize_int(participant_id, -1)
     if block_id < 0 or participant_user_id < 0:
-        await board_manager.send_to(
+        await _send_similarity_reason_share_error(
             session_id,
             participant_id,
-            {
-                "type": "similarity_reason_share_error",
-                "reason": "invalid idea block",
-            },
+            reason="invalid idea block",
+            block_id=block_id,
         )
         return
 
@@ -568,13 +1069,11 @@ async def _handle_similarity_reason_share(
             or own_block.session_name != session_id
             or own_block.user_id != participant_user_id
         ):
-            await board_manager.send_to(
+            await _send_similarity_reason_share_error(
                 session_id,
                 participant_id,
-                {
-                    "type": "similarity_reason_share_error",
-                    "reason": "similar idea block not found",
-                },
+                reason="similar idea block not found",
+                block_id=block_id,
             )
             return
 
@@ -583,12 +1082,11 @@ async def _handle_similarity_reason_share(
                 or_(
                     Similarity.idea_block_id_1 == own_block.id,
                     Similarity.idea_block_id_2 == own_block.id,
-                ),
-                Similarity.is_same_reason.is_(False),
+                )
             )
         )
         similarities = result.scalars().all()
-        targets: list[tuple[str, dict[str, Any], int, int]] = []
+        targets: list[tuple[str, dict[str, Any], int, int, str, bool, str]] = []
         received_at_ms = _now_ms()
         for similarity in similarities:
             other_block_id = (
@@ -606,36 +1104,41 @@ async def _handle_similarity_reason_share(
                 continue
 
             target_participant_id = str(other_block.user_id)
+            share_cue_id = _anonymous_shared_reason_id(
+                session_id,
+                similarity.id,
+                other_block.id,
+            )
             targets.append(
                 (
                     target_participant_id,
                     {
                         "type": "similarity_reason_shared",
                         "payload": {
-                            "id": _anonymous_shared_reason_id(
-                                session_id,
-                                similarity.id,
-                                other_block.id,
-                            ),
+                            "id": share_cue_id,
+                            "cueId": share_cue_id,
+                            "similarityId": similarity.id,
                             "blockId": str(other_block.id),
                             "title": own_block.title,
                             "summary": own_block.summary,
+                            "isSameReason": similarity.is_same_reason,
                             "receivedAtMs": received_at_ms,
                         },
                     },
                     similarity.id,
                     other_block.id,
+                    share_cue_id,
+                    similarity.is_same_reason,
+                    similarity.reason,
                 )
             )
 
         if not targets:
-            await board_manager.send_to(
+            await _send_similarity_reason_share_error(
                 session_id,
                 participant_id,
-                {
-                    "type": "similarity_reason_share_error",
-                    "reason": "different-reason recipient idea blocks not found",
-                },
+                reason="recipient idea blocks not found",
+                block_id=own_block.id,
             )
             return
 
@@ -646,15 +1149,76 @@ async def _handle_similarity_reason_share(
             target_participant_id,
             similarity_id,
             target_block_id,
+            share_cue_id,
+            is_same_reason,
+            reason,
             await board_manager.send_to(session_id, target_participant_id, message),
         )
-        for target_participant_id, message, similarity_id, target_block_id in targets
+        for target_participant_id, message, similarity_id, target_block_id, share_cue_id, is_same_reason, reason in targets
     ]
     delivered_count = sum(
         1
-        for _, _, _, sent in delivery_results
+        for _, _, _, _, _, _, sent in delivery_results
         if sent
     )
+    try:
+        async with SessionLocal() as db:
+            if delivered_count > 0 and (source_cue_id or own_block_id):
+                await mark_latest_similarity_cue_shared(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    cue_id=source_cue_id or None,
+                    own_idea_block_id=own_block_id,
+                    phase=_get_session_phase(session_id),
+                    condition=session_cue_conditions[session_id],
+                    cue_enabled=is_similarity_cue_enabled(session_id),
+                    timestamp_ms=received_at_ms,
+                    event_metadata={
+                        "source": "share_similarity_reason",
+                        "delivered_count": delivered_count,
+                        "recipient_count": len(delivery_results),
+                    },
+                )
+            for (
+                target_participant_id,
+                similarity_id,
+                target_block_id,
+                share_cue_id,
+                is_same_reason,
+                reason,
+                sent,
+            ) in delivery_results:
+                await record_similarity_reason_share_delivery(
+                    db,
+                    cue_id=share_cue_id,
+                    session_name=session_id,
+                    phase=_get_session_phase(session_id),
+                    condition=session_cue_conditions[session_id],
+                    cue_enabled=is_similarity_cue_enabled(session_id),
+                    sender_participant_id=participant_id,
+                    recipient_participant_id=target_participant_id,
+                    sender_idea_block_id=own_block_id,
+                    recipient_idea_block_id=target_block_id,
+                    similarity_id=similarity_id,
+                    is_same_reason=is_same_reason,
+                    reason=reason,
+                    delivery_status="delivered" if sent else "failed",
+                    event_metadata={
+                        "source": "share_similarity_reason",
+                        "source_cue_id": source_cue_id,
+                        "received_at_ms": received_at_ms,
+                    },
+                )
+    except Exception as exc:
+        logger.warning(
+            "similarity_reason_share_persist_failed session_id=%s participant_id=%s block_id=%s error_type=%s error=%s",
+            session_id,
+            participant_id,
+            own_block_id,
+            exc.__class__.__name__,
+            exc,
+        )
     await board_manager.send_to(
         session_id,
         participant_id,
@@ -662,6 +1226,7 @@ async def _handle_similarity_reason_share(
             "type": "similarity_reason_share_sent",
             "payload": {
                 "blockId": str(own_block_id),
+                "cueId": source_cue_id or None,
                 "recipientCount": len(delivery_results),
                 "deliveredCount": delivered_count,
             },
@@ -679,7 +1244,15 @@ async def _handle_similarity_reason_share(
                 "similarity_id": similarity_id,
                 "delivered": sent,
             }
-            for target_participant_id, similarity_id, target_block_id, sent in delivery_results
+            for (
+                target_participant_id,
+                similarity_id,
+                target_block_id,
+                _share_cue_id,
+                _is_same_reason,
+                _reason,
+                sent,
+            ) in delivery_results
         ],
         delivered_count,
     )
@@ -703,9 +1276,111 @@ def _get_current_ranking_items(session_id: str) -> list[str]:
     return _get_default_ranking_items(session_id)
 
 
+def _get_active_ranking_limit(session_id: str) -> int | None:
+    return _get_ranking_limit_for_item_count(
+        session_id,
+        len(_get_current_ranking_items(session_id)),
+    )
+
+
+def _get_ranking_limit_for_item_count(session_id: str, item_count: int) -> int | None:
+    ranking_limit = get_ranking_limit_for_session(session_name=session_id)
+    if ranking_limit is None:
+        return None
+    return ranking_limit if item_count > 0 else None
+
+
+def _build_internal_ranking_items_for_session(
+    session_id: str,
+    items: list[str],
+    change_count: int | None = None,
+) -> list[str]:
+    ranking_limit = _get_ranking_limit_for_item_count(session_id, len(items))
+    if ranking_limit is None:
+        return list(items)
+    return build_ranking_items_with_cutoff(
+        items,
+        normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(items),
+        ),
+    )
+
+
 def _get_current_ranking_item_catalog(session_id: str) -> list[dict[str, Any]] | None:
     catalog = session_ranking_item_catalog.get(session_id)
     return [dict(item) for item in catalog] if catalog else None
+
+
+def _normalize_uploaded_ranking_item_catalog(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    normalized_items: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, raw_item in enumerate(items[:200], start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        label = str(raw_item.get("label") or raw_item.get("label_zh") or raw_item.get("label_en") or "").strip()
+        item_id = str(raw_item.get("id") or "").strip()
+        if not label and item_id:
+            label = item_id
+        if not label:
+            continue
+        if not item_id:
+            item_id = f"capstone_item_{index}"
+        item_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", item_id).strip("_").lower() or f"capstone_item_{index}"
+        base_item_id = item_id
+        suffix = 2
+        while item_id in seen_ids:
+            item_id = f"{base_item_id}_{suffix}"
+            suffix += 1
+        seen_ids.add(item_id)
+        description = str(raw_item.get("description_zh") or raw_item.get("description") or "").strip()
+        normalized_items.append(
+            {
+                "id": item_id,
+                "label": label,
+                "label_zh": label,
+                "label_en": str(raw_item.get("label_en") or label).strip() or label,
+                "description_zh": description,
+                "aliases": [],
+                "image_title": str(raw_item.get("image_title") or label).strip() or label,
+                "image_bg": str(raw_item.get("image_bg") or "#f8fafc").strip() or "#f8fafc",
+                "image_fg": str(raw_item.get("image_fg") or "#334155").strip() or "#334155",
+                "image_mark": str(raw_item.get("image_mark") or f"{index}").strip() or f"{index}",
+            }
+        )
+    return normalized_items
+
+
+async def _broadcast_ranking_items_changed(session_id: str, participant_id: str, ranking_items: list[dict[str, Any]]) -> None:
+    default_items = [str(item["id"]) for item in ranking_items if item.get("id")]
+    session_ranking_item_catalog[session_id] = ranking_items
+    public_ranking_state[session_id] = _create_ranking_state_from_items(session_id, default_items)
+    for current_participant_id in board_manager.get_participants(session_id):
+        private_ranking_state[session_id][current_participant_id] = _create_ranking_state_from_items(session_id, default_items)
+    await board_manager.broadcast(
+        session_id,
+        {
+            "type": "ranking_items_changed",
+            "updatedBy": participant_id,
+            "ranking_items": _get_current_ranking_item_catalog(session_id),
+            "public_ranking": _ranking_payload(session_id, public_ranking_state[session_id]),
+        },
+    )
+    for current_participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            current_participant_id,
+            {
+                "type": "ranking_state",
+                "scope": "private",
+                "updatedBy": participant_id,
+                **_ranking_payload(session_id, private_ranking_state[session_id][current_participant_id]),
+            },
+        )
+    await broadcast_admin_ranking_state(session_id)
 
 
 def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -714,27 +1389,53 @@ def _normalize_ranking_state(session_id: str, state: dict[str, Any]) -> dict[str
     current_items = state.get("items")
     if not isinstance(current_items, list):
         current_items = []
-    normalized_items = [
-        item
-        for index, item in enumerate(current_items)
-        if isinstance(item, str)
-        and item in default_ranking_item_set
-        and current_items.index(item) == index
-    ]
+    current_real_items, current_change_count = split_ranking_items(current_items)
+    seen_items: set[str] = set()
+    normalized_real_items: list[str] = []
+    for item in current_real_items:
+        if item in default_ranking_item_set and item not in seen_items:
+            normalized_real_items.append(item)
+            seen_items.add(item)
+    normalized_items = normalized_real_items
     normalized_items.extend(
         item for item in default_ranking_items if item not in normalized_items
     )
+    ranking_limit = _get_ranking_limit_for_item_count(session_id, len(normalized_items))
+    if ranking_limit is not None:
+        normalized_change_count = normalize_ranking_change_count(
+            current_change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(normalized_items),
+        )
+        normalized_items = build_ranking_items_with_cutoff(
+            normalized_items,
+            normalized_change_count,
+        )
     if normalized_items != current_items:
         state["items"] = normalized_items
         state["revision"] = _normalize_int(state.get("revision"), 0) + 1
     return state
 
 
-def _create_ranking_state(session_id: str) -> dict[str, Any]:
+def _create_ranking_state_from_items(
+    session_id: str,
+    items: list[str],
+    *,
+    revision: int = 0,
+    change_count: int | None = None,
+) -> dict[str, Any]:
     return {
-        "revision": 0,
-        "items": _get_current_ranking_items(session_id),
+        "revision": revision,
+        "items": _build_internal_ranking_items_for_session(
+            session_id,
+            items,
+            change_count=change_count,
+        ),
     }
+
+
+def _create_ranking_state(session_id: str) -> dict[str, Any]:
+    return _create_ranking_state_from_items(session_id, _get_current_ranking_items(session_id))
 
 
 def _get_public_ranking_state(session_id: str) -> dict[str, Any]:
@@ -761,11 +1462,20 @@ def _get_ranking_state(
     return _get_public_ranking_state(session_id)
 
 
-def _ranking_payload(state: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _ranking_payload(session_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    items, change_count = split_ranking_items(state["items"])
+    payload: dict[str, Any] = {
         "revision": state["revision"],
-        "items": list(state["items"]),
+        "items": items,
     }
+    ranking_limit = _get_active_ranking_limit(session_id)
+    if ranking_limit is not None:
+        payload["change_count"] = normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(items),
+        )
+    return payload
 
 
 def _normalize_ranking_scope(value: Any) -> str:
@@ -785,9 +1495,9 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "type": "board_state",
         "session_name": session_id,
         "revision": public_state["revision"],
-        "ranking": {"items": list(public_state["items"])},
-        "public_ranking": _ranking_payload(public_state),
-        "private_ranking": _ranking_payload(private_state),
+        "ranking": {"items": split_ranking_items(public_state["items"])[0]},
+        "public_ranking": _ranking_payload(session_id, public_state),
+        "private_ranking": _ranking_payload(session_id, private_state),
         "ranking_items": _get_current_ranking_item_catalog(session_id),
         "public_blocks": list(blocks["public_blocks"]),
         "private_blocks": private_blocks,
@@ -795,33 +1505,242 @@ def _board_state_message(session_id: str, participant_id: str) -> dict[str, Any]
         "timer_end_time_ms": session_timers[session_id]["end_time_ms"],
         "cue_condition": session_cue_conditions[session_id],
         "similarity_cue_enabled": is_similarity_cue_enabled(session_id),
+        "ranking_completion": (
+            _ranking_completion_message(session_id, participant_id)
+            if _is_capstone_session(session_id)
+            else None
+        ),
     }
 
 
 def _admin_ranking_state_message(session_id: str) -> dict[str, Any]:
     public_state = _get_public_ranking_state(session_id)
     private_rankings = {
-        participant_id: _ranking_payload(state)
+        participant_id: _ranking_payload(session_id, state)
         for participant_id, state in sorted(private_ranking_state[session_id].items())
-        if not _is_admin_participant_id(participant_id)
+        if _is_admin_monitor_ranking_subject(session_id, participant_id)
     }
     return {
         "type": "admin_ranking_state",
         "session_name": session_id,
         "revision": public_state["revision"],
-        "public_ranking": _ranking_payload(public_state),
+        "public_ranking": _ranking_payload(session_id, public_state),
         "private_rankings": private_rankings,
         "ranking_items": _get_current_ranking_item_catalog(session_id),
     }
 
 
-def _apply_ranking_move(items: list[str], item_id: str, to_index: int) -> list[str]:
-    if item_id not in items:
+def _apply_ranking_move(items: list[str], item_id: str, to_index: int, *, ranking_limit: int | None = None) -> list[str]:
+    real_items, change_count = split_ranking_items(items)
+    if item_id not in real_items:
         raise ValueError("ranking item does not exist")
-    next_items = [item for item in items if item != item_id]
-    bounded_index = max(0, min(to_index, len(next_items)))
-    next_items.insert(bounded_index, item_id)
-    return next_items
+    old_index = real_items.index(item_id)
+    target_index = max(0, min(to_index, len(real_items)))
+    next_real_items = [item for item in real_items if item != item_id]
+    insert_index = max(0, min(to_index, len(next_real_items)))
+    next_real_items.insert(insert_index, item_id)
+
+    next_change_count: int | None = None
+    if ranking_limit is not None:
+        current_change_count = normalize_ranking_change_count(
+            change_count,
+            ranking_limit=ranking_limit,
+            item_count=len(real_items),
+        )
+        next_change_count = current_change_count
+        if old_index < current_change_count and target_index >= current_change_count:
+            next_change_count = max(0, current_change_count - 1)
+        elif old_index >= current_change_count and target_index <= current_change_count:
+            next_change_count = normalize_ranking_change_count(
+                current_change_count + 1,
+                ranking_limit=ranking_limit,
+                item_count=len(real_items),
+            )
+
+    return build_ranking_items_with_cutoff(next_real_items, next_change_count)
+
+
+async def _switch_session_phase(
+    session_id: str,
+    new_phase: str,
+    *,
+    duration_s: int | None = None,
+) -> bool:
+    previous_phase = _get_session_phase(session_id)
+    if duration_s is not None:
+        _set_session_countdown(session_id, duration_s)
+
+    async with session_locks[session_id]:
+        participant_ids = sorted(
+            {
+                *board_manager.get_participants(session_id),
+                *private_ranking_state[session_id].keys(),
+            }
+        )
+        ranking_initialization = None
+        async with SessionLocal() as db:
+            try:
+                if new_phase != previous_phase:
+                    await create_phase_boundary_ranking_snapshots(
+                        db,
+                        session_name=session_id,
+                        from_phase=previous_phase,
+                        to_phase=new_phase,
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        participant_ids=_phase_snapshot_participant_ids(participant_ids),
+                        private_ranking_states=private_ranking_state[session_id],
+                        public_ranking_state=public_ranking_state.get(session_id),
+                        ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
+                    )
+                if new_phase == "group" and previous_phase != "group":
+                    for checkpoint_participant_id in [
+                        participant_id
+                        for participant_id in participant_ids
+                        if _is_participant_ranking_subject(session_id, participant_id)
+                    ]:
+                        state = private_ranking_state[session_id].get(checkpoint_participant_id)
+                        if state is None:
+                            try:
+                                effective_state = await get_effective_ranking_state(
+                                    db,
+                                    session_name=session_id,
+                                    scope="private",
+                                    participant_id=checkpoint_participant_id,
+                                    phase="private_phase_2",
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "ranking_checkpoint_rebuild_failed session_id=%s participant_id=%s reason=%s",
+                                    session_id,
+                                    checkpoint_participant_id,
+                                    exc,
+                                )
+                                continue
+                            checkpoint_real_items = list(effective_state.get("items") or [])
+                            checkpoint_items = _build_internal_ranking_items_for_session(
+                                session_id,
+                                checkpoint_real_items,
+                                change_count=_normalize_optional_int(effective_state.get("change_count")),
+                            )
+                            checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
+                        else:
+                            checkpoint_items = list(state.get("items") or [])
+                            checkpoint_revision = _normalize_int(state.get("revision"), 0)
+                        if not checkpoint_items:
+                            continue
+                        if not _is_participant_ranking_subject(session_id, checkpoint_participant_id):
+                            continue
+                        await create_ranking_checkpoint(
+                            session_name=session_id,
+                            participant_id=checkpoint_participant_id,
+                            scope="private",
+                            phase="private_phase_2",
+                            revision=checkpoint_revision,
+                            items=checkpoint_items,
+                            db=db,
+                        )
+                ranking_initialization = await initialize_phase_rankings(
+                    db,
+                    session_name=session_id,
+                    from_phase=previous_phase,
+                    to_phase=new_phase,
+                    participant_ids=[
+                        participant_id
+                        for participant_id in participant_ids
+                        if _is_participant_ranking_subject(session_id, participant_id)
+                    ],
+                )
+            except Exception as exc:
+                await db.rollback()
+                logger.exception(
+                    "phase_snapshot_initialization_failed session_id=%s from_phase=%s to_phase=%s error=%s",
+                    session_id,
+                    previous_phase,
+                    new_phase,
+                    exc,
+                )
+                return False
+
+        if ranking_initialization is not None:
+            session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
+            if ranking_initialization.private_items_by_participant_id is not None:
+                for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
+                    private_ranking_state[session_id][participant_id] = _create_ranking_state_from_items(
+                        session_id,
+                        list(item_ids),
+                    )
+            if ranking_initialization.public_items is not None:
+                public_ranking_state[session_id] = _create_ranking_state_from_items(
+                    session_id,
+                    list(ranking_initialization.public_items),
+                )
+        elif new_phase == get_default_phase_for_session(session_name=session_id):
+            session_ranking_item_catalog.pop(session_id, None)
+
+        session_phases[session_id] = new_phase
+        session_ranking_completion[session_id].pop(previous_phase, None)
+        session_ranking_completion[session_id][new_phase].clear()
+
+    phase_changed_msg = _phase_changed_message(session_id)
+    await admin_manager.broadcast(session_id, phase_changed_msg)
+    await board_manager.broadcast(session_id, phase_changed_msg)
+    await cue_manager.broadcast(session_id, phase_changed_msg)
+    for participant_id in board_manager.get_participants(session_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            _board_state_message(session_id, participant_id),
+        )
+    await broadcast_admin_ranking_state(session_id)
+    await _broadcast_ranking_completion_state(session_id)
+    return True
+
+
+async def _handle_ranking_complete(session_id: str, participant_id: str) -> None:
+    if not _is_capstone_session(session_id):
+        return
+    if not _is_participant_ranking_subject(session_id, participant_id):
+        await board_manager.send_to(
+            session_id,
+            participant_id,
+            {"type": "ranking_error", "reason": "participant cannot complete ranking"},
+        )
+        return
+
+    should_advance = False
+    next_phase: str | None = None
+    async with session_locks[session_id]:
+        current_phase = _get_session_phase(session_id)
+        next_phase = _get_next_session_phase(session_id)
+        if next_phase is None:
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                _ranking_completion_message(session_id, participant_id),
+            )
+            return
+        session_ranking_completion[session_id][current_phase].add(participant_id)
+        completion_state = _ranking_completion_message(session_id, participant_id)
+        should_advance = (
+            completion_state["total_count"] > 0
+            and completion_state["completed_count"] >= completion_state["total_count"]
+        )
+
+    await _broadcast_ranking_completion_state(session_id)
+    if should_advance and next_phase is not None:
+        switched = await _switch_session_phase(session_id, next_phase)
+        if not switched:
+            await board_manager.send_to(
+                session_id,
+                participant_id,
+                {
+                    "type": "phase_transition_error",
+                    "reason": "failed to save phase ranking snapshot",
+                    "from_phase": _get_session_phase(session_id),
+                    "to_phase": next_phase,
+                },
+            )
 
 
 async def handle_board_websocket(
@@ -894,6 +1813,7 @@ async def handle_board_websocket(
                     _board_state_message(session_id, participant_id),
                 )
                 await broadcast_presence_state(session_id)
+                await _broadcast_ranking_completion_state(session_id)
                 continue
 
             if message_type == "ping":
@@ -904,6 +1824,40 @@ async def handle_board_websocket(
 
             if message_type == "share_similarity_reason":
                 await _handle_similarity_reason_share(session_id, participant_id, payload)
+                continue
+
+            if message_type == "ranking_complete":
+                await _handle_ranking_complete(session_id, participant_id)
+                continue
+
+            if message_type == "set_ranking_items":
+                ranking_items = _normalize_uploaded_ranking_item_catalog(payload.get("items"))
+                if not ranking_items:
+                    await board_manager.send_to(
+                        session_id,
+                        participant_id,
+                        {"type": "ranking_error", "reason": "ranking items cannot be empty"},
+                    )
+                    continue
+                async with session_locks[session_id]:
+                    await _broadcast_ranking_items_changed(session_id, participant_id, ranking_items)
+                continue
+
+            if message_type == "similarity_cue_response":
+                async with SessionLocal() as db:
+                    await safe_record_similarity_cue_response(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        cue_id=payload.get("cueId") or payload.get("cue_id"),
+                        response_status=str(payload.get("response") or payload.get("status") or "unknown"),
+                        timestamp_ms=_normalize_optional_int(payload.get("timestampMs") or payload.get("timestamp_ms")),
+                        phase=_get_session_phase(session_id),
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        block_id=_normalize_optional_int(payload.get("blockId") or payload.get("block_id")),
+                        event_metadata={"source": "board_ws"},
+                    )
                 continue
 
             if message_type == "ranking_move":
@@ -924,14 +1878,19 @@ async def handle_board_websocket(
                 async with session_locks[session_id]:
                     state = _get_ranking_state(session_id, participant_id, scope)
                     previous_items = list(state["items"])
+                    previous_real_items, _ = split_ranking_items(previous_items)
                     from_index = (
-                        previous_items.index(item_id)
-                        if item_id in previous_items
+                        previous_real_items.index(item_id)
+                        if item_id in previous_real_items
                         else None
                     )
                     try:
+                        ranking_limit = _get_active_ranking_limit(session_id)
                         next_items = _apply_ranking_move(
-                            previous_items, item_id, to_index
+                            previous_items,
+                            item_id,
+                            to_index,
+                            ranking_limit=ranking_limit,
                         )
                     except ValueError as exc:
                         logger.warning(
@@ -948,15 +1907,17 @@ async def handle_board_websocket(
                                 "type": "ranking_error",
                                 "scope": scope,
                                 "reason": str(exc),
-                                "current": _ranking_payload(state),
+                                "current": _ranking_payload(session_id, state),
                             },
                         )
                         continue
                     next_revision = state["revision"] + 1
-                    final_to_index = next_items.index(item_id)
+                    next_real_items, _ = split_ranking_items(next_items)
+                    final_to_index = next_real_items.index(item_id)
+                    saved_ranking_move_id: int | None = None
                     async with SessionLocal() as db:
                         try:
-                            await create_ranking_move(
+                            saved_ranking_move = await create_ranking_move(
                                 session_name=session_id,
                                 participant_id=participant_id,
                                 scope=scope,
@@ -971,6 +1932,18 @@ async def handle_board_websocket(
                                 items=next_items,
                                 db=db,
                             )
+                            saved_ranking_move_id = saved_ranking_move.id
+                            if _get_session_phase(session_id) == "reflect" and scope == "private":
+                                await create_reflect_ranking_move_snapshot(
+                                    db,
+                                    session_name=session_id,
+                                    condition=session_cue_conditions[session_id],
+                                    cue_enabled=is_similarity_cue_enabled(session_id),
+                                    participant_id=participant_id,
+                                    state={"items": next_items, "revision": next_revision},
+                                    ranking_move_id=saved_ranking_move_id,
+                                    ranking_item_catalog=_get_current_ranking_item_catalog(session_id),
+                                )
                         except Exception as exc:
                             await db.rollback()
                             logger.warning(
@@ -988,54 +1961,51 @@ async def handle_board_websocket(
                                     "type": "ranking_error",
                                     "scope": scope,
                                     "reason": "failed to save ranking move",
-                                    "current": _ranking_payload(state),
+                                    "current": _ranking_payload(session_id, state),
                                 },
                             )
                             continue
                     state["items"] = next_items
                     state["revision"] = next_revision
                     logger.info(
-                        "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s",
+                        "ranking_state updated session_id=%s revision=%s updated_by=%s scope=%s items=%s targets=%s ranking_move_id=%s",
                         session_id,
                         state["revision"],
                         participant_id,
                         scope,
                         state["items"],
                         board_manager.get_participants(session_id),
+                        saved_ranking_move_id,
                     )
+                    ranking_payload = _ranking_payload(session_id, state)
                     message = {
                         "type": "ranking_state",
                         "scope": scope,
-                        "revision": state["revision"],
-                        "items": list(state["items"]),
                         "updatedBy": participant_id,
+                        **ranking_payload,
                     }
                     if scope == "private":
                         await board_manager.send_to(session_id, participant_id, message)
                     else:
                         await board_manager.broadcast(session_id, message)
-                    await admin_manager.broadcast(
-                        session_id, _admin_ranking_state_message(session_id)
-                    )
+                    await broadcast_admin_ranking_state(session_id)
                 continue
 
             if message_type == "public_chat_send":
                 message_text = str(payload.get("message") or "").strip()
+                client_message_id = str(payload.get("clientMessageId") or "").strip() or None
                 if not message_text:
                     await board_manager.send_to(
                         session_id,
                         participant_id,
-                        {
-                            "type": "public_chat_error",
-                            "reason": "message cannot be empty",
-                        },
+                        _public_chat_error_message("message cannot be empty", client_message_id),
                     )
                     continue
                 if len(message_text) > 2000:
                     await board_manager.send_to(
                         session_id,
                         participant_id,
-                        {"type": "public_chat_error", "reason": "message is too long"},
+                        _public_chat_error_message("message is too long", client_message_id),
                     )
                     continue
 
@@ -1062,16 +2032,13 @@ async def handle_board_websocket(
                         await board_manager.send_to(
                             session_id,
                             participant_id,
-                            {
-                                "type": "public_chat_error",
-                                "reason": "failed to save message",
-                            },
+                            _public_chat_error_message("failed to save message", client_message_id),
                         )
                         continue
 
                 chat_msg = {
                     "type": "public_chat_message",
-                    "payload": _chat_message_payload(saved_message),
+                    "payload": _chat_message_payload(saved_message, client_message_id),
                 }
                 await board_manager.broadcast(session_id, chat_msg)
                 await admin_manager.broadcast(session_id, chat_msg)
@@ -1099,6 +2066,7 @@ async def handle_board_websocket(
             board_manager.get_participants(session_id),
         )
         await broadcast_presence_state(session_id)
+        await _broadcast_ranking_completion_state(session_id)
 
 
 async def handle_admin_websocket(
@@ -1118,6 +2086,11 @@ async def handle_admin_websocket(
             admin_id,
         )
         return
+    async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
     logger.info(
         "admin ws connected session_id=%s admin_id=%s admins=%s",
         session_id,
@@ -1134,6 +2107,11 @@ async def handle_admin_websocket(
             **_phase_state_message(session_id),
             "ranking_state": _admin_ranking_state_message(session_id),
         },
+    )
+    await admin_manager.send_to(
+        session_id,
+        admin_id,
+        _public_context_component_state_message(session_id),
     )
 
     try:
@@ -1161,116 +2139,36 @@ async def handle_admin_websocket(
                         "ranking_state": _admin_ranking_state_message(session_id),
                     },
                 )
+                await admin_manager.send_to(
+                    session_id,
+                    admin_id,
+                    _public_context_component_state_message(session_id),
+                )
             elif message_type == "switch_phase":
-                previous_phase = _get_session_phase(session_id)
                 new_phase = _normalize_session_phase(session_id, payload.get("phase"))
-                if "duration_s" in payload:
-                    _set_session_countdown(
-                        session_id, _normalize_int(payload.get("duration_s"), 0)
-                    )
-
-                async with session_locks[session_id]:
-                    participant_ids = sorted(
-                        {
-                            *board_manager.get_participants(session_id),
-                            *private_ranking_state[session_id].keys(),
-                        }
-                    )
-                    async with SessionLocal() as db:
-                        try:
-                            if new_phase == "group" and previous_phase != "group":
-                                for checkpoint_participant_id in [
-                                    participant_id
-                                    for participant_id in participant_ids
-                                    if not _is_admin_participant_id(participant_id)
-                                ]:
-                                    state = private_ranking_state[session_id].get(checkpoint_participant_id)
-                                    if state is None:
-                                        try:
-                                            effective_state = await get_effective_ranking_state(
-                                                db,
-                                                session_name=session_id,
-                                                scope="private",
-                                                participant_id=checkpoint_participant_id,
-                                                phase="private_phase_2",
-                                            )
-                                        except Exception as exc:
-                                            logger.warning(
-                                                "ranking_checkpoint_rebuild_failed session_id=%s participant_id=%s reason=%s",
-                                                session_id,
-                                                checkpoint_participant_id,
-                                                exc,
-                                            )
-                                            continue
-                                        checkpoint_items = list(effective_state.get("items") or [])
-                                        checkpoint_revision = _normalize_int(effective_state.get("revision"), 0)
-                                    else:
-                                        checkpoint_items = list(state.get("items") or [])
-                                        checkpoint_revision = _normalize_int(state.get("revision"), 0)
-                                    if not checkpoint_items:
-                                        continue
-                                    if _is_admin_participant_id(checkpoint_participant_id):
-                                        continue
-                                    await create_ranking_checkpoint(
-                                        session_name=session_id,
-                                        participant_id=checkpoint_participant_id,
-                                        scope="private",
-                                        phase="private_phase_2",
-                                        revision=checkpoint_revision,
-                                        items=checkpoint_items,
-                                        db=db,
-                                    )
-                            ranking_initialization = await initialize_phase_rankings(
-                                db,
-                                session_name=session_id,
-                                from_phase=previous_phase,
-                                to_phase=new_phase,
-                                participant_ids=[
-                                    participant_id
-                                    for participant_id in participant_ids
-                                    if not _is_admin_participant_id(participant_id)
-                                ],
-                            )
-                        except Exception as exc:
-                            await db.rollback()
-                            logger.exception(
-                                "phase_snapshot_initialization_failed session_id=%s from_phase=%s to_phase=%s error=%s",
-                                session_id,
-                                previous_phase,
-                                new_phase,
-                                exc,
-                            )
-                            ranking_initialization = None
-
-                    if ranking_initialization is not None:
-                        session_ranking_item_catalog[session_id] = ranking_initialization.ranking_items
-                        if ranking_initialization.private_items_by_participant_id is not None:
-                            for participant_id, item_ids in ranking_initialization.private_items_by_participant_id.items():
-                                private_ranking_state[session_id][participant_id] = {
-                                    "revision": 0,
-                                    "items": list(item_ids),
-                                }
-                        if ranking_initialization.public_items is not None:
-                            public_ranking_state[session_id] = {
-                                "revision": 0,
-                                "items": list(ranking_initialization.public_items),
-                            }
-                    elif new_phase == get_default_phase_for_session(session_name=session_id):
-                        session_ranking_item_catalog.pop(session_id, None)
-
-                    session_phases[session_id] = new_phase
-
-                phase_changed_msg = _phase_changed_message(session_id)
-                await admin_manager.broadcast(session_id, phase_changed_msg)
-                await board_manager.broadcast(session_id, phase_changed_msg)
-                await cue_manager.broadcast(session_id, phase_changed_msg)
-                for participant_id in board_manager.get_participants(session_id):
-                    await board_manager.send_to(
+                duration_s = (
+                    _normalize_int(payload.get("duration_s"), 0)
+                    if "duration_s" in payload
+                    else None
+                )
+                previous_phase = _get_session_phase(session_id)
+                switched = await _switch_session_phase(
+                    session_id,
+                    new_phase,
+                    duration_s=duration_s,
+                )
+                if not switched:
+                    await admin_manager.send_to(
                         session_id,
-                        participant_id,
-                        _board_state_message(session_id, participant_id),
+                        admin_id,
+                        {
+                            "type": "phase_transition_error",
+                            "reason": "failed to save phase ranking snapshot",
+                            "from_phase": previous_phase,
+                            "to_phase": new_phase,
+                        },
                     )
-                await admin_manager.broadcast(session_id, _admin_ranking_state_message(session_id))
+                    continue
             elif message_type == "set_countdown":
                 _set_session_countdown(
                     session_id, _normalize_int(payload.get("duration_s"), 0)
@@ -1292,23 +2190,99 @@ async def handle_admin_websocket(
                 await admin_manager.broadcast(session_id, cue_condition_msg)
                 await board_manager.broadcast(session_id, cue_condition_msg)
                 await cue_manager.broadcast(session_id, cue_condition_msg)
-            elif message_type == "public_chat_send":
-                message_text = str(payload.get("message") or "").strip()
-                if not message_text:
+            elif message_type == "set_public_context_components":
+                raw_component_ids = (
+                    payload.get("componentIds")
+                    if "componentIds" in payload
+                    else payload.get("component_ids", payload.get("componentId", payload.get("component_id")))
+                )
+                raw_task_item_ids = (
+                    payload.get("taskItemIds")
+                    if "taskItemIds" in payload
+                    else payload.get("task_item_ids", payload.get("taskItemId", payload.get("task_item_id")))
+                )
+                should_clear = payload.get("clear") is True
+                component_ids = [] if should_clear else _normalize_public_context_component_ids(session_id, raw_component_ids)
+                task_item_ids = [] if should_clear else _normalize_public_context_task_item_ids(session_id, raw_task_item_ids)
+                has_raw_now_targets = bool(raw_component_ids) or bool(raw_task_item_ids)
+                if not should_clear and has_raw_now_targets and not component_ids and not task_item_ids:
                     await admin_manager.send_to(
                         session_id,
                         admin_id,
                         {
-                            "type": "public_chat_error",
-                            "reason": "message cannot be empty",
+                            "type": "public_context_component_error",
+                            "reason": "no valid NOW targets",
+                            "componentIds": [],
+                            "taskItemIds": [],
                         },
+                    )
+                    continue
+
+                matches: list[PublicContextMatch] = []
+                if component_ids or task_item_ids:
+                    async with SessionLocal() as db:
+                        try:
+                            if component_ids:
+                                matches.extend(
+                                    await find_public_context_component_matches(
+                                        db,
+                                        session_name=session_id,
+                                        component_ids=component_ids,
+                                    )
+                                )
+                            if task_item_ids:
+                                matches.extend(
+                                    await find_public_context_task_item_matches(
+                                        db,
+                                        session_name=session_id,
+                                        task_item_ids=task_item_ids,
+                                    )
+                                )
+                        except Exception as exc:
+                            await db.rollback()
+                            logger.warning(
+                                "admin_public_context_component_failed session_id=%s admin_id=%s component_ids=%s task_item_ids=%s error_type=%s error=%s",
+                                session_id,
+                                admin_id,
+                                component_ids,
+                                task_item_ids,
+                                exc.__class__.__name__,
+                                exc,
+                            )
+                            await admin_manager.send_to(
+                                session_id,
+                                admin_id,
+                                {
+                                    "type": "public_context_component_error",
+                                    "reason": "failed to set NOW target",
+                                    "componentIds": component_ids,
+                                    "taskItemIds": task_item_ids,
+                                },
+                            )
+                            continue
+                await _publish_public_context_matches(
+                    session_id,
+                    matches=matches,
+                    source="manual_clear" if not component_ids and not task_item_ids else "manual",
+                    participant_id=admin_id,
+                    component_ids=component_ids,
+                    task_item_ids=task_item_ids,
+                )
+            elif message_type == "public_chat_send":
+                message_text = str(payload.get("message") or "").strip()
+                client_message_id = str(payload.get("clientMessageId") or "").strip() or None
+                if not message_text:
+                    await admin_manager.send_to(
+                        session_id,
+                        admin_id,
+                        _public_chat_error_message("message cannot be empty", client_message_id),
                     )
                     continue
                 if len(message_text) > 2000:
                     await admin_manager.send_to(
                         session_id,
                         admin_id,
-                        {"type": "public_chat_error", "reason": "message is too long"},
+                        _public_chat_error_message("message is too long", client_message_id),
                     )
                     continue
 
@@ -1335,16 +2309,13 @@ async def handle_admin_websocket(
                         await admin_manager.send_to(
                             session_id,
                             admin_id,
-                            {
-                                "type": "public_chat_error",
-                                "reason": "failed to save message",
-                            },
+                            _public_chat_error_message("failed to save message", client_message_id),
                         )
                         continue
 
                 chat_msg = {
                     "type": "public_chat_message",
-                    "payload": _chat_message_payload(saved_message),
+                    "payload": _chat_message_payload(saved_message, client_message_id),
                 }
                 await board_manager.broadcast(session_id, chat_msg)
                 await admin_manager.broadcast(session_id, chat_msg)
@@ -1474,6 +2445,20 @@ async def handle_cue_websocket(
                         "timestamp_ms": payload.get("timestamp_ms", _now_ms()),
                     }
                 )
+                async with SessionLocal() as db:
+                    await safe_record_similarity_cue_response(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        cue_id=payload.get("cue_id") or payload.get("cueId"),
+                        response_status=str(payload.get("response") or payload.get("status") or "unknown"),
+                        timestamp_ms=_normalize_optional_int(payload.get("timestamp_ms") or payload.get("timestampMs")),
+                        phase=_get_session_phase(session_id),
+                        condition=session_cue_conditions[session_id],
+                        cue_enabled=is_similarity_cue_enabled(session_id),
+                        block_id=_normalize_optional_int(payload.get("block_id") or payload.get("blockId")),
+                        event_metadata={"source": "cue_ws"},
+                    )
                 await cue_manager.send_to(
                     session_id,
                     participant_id,
@@ -1499,6 +2484,7 @@ async def handle_presence_websocket(
             participant_id,
         )
         return
+    await _sync_cached_participant_roles(session_id)
     await presence_manager.send_to(
         session_id,
         participant_id,
@@ -1543,6 +2529,7 @@ async def handle_presence_websocket(
                     display_name=display_name,
                     client_id=client_id,
                 )
+                await _sync_cached_participant_roles(session_id)
                 await presence_manager.send_to(
                     session_id,
                     participant_id,
@@ -1589,12 +2576,47 @@ async def handle_audio_websocket(
     )
 
     async with SessionLocal() as db:
+        sync_participant_roles(
+            session_id,
+            await list_session_participant_roles(db, session_name=session_id),
+        )
+
+        async def notify_transcription_disabled(participant_role: str) -> None:
+            if state.transcription_disabled_notified:
+                return
+            state.transcription_disabled_notified = True
+            await audio_manager.send_to(
+                session_id,
+                participant_id,
+                _transcription_disabled_message(
+                    session_id,
+                    participant_id,
+                    participant_role,
+                    state.mic_mode,
+                ),
+            )
 
         async def flush_buffer() -> None:
             if not state.audio_buffer:
                 return
             raw_bytes = bytes(state.audio_buffer)
             state.audio_buffer.clear()
+            audio_started_at = state.audio_buffer_started_at or utc_now()
+            audio_bytes = state.audio_buffer_bytes or len(raw_bytes)
+            state.audio_buffer_started_at = None
+            state.audio_buffer_bytes = 0
+            participant_role = get_cached_participant_role(session_id, participant_id)
+            if not is_audio_transcription_role(participant_role):
+                logger.info(
+                    "audio ws transcript skipped for excluded role session_id=%s participant_id=%s participant_role=%s bytes=%s mic_mode=%s",
+                    session_id,
+                    participant_id,
+                    participant_role,
+                    len(raw_bytes),
+                    state.mic_mode,
+                )
+                await notify_transcription_disabled(participant_role)
+                return
             logger.info(
                 "audio ws flush session_id=%s participant_id=%s bytes=%s mic_mode=%s sample_rate=%s",
                 session_id,
@@ -1607,6 +2629,10 @@ async def handle_audio_websocket(
             if aligned_size <= 0:
                 return
             chunk = raw_bytes[:aligned_size]
+            audio_samples = aligned_size // 2
+            audio_ended_at = audio_started_at + timedelta(
+                seconds=audio_samples / max(state.sample_rate, 1)
+            )
             transcript_text = await transcribe_ws_chunk(
                 pcm16_bytes=chunk,
                 sample_rate=state.sample_rate,
@@ -1622,18 +2648,35 @@ async def handle_audio_websocket(
                     state.mic_mode,
                     len(transcript_text),
                 )
-                now = utc_now()
                 saved_segment = await save_ws_transcript_segment(
                     db,
                     session_name=session_id,
                     participant_id=participant_id,
                     visibility=Visibility.PUBLIC,
                     transcript_text=transcript_text,
-                    started_at=now,
-                    ended_at=now,
+                    started_at=audio_started_at,
+                    ended_at=audio_ended_at,
                     display_name=state.display_name,
                 )
                 segment_id = saved_segment.segment_id if saved_segment else None
+                if saved_segment is not None:
+                    await record_audio_transcript_latency_events(
+                        db,
+                        session_name=session_id,
+                        participant_id=participant_id,
+                        scope=Visibility.PUBLIC.value,
+                        transcript_id=saved_segment.segment_id,
+                        transcript_chars=len(saved_segment.text),
+                        audio_started_at=audio_started_at,
+                        audio_ended_at=audio_ended_at,
+                        sample_rate=state.sample_rate,
+                        channels=1,
+                        audio_samples=audio_samples,
+                        audio_bytes=audio_bytes,
+                        source="legacy_audio_ws",
+                        reason="flush_public",
+                        metadata={"mic_mode": state.mic_mode},
+                    )
                 await audio_manager.send_to(
                     session_id,
                     participant_id,
@@ -1663,7 +2706,6 @@ async def handle_audio_websocket(
                     transcript_segment_id=segment_id,
                 )
                 return
-            now = utc_now()
             saved_segment = await save_ws_transcript_segment(
                 db,
                 session_name=session_id,
@@ -1672,12 +2714,32 @@ async def handle_audio_websocket(
                 if state.mic_mode == "private"
                 else Visibility.PUBLIC,
                 transcript_text=transcript_text,
-                started_at=now,
-                ended_at=now,
+                started_at=audio_started_at,
+                ended_at=audio_ended_at,
                 display_name=state.display_name,
             )
             if saved_segment:
                 transcript_segments.append(saved_segment)
+                saved_segment_visibility = (
+                    Visibility.PRIVATE if state.mic_mode == "private" else Visibility.PUBLIC
+                ).value
+                await record_audio_transcript_latency_events(
+                    db,
+                    session_name=session_id,
+                    participant_id=participant_id,
+                    scope=saved_segment_visibility,
+                    transcript_id=saved_segment.segment_id,
+                    transcript_chars=len(saved_segment.text),
+                    audio_started_at=audio_started_at,
+                    audio_ended_at=audio_ended_at,
+                    sample_rate=state.sample_rate,
+                    channels=1,
+                    audio_samples=audio_samples,
+                    audio_bytes=audio_bytes,
+                    source="legacy_audio_ws",
+                    reason="flush_private" if saved_segment_visibility == Visibility.PRIVATE.value else "flush_public",
+                    metadata={"mic_mode": state.mic_mode},
+                )
                 logger.info(
                     "audio ws transcript session_id=%s participant_id=%s segment_id=%s text=%s",
                     session_id,
@@ -1716,7 +2778,11 @@ async def handle_audio_websocket(
 
                 raw_bytes = message.get("bytes")
                 if raw_bytes is not None:
+                    if not state.audio_buffer:
+                        state.audio_buffer_started_at = utc_now()
+                        state.audio_buffer_bytes = 0
                     state.audio_buffer.extend(raw_bytes)
+                    state.audio_buffer_bytes += len(raw_bytes)
                     if len(state.audio_buffer) >= STREAM_CHUNK_SAMPLES * 2:
                         await flush_buffer()
                     continue
@@ -1829,7 +2895,7 @@ async def handle_audio_websocket(
                 {"type": "transcript_error", "segment_id": None, "reason": "stt_error"},
             )
         finally:
-            if transcript_segments and state.mic_mode == "private":
+            if transcript_segments and state.mic_mode == "private" and _is_audio_transcription_subject(session_id, participant_id):
                 idea_blocks = await generate_idea_blocks_from_stream_transcripts(
                     db,
                     session_name=session_id,
@@ -1843,6 +2909,15 @@ async def handle_audio_websocket(
                     session_id,
                     participant_id=participant_id,
                     idea_blocks=_serialize_admin_idea_blocks(idea_blocks),
+                    duplicate_idea_blocks=[],
+                    scope=state.mic_mode,
+                    transcript_segment_id=transcript_segments[-1].segment_id,
+                    transcript_segment_ids=[
+                        str(segment.segment_id) for segment in transcript_segments
+                    ],
+                    client_segment_id=None,
+                    client_segment_ids=[],
+                    generation_complete=True,
                 )
             if audio_connections.get(session_id, {}).get(participant_id) is state:
                 audio_connections.get(session_id, {}).pop(participant_id, None)

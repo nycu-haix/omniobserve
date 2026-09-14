@@ -30,7 +30,7 @@
     APP_DEFAULTS.roomName || "lost-at-sea";
 
   const DEFAULT_JITSI_BASE_URL =
-    APP_DEFAULTS.jitsiBaseUrl || "https://meet.omni.elvismao.com";
+    APP_DEFAULTS.jitsiBaseUrl || "https://meet.omni.observe.tw";
 
   const DEFAULT_JITSI_URL =
     APP_DEFAULTS.jitsiUrl ||
@@ -1252,7 +1252,7 @@
   }
 
   function buildDefaultJitsiUrl(roomName, displayName) {
-    const base = String(DEFAULT_JITSI_BASE_URL || "https://meet.omni.elvismao.com")
+    const base = String(DEFAULT_JITSI_BASE_URL || "https://meet.omni.observe.tw")
         .trim()
         .replace(/\/+$/g, "");
 
@@ -1313,7 +1313,7 @@
       };
     } catch {
       return {
-        domain: "meet.omni.elvismao.com",
+        domain: "meet.omni.observe.tw",
         roomName: normalizeRoomName(fallbackRoomName || DEFAULT_ROOM_NAME)
       };
     }

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from ..models import Visibility
@@ -20,3 +21,5 @@ class StreamContext:
 class StreamTranscript:
     segment_id: str
     text: str
+    started_at: datetime | None = None
+    ended_at: datetime | None = None

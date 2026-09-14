@@ -2,7 +2,9 @@ from dataclasses import dataclass
 import json
 import os
 import re
+import time
 import unicodedata
+from typing import Any, Protocol
 
 from sqlalchemy import distinct, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,19 @@ class SemanticCandidateSearchResult:
     best_similarity: float | None
 
 
+class DeduplicationStageRecorder(Protocol):
+    def __call__(
+        self,
+        stage: str,
+        started_perf: float,
+        *,
+        candidate_count: int | None = None,
+        llm_model: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        ...
+
+
 async def find_duplicate_idea_block(
     db: AsyncSession,
     *,
@@ -40,6 +55,7 @@ async def find_duplicate_idea_block(
     summary: str,
     embedding_vector: list[float] | None,
     task_item_ids: list[int],
+    record_stage: DeduplicationStageRecorder | None = None,
 ) -> DuplicateIdeaBlockMatch | None:
     logger.info(
         (
@@ -85,19 +101,35 @@ async def find_duplicate_idea_block(
 
     same_item_block_ids: list[int] = []
     if normalized_task_item_ids:
+        same_item_started = time.perf_counter()
         same_item_block_ids = await _find_same_task_item_block_ids(
             db,
             session_name=session_name,
             user_id=user_id,
             task_item_ids=normalized_task_item_ids,
         )
+        if record_stage is not None:
+            record_stage(
+                "dedupe_candidate_query",
+                same_item_started,
+                candidate_count=len(same_item_block_ids),
+                metadata={"source": "same_task_item", "task_item_count": len(normalized_task_item_ids)},
+            )
     else:
         logger.info(
             "idea_block_dedup_task_item_gate_skipped session_name=%s user_id=%s reason=no_task_items",
             session_name,
             user_id,
         )
+        if record_stage is not None:
+            record_stage(
+                "dedupe_candidate_query",
+                time.perf_counter(),
+                candidate_count=0,
+                metadata={"source": "same_task_item", "task_item_count": 0, "skipped_reason": "no_task_items"},
+            )
 
+    semantic_started = time.perf_counter()
     same_item_result = await _find_semantic_candidates(
         db,
         session_name=session_name,
@@ -106,6 +138,19 @@ async def find_duplicate_idea_block(
         candidate_idea_block_ids=same_item_block_ids,
         threshold=DEDUPLICATION_SIMILARITY_THRESHOLD,
     )
+    if record_stage is not None:
+        record_stage(
+            "dedupe_candidate_query",
+            semantic_started,
+            candidate_count=len(same_item_block_ids),
+            metadata={
+                "source": "same_task_item_semantic",
+                "accepted_count": len(same_item_result.candidates),
+                "best_candidate_id": same_item_result.best_candidate_id,
+                "best_similarity": same_item_result.best_similarity,
+                "threshold": DEDUPLICATION_SIMILARITY_THRESHOLD,
+            },
+        )
     _log_candidate_search(
         session_name=session_name,
         user_id=user_id,
@@ -119,12 +164,21 @@ async def find_duplicate_idea_block(
     candidate_source = "same_task_item"
     threshold = DEDUPLICATION_SIMILARITY_THRESHOLD
     if not semantic_candidates:
+        fallback_started = time.perf_counter()
         fallback_block_ids = await _find_recent_block_ids(
             db,
             session_name=session_name,
             user_id=user_id,
             limit=DEDUPLICATION_FALLBACK_RECENT_CANDIDATE_LIMIT,
         )
+        if record_stage is not None:
+            record_stage(
+                "dedupe_candidate_query",
+                fallback_started,
+                candidate_count=len(fallback_block_ids),
+                metadata={"source": "recent_fallback", "limit": DEDUPLICATION_FALLBACK_RECENT_CANDIDATE_LIMIT},
+            )
+        fallback_semantic_started = time.perf_counter()
         fallback_result = await _find_semantic_candidates(
             db,
             session_name=session_name,
@@ -133,6 +187,19 @@ async def find_duplicate_idea_block(
             candidate_idea_block_ids=fallback_block_ids,
             threshold=DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD,
         )
+        if record_stage is not None:
+            record_stage(
+                "dedupe_candidate_query",
+                fallback_semantic_started,
+                candidate_count=len(fallback_block_ids),
+                metadata={
+                    "source": "recent_fallback_semantic",
+                    "accepted_count": len(fallback_result.candidates),
+                    "best_candidate_id": fallback_result.best_candidate_id,
+                    "best_similarity": fallback_result.best_similarity,
+                    "threshold": DEDUPLICATION_FALLBACK_SIMILARITY_THRESHOLD,
+                },
+            )
         _log_candidate_search(
             session_name=session_name,
             user_id=user_id,
@@ -159,10 +226,23 @@ async def find_duplicate_idea_block(
         )
         return None
 
+    llm_started = time.perf_counter()
     confirmed_match = await _select_duplicate_with_llm(
         summary=summary,
         candidates=semantic_candidates,
     )
+    if record_stage is not None:
+        record_stage(
+            "dedupe_llm_compare",
+            llm_started,
+            candidate_count=len(semantic_candidates),
+            llm_model=OPENAI_MODEL,
+            metadata={
+                "candidate_source": candidate_source,
+                "candidate_ids": [candidate.id for candidate, _ in semantic_candidates],
+                "matched": confirmed_match is not None,
+            },
+        )
     if confirmed_match is None:
         logger.info(
             (

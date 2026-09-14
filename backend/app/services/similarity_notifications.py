@@ -1,16 +1,43 @@
 import time
+from dataclasses import dataclass
+from typing import Literal
 
 from ..config import logger
+from ..db import SessionLocal
 from ..models import IdeaBlock, Similarity
-from .realtime import board_manager, is_similarity_cue_enabled
+from .realtime import board_manager, get_session_cue_condition, get_session_phase, is_similarity_cue_enabled
+from .similarity_cue_event_service import record_similarity_cue_delivery
+
+SimilarityCueDeliveryStatus = Literal["suppressed", "delivered", "failed"]
 
 
-async def notify_similarity_cue(similarity: Similarity) -> None:
+@dataclass(frozen=True)
+class SimilarityCueDeliverySummary:
+    attempted: int
+    delivered: int
+    failed: int
+    suppressed: int
+
+    @classmethod
+    def from_statuses(cls, statuses: list[SimilarityCueDeliveryStatus]) -> "SimilarityCueDeliverySummary":
+        suppressed = statuses.count("suppressed")
+        delivered = statuses.count("delivered")
+        failed = statuses.count("failed")
+        return cls(
+            attempted=delivered + failed,
+            delivered=delivered,
+            failed=failed,
+            suppressed=suppressed,
+        )
+
+
+async def notify_similarity_cue(similarity: Similarity) -> SimilarityCueDeliverySummary:
     idea_a = similarity.idea_block_1
     idea_b = similarity.idea_block_2
-    await notify_similarity_cue_for_blocks(
+    return await notify_similarity_cue_for_blocks(
         similarity_id=similarity.id,
         is_same_reason=similarity.is_same_reason,
+        reason=similarity.reason,
         idea_a=idea_a,
         idea_b=idea_b,
     )
@@ -22,26 +49,32 @@ async def notify_similarity_cue_for_blocks(
     is_same_reason: bool,
     idea_a: IdeaBlock,
     idea_b: IdeaBlock,
-) -> None:
+    reason: str = "",
+) -> SimilarityCueDeliverySummary:
     if idea_a.session_name != idea_b.session_name:
-        return
+        return SimilarityCueDeliverySummary(attempted=0, delivered=0, failed=0, suppressed=0)
 
-    await send_similarity_cue(
-        session_name=idea_a.session_name,
-        participant_id=str(idea_a.user_id),
-        own_block=idea_a,
-        other_block=idea_b,
-        similarity_id=similarity_id,
-        is_same_reason=is_same_reason,
-    )
-    await send_similarity_cue(
-        session_name=idea_b.session_name,
-        participant_id=str(idea_b.user_id),
-        own_block=idea_b,
-        other_block=idea_a,
-        similarity_id=similarity_id,
-        is_same_reason=is_same_reason,
-    )
+    statuses = [
+        await send_similarity_cue(
+            session_name=idea_a.session_name,
+            participant_id=str(idea_a.user_id),
+            own_block=idea_a,
+            other_block=idea_b,
+            similarity_id=similarity_id,
+            is_same_reason=is_same_reason,
+            reason=reason,
+        ),
+        await send_similarity_cue(
+            session_name=idea_b.session_name,
+            participant_id=str(idea_b.user_id),
+            own_block=idea_b,
+            other_block=idea_a,
+            similarity_id=similarity_id,
+            is_same_reason=is_same_reason,
+            reason=reason,
+        ),
+    ]
+    return SimilarityCueDeliverySummary.from_statuses(statuses)
 
 
 async def send_similarity_cue(
@@ -52,8 +85,27 @@ async def send_similarity_cue(
     other_block: IdeaBlock,
     similarity_id: int,
     is_same_reason: bool,
-) -> None:
-    if not is_similarity_cue_enabled(session_name):
+    reason: str = "",
+) -> SimilarityCueDeliveryStatus:
+    cue_id = f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}"
+    cue_enabled = is_similarity_cue_enabled(session_name)
+    if not cue_enabled:
+        await _record_similarity_cue_delivery_event(
+            cue_id=cue_id,
+            session_name=session_name,
+            participant_id=participant_id,
+            own_block=own_block,
+            other_block=other_block,
+            similarity_id=similarity_id,
+            is_same_reason=is_same_reason,
+            reason=reason,
+            cue_enabled=cue_enabled,
+            delivery_status="suppressed",
+            event_metadata={
+                "suppressed_reason": "cue_disabled",
+                "board_participants": board_manager.get_participants(session_name),
+            },
+        )
         logger.info(
             "similarity_cue_suppressed session_name=%s participant_id=%s own_block_id=%s other_block_id=%s similarity_id=%s",
             session_name,
@@ -62,7 +114,7 @@ async def send_similarity_cue(
             other_block.id,
             similarity_id,
         )
-        return
+        return "suppressed"
 
     update_sent = await board_manager.send_to(
         session_name,
@@ -78,11 +130,31 @@ async def send_similarity_cue(
         {
             "type": "similarity_cue",
             "payload": {
-                "id": f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}",
+                "id": cue_id,
+                "cueId": cue_id,
+                "similarityId": similarity_id,
                 "blockId": str(own_block.id),
+                "ownBlockId": str(own_block.id),
+                "otherBlockId": str(other_block.id),
                 "blockSummary": other_block.title or other_block.summary,
                 "isSameReason": is_same_reason,
             },
+        },
+    )
+    await _record_similarity_cue_delivery_event(
+        cue_id=cue_id,
+        session_name=session_name,
+        participant_id=participant_id,
+        own_block=own_block,
+        other_block=other_block,
+        similarity_id=similarity_id,
+        is_same_reason=is_same_reason,
+        reason=reason,
+        cue_enabled=cue_enabled,
+        delivery_status="delivered" if cue_sent else "failed",
+        event_metadata={
+            "update_sent": update_sent,
+            "board_participants": board_manager.get_participants(session_name),
         },
     )
     logger.info(
@@ -97,3 +169,50 @@ async def send_similarity_cue(
         cue_sent,
         board_manager.get_participants(session_name),
     )
+    return "delivered" if cue_sent else "failed"
+
+
+async def _record_similarity_cue_delivery_event(
+    *,
+    cue_id: str,
+    session_name: str,
+    participant_id: str,
+    own_block: IdeaBlock,
+    other_block: IdeaBlock,
+    similarity_id: int,
+    is_same_reason: bool,
+    reason: str,
+    cue_enabled: bool,
+    delivery_status: SimilarityCueDeliveryStatus,
+    event_metadata: dict[str, object],
+) -> None:
+    async with SessionLocal() as db:
+        try:
+            await record_similarity_cue_delivery(
+                db,
+                cue_id=cue_id,
+                session_name=session_name,
+                phase=get_session_phase(session_name),
+                condition=get_session_cue_condition(session_name),
+                cue_enabled=cue_enabled,
+                recipient_participant_id=participant_id,
+                own_block=own_block,
+                other_block=other_block,
+                similarity_id=similarity_id,
+                is_same_reason=is_same_reason,
+                reason=reason,
+                delivery_status=delivery_status,
+                event_metadata=event_metadata,
+            )
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(
+                "similarity_cue_delivery_persist_failed session_name=%s participant_id=%s cue_id=%s similarity_id=%s delivery_status=%s error_type=%s error=%s",
+                session_name,
+                participant_id,
+                cue_id,
+                similarity_id,
+                delivery_status,
+                exc.__class__.__name__,
+                exc,
+            )

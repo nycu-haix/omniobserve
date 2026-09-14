@@ -7,6 +7,8 @@ import math
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 import wave
 from collections import deque
 from pathlib import Path
@@ -18,6 +20,12 @@ import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 # from transcript_normalizer import to_traditional
+
+FLUSH_BEFORE_FINAL = os.getenv("WHISPERLIVEKIT_FLUSH_BEFORE_FINAL", "0") == "1"
+
+
+from whisper_drain import drain_whisper_stream, committed_whisper_text
+
 
 ASR_ENGINE = os.getenv("ASR_ENGINE", "whisperlivekit").strip().lower()
 if ASR_ENGINE == "local":
@@ -79,11 +87,15 @@ SEGMENT_DIR = BASE_DIR / "segments"
 SEGMENT_DIR.mkdir(exist_ok=True)
 
 TRANSCRIPT_FILE = BASE_DIR / "transcripts.jsonl"
-DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.elvismao.com").strip().rstrip("/")
+DEFAULT_PIPELINE_WS_BASE_URL = os.getenv("PIPELINE_WS_BASE_URL", "wss://api.omni.observe.tw").strip().rstrip("/")
 PIPELINE_WS_TIMEOUT_SEC = float(os.getenv("PIPELINE_WS_TIMEOUT_SEC", "60"))
 PIPELINE_PERSIST_TIMEOUT_SEC = float(os.getenv("PIPELINE_PERSIST_TIMEOUT_SEC", "10"))
 PIPELINE_FINAL_RELAY_RETRIES = int(os.getenv("PIPELINE_FINAL_RELAY_RETRIES", "3"))
 PIPELINE_FINAL_REASONS = {"silence", "client_stop", "mic_mode_switch", "disconnect"}
+PIPELINE_ROLE_CHECK_TIMEOUT_SEC = float(os.getenv("PIPELINE_ROLE_CHECK_TIMEOUT_SEC", "3"))
+PIPELINE_ROLE_CHECK_TTL_SEC = float(os.getenv("PIPELINE_ROLE_CHECK_TTL_SEC", "2"))
+AUDIO_TRANSCRIPTION_ROLES = {"participant", "confederate"}
+NON_TRANSCRIPTION_ROLES = {"observer", "facilitator", "test"}
 ASR_MOCK = os.getenv("ASR_MOCK", "0").strip().lower() in {"1", "true", "yes", "on"}
 ASR_MODEL_NAME = os.getenv("ASR_MODEL_NAME", "MediaTek-Research/Breeze-ASR-25").strip()
 _wlk_urls_env = os.getenv("WHISPERLIVEKIT_WS_URLS", "").strip()
@@ -175,7 +187,7 @@ def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
         or parsed.fragment
     )
     if parsed.scheme not in {"ws", "wss"} or not has_clean_base_url or not (
-        hostname == "api.omni.elvismao.com" or hostname.endswith(".api.omni.elvismao.com")
+        hostname == "api.omni.observe.tw" or hostname.endswith(".api.omni.observe.tw")
     ):
         print(
             "Invalid pipeline_ws_base_url ignored: "
@@ -184,6 +196,139 @@ def normalize_pipeline_ws_base_url(value: Optional[str]) -> str:
         return DEFAULT_PIPELINE_WS_BASE_URL
 
     return candidate
+
+
+def pipeline_http_base_url_from_ws(value: Optional[str]) -> str:
+    pipeline_base_url = normalize_pipeline_ws_base_url(value)
+    if not pipeline_base_url:
+        return ""
+
+    parsed = urlparse(pipeline_base_url)
+    if parsed.scheme == "wss":
+        return parsed._replace(scheme="https").geturl().rstrip("/")
+    if parsed.scheme == "ws":
+        return parsed._replace(scheme="http").geturl().rstrip("/")
+    return ""
+
+
+def presence_participant_transcription_enabled(
+    payload: Any,
+    participant_id: Optional[str],
+) -> bool | None:
+    normalized_participant_id = str(participant_id or "").strip()
+    if not normalized_participant_id or not isinstance(payload, dict):
+        return None
+
+    participants = payload.get("participants")
+    if not isinstance(participants, list):
+        return None
+
+    for participant in participants:
+        if not isinstance(participant, dict):
+            continue
+        candidate_id = str(
+            participant.get("id")
+            or participant.get("participant_id")
+            or participant.get("participantId")
+            or ""
+        ).strip()
+        if candidate_id != normalized_participant_id:
+            continue
+
+        transcription_enabled = participant.get("transcription_enabled")
+        if isinstance(transcription_enabled, bool):
+            return transcription_enabled
+
+        participant_role = str(
+            participant.get("participant_role")
+            or participant.get("participantRole")
+            or ""
+        ).strip().lower().replace("_", "-")
+        if participant_role in AUDIO_TRANSCRIPTION_ROLES:
+            return True
+        if participant_role in NON_TRANSCRIPTION_ROLES:
+            return False
+        return None
+
+    return None
+
+
+def fetch_pipeline_participant_transcription_enabled(
+    pipeline_ws_base_url: Optional[str],
+    room_name: Optional[str],
+    participant_id: Optional[str],
+) -> bool | None:
+    http_base_url = pipeline_http_base_url_from_ws(pipeline_ws_base_url)
+    normalized_room_name = str(room_name or "").strip()
+    normalized_participant_id = str(participant_id or "").strip()
+    if not http_base_url or not normalized_room_name or not normalized_participant_id:
+        return None
+
+    url = f"{http_base_url}/api/sessions/{quote(normalized_room_name, safe='')}/presence"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "omniobserve-audio-gateway",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=PIPELINE_ROLE_CHECK_TIMEOUT_SEC) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (TimeoutError, OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        print(
+            "Pipeline role check failed: "
+            f"roomName={normalized_room_name}, participantId={normalized_participant_id}, "
+            f"url={url}, error={exc}"
+        )
+        return None
+
+    return presence_participant_transcription_enabled(payload, normalized_participant_id)
+
+
+async def get_pipeline_participant_transcription_enabled(
+    pipeline_ws_base_url: Optional[str],
+    room_name: Optional[str],
+    participant_id: Optional[str],
+) -> bool | None:
+    return await asyncio.to_thread(
+        fetch_pipeline_participant_transcription_enabled,
+        pipeline_ws_base_url,
+        room_name,
+        participant_id,
+    )
+
+
+async def send_gateway_transcription_disabled(
+    websocket: WebSocket,
+    send_lock: asyncio.Lock,
+    *,
+    room_name: Optional[str],
+    participant_id: Optional[str],
+    scope: Optional[str],
+) -> None:
+    payload = {
+        "type": "transcription_disabled",
+        "reason": "participant_role_excluded",
+        "roomName": room_name,
+        "participantId": participant_id,
+        "participant_id": participant_id,
+        "scope": scope,
+        "message": "Audio transcription is disabled for this participant role.",
+    }
+    try:
+        async with send_lock:
+            await websocket.send_json(payload)
+    except Exception:
+        print("Cannot send transcription_disabled because websocket is closed")
+
+
+async def close_gateway_websocket(websocket: WebSocket) -> None:
+    try:
+        await websocket.close()
+    except Exception:
+        pass
 
 
 @app.get("/asr-status")
@@ -610,9 +755,9 @@ async def relay_transcript_to_pipeline(
         "client_segment_id": client_segment_id,
     }
     terminal_types = (
-        {"task_items_update", "transcript_error", "pipeline_error"}
+        {"task_items_update", "transcript_error", "pipeline_error", "transcription_disabled", "transcript_segments_stopped"}
         if reason in PIPELINE_FINAL_REASONS
-        else {"transcript", "transcript_error", "pipeline_error"}
+        else {"transcript", "transcript_error", "pipeline_error", "transcription_disabled", "transcript_segments_stopped"}
     )
     pipeline_messages = []
 
@@ -646,12 +791,19 @@ async def relay_transcript_to_pipeline(
                 message_type = message.get("type")
                 if persisted_event is not None and (
                     (message_type == "transcript_update" and message.get("persisted") is True)
-                    or message_type in {"transcript_error", "pipeline_error"}
+                    or message_type in {
+                        "transcript_error",
+                        "pipeline_error",
+                        "transcription_disabled",
+                        "transcript_segments_stopped",
+                    }
                 ):
                     persisted_event.set()
                 if isinstance(message, dict) and message_type in {
                     "transcript",
                     "transcript_update",
+                    "transcription_disabled",
+                    "transcript_segments_stopped",
                     "transcript_error",
                     "idea_blocks_update",
                     "task_items_update",
@@ -1054,6 +1206,8 @@ async def handle_whisperlivekit_audio_ws(
     encoding = "float32"
     channels = 1
     connection_pipeline_ws_base_url = normalize_pipeline_ws_base_url(pipeline_ws_base_url)
+    role_check_expires_at = 0.0
+    transcription_enabled_cache = True
 
     latest_buffer_text = ""
     current_draft_text = ""
@@ -1090,6 +1244,7 @@ async def handle_whisperlivekit_audio_ws(
     wlk_tail_silence_duration = 0.0
     restart_wlk_after_final = False
     wlk_session_generation = 0
+    wlk_ready_event = asyncio.Event()
     wlk_restart_lock = asyncio.Lock()
     wlk_last_progress_at = time.monotonic()
     wlk_recovery_task: asyncio.Task | None = None
@@ -1100,6 +1255,37 @@ async def handle_whisperlivekit_audio_ws(
                 await websocket.send_json(payload)
         except Exception:
             print("Cannot send WhisperLiveKit proxy payload because websocket is closed")
+
+    async def ensure_gateway_transcription_enabled(force: bool = False) -> bool:
+        nonlocal role_check_expires_at, transcription_enabled_cache
+        now = time.monotonic()
+        if not force and now < role_check_expires_at:
+            return transcription_enabled_cache
+
+        enabled = await get_pipeline_participant_transcription_enabled(
+            connection_pipeline_ws_base_url,
+            room_name,
+            participant_id,
+        )
+        role_check_expires_at = now + max(0.0, PIPELINE_ROLE_CHECK_TTL_SEC)
+        if enabled is False:
+            transcription_enabled_cache = False
+            print(
+                "WhisperLiveKit gateway refused disabled role before ASR: "
+                f"roomName={room_name}, participantId={participant_id}"
+            )
+            await send_gateway_transcription_disabled(
+                websocket,
+                send_lock,
+                room_name=room_name,
+                participant_id=participant_id,
+                scope=scope,
+            )
+            await close_gateway_websocket(websocket)
+            return False
+
+        transcription_enabled_cache = True
+        return True
 
     def track_pipeline_relay(task: asyncio.Task) -> None:
         pipeline_relay_tasks.add(task)
@@ -1216,7 +1402,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def build_live_text(lines: list[dict[str, Any]], buffer_text: str) -> str:
         latest = latest_speech_line(lines)
-        latest_line_text = whisperlivekit_line_text(latest[1]) if latest else ""
+        latest_line_text = (clean_asr_transcript_text(committed_whisper_text(lines))
+                            if FLUSH_BEFORE_FINAL else whisperlivekit_line_text(latest[1]) if latest else "")
 
         normalized_buffer = buffer_text.strip()
         if latest_line_text and normalized_buffer:
@@ -1440,6 +1627,25 @@ async def handle_whisperlivekit_audio_ws(
                             continue
 
                 pipeline_messages = [] if persist_timed_out else await relay_task
+                disabled_terminal = next(
+                    (
+                        message
+                        for message in pipeline_messages
+                        if message.get("type") in {
+                            "transcription_disabled",
+                            "transcript_segments_stopped",
+                        }
+                    ),
+                    None,
+                )
+                if disabled_terminal is not None:
+                    print(
+                        "Pipeline final intentionally disabled: "
+                        f"roomName={room_name}, participantId={participant_id}, "
+                        f"client_segment_id={line_id}, response={disabled_terminal.get('type')}"
+                    )
+                    return
+
                 persisted_update = next(
                     (
                         message
@@ -1499,9 +1705,13 @@ async def handle_whisperlivekit_audio_ws(
             return
 
         latest = latest_speech_line(active_state_lines()) or latest_speech_line(state_lines)
-        last_finalized_state_line_count = len(state_lines)
+        if not FLUSH_BEFORE_FINAL:
+            last_finalized_state_line_count = len(state_lines)
         pending_audio_silence_segment_id = segment_id
-        await forward_final_text(current_final_text(), latest[1] if latest else None)
+        if FLUSH_BEFORE_FINAL:
+            await drain_whisper_stream(wlk_ws, sender_task, wlk_send_queue, wlk_ready_event)
+        else:
+            await forward_final_text(current_final_text(), latest[1] if latest else None)
 
     async def finalize_current_draft_from_idle(segment_id: str) -> None:
         nonlocal last_finalized_state_line_count, pending_draft_idle_segment_id
@@ -1529,6 +1739,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def schedule_draft_idle_finalize() -> None:
         nonlocal pending_draft_idle_task, pending_draft_idle_segment_id
+        if FLUSH_BEFORE_FINAL:
+            return
         if not current_draft_text:
             return
         segment_id = current_client_segment_id()
@@ -1547,6 +1759,8 @@ async def handle_whisperlivekit_audio_ws(
 
     def schedule_silence_finalize(silence_key: str) -> None:
         nonlocal pending_silence_task, pending_silence_key
+        if FLUSH_BEFORE_FINAL:
+            return
         if not current_draft_text or silence_key in finalized_silence_keys:
             return
         if pending_silence_key == silence_key and pending_silence_task and not pending_silence_task.done():
@@ -1587,7 +1801,9 @@ async def handle_whisperlivekit_audio_ws(
             cancel_pending_silence_finalize()
             if current_draft_text:
                 latest = latest_speech_line(state_lines)
-                await forward_final_text(current_final_text(), latest[1] if latest else None)
+                text = build_live_text(state_lines, "") if FLUSH_BEFORE_FINAL else current_final_text()
+                await forward_final_text(text or current_final_text(), latest[1] if latest else None)
+            wlk_ready_event.set()
             print("WhisperLiveKit ready_to_stop")
             return
         if message.get("error"):
@@ -1696,6 +1912,12 @@ async def handle_whisperlivekit_audio_ws(
     async def stop_wlk_session(send_stop: bool = True) -> None:
         nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
         ws = wlk_ws
+        if FLUSH_BEFORE_FINAL and send_stop and ws is not None:
+            try:
+                await drain_whisper_stream(ws, sender_task, wlk_send_queue, wlk_ready_event)
+            except Exception as exc:
+                await send_client_json({"type": "asr_error", "error": "ASR flush failed: " + type(exc).__name__})
+            send_stop = False
         wlk_session_generation += 1
         if ws is not None and send_stop:
             try:
@@ -1732,6 +1954,7 @@ async def handle_whisperlivekit_audio_ws(
     async def start_wlk_session() -> None:
         nonlocal wlk_ws, receiver_task, sender_task, wlk_session_generation
         drain_wlk_send_queue()
+        wlk_ready_event.clear()
         wlk_ws = await connect_wlk_session()
         wlk_session_generation += 1
         generation = wlk_session_generation
@@ -1803,6 +2026,8 @@ async def handle_whisperlivekit_audio_ws(
         wlk_recovery_task = asyncio.create_task(recover())
 
     try:
+        if not await ensure_gateway_transcription_enabled(force=True):
+            return
         await start_wlk_session()
         while True:
             data = await websocket.receive()
@@ -1824,6 +2049,7 @@ async def handle_whisperlivekit_audio_ws(
                     scope = msg.get("scope", scope)
                     agent_type = msg.get("agentType", agent_type)
                     room_name = msg.get("roomName", room_name)
+                    participant_id = msg.get("participantId", participant_id)
                     user_id = msg.get("userId", user_id)
                     display_name = msg.get("displayName", display_name)
                     input_sample_rate = int(msg.get("sampleRate", input_sample_rate))
@@ -1834,6 +2060,9 @@ async def handle_whisperlivekit_audio_ws(
                         or msg.get("pipeline_ws_base_url")
                         or connection_pipeline_ws_base_url
                     )
+                    if not await ensure_gateway_transcription_enabled(force=True):
+                        await stop_wlk_session(send_stop=False)
+                        return
                     session_started = True
                     await send_client_json({
                         "type": "joined",
@@ -1853,6 +2082,9 @@ async def handle_whisperlivekit_audio_ws(
             pcm_bytes = data.get("bytes")
             if pcm_bytes is None or not session_started:
                 continue
+            if not await ensure_gateway_transcription_enabled():
+                await stop_wlk_session(send_stop=False)
+                return
 
             try:
                 decoded_audio = decode_audio_bytes(
@@ -1989,6 +2221,8 @@ async def audio_ws(
     display_name = url_participant_id
     client_id = None
     connection_pipeline_ws_base_url = normalize_pipeline_ws_base_url(pipeline_ws_base_url)
+    role_check_expires_at = 0.0
+    transcription_enabled_cache = True
 
     input_sample_rate = SAMPLE_RATE
     encoding = "float32"
@@ -2015,6 +2249,37 @@ async def audio_ws(
 
     connection_start_time = time.monotonic()
     has_received_start = False
+
+    async def ensure_gateway_transcription_enabled(force: bool = False) -> bool:
+        nonlocal role_check_expires_at, transcription_enabled_cache
+        now = time.monotonic()
+        if not force and now < role_check_expires_at:
+            return transcription_enabled_cache
+
+        enabled = await get_pipeline_participant_transcription_enabled(
+            connection_pipeline_ws_base_url,
+            room_name,
+            participant_id,
+        )
+        role_check_expires_at = now + max(0.0, PIPELINE_ROLE_CHECK_TTL_SEC)
+        if enabled is False:
+            transcription_enabled_cache = False
+            print(
+                "Local ASR gateway refused disabled role before ASR: "
+                f"roomName={room_name}, participantId={participant_id}"
+            )
+            await send_gateway_transcription_disabled(
+                websocket,
+                send_lock,
+                room_name=room_name,
+                participant_id=participant_id,
+                scope=scope,
+            )
+            await close_gateway_websocket(websocket)
+            return False
+
+        transcription_enabled_cache = True
+        return True
 
     async def finalize_segment(end_reason: str):
         nonlocal speech_started
@@ -2383,6 +2648,12 @@ async def audio_ws(
                     connection_pipeline_ws_base_url = next_pipeline_ws_base_url
                     has_received_start = True
 
+                    if not await ensure_gateway_transcription_enabled(force=True):
+                        for task in [*asr_tasks, *live_asr_tasks]:
+                            task.cancel()
+                        await asyncio.gather(*asr_tasks, *live_asr_tasks, return_exceptions=True)
+                        return
+
                     print(
                         "Control start: "
                         f"source={source}, "
@@ -2435,6 +2706,15 @@ async def audio_ws(
 
             if "bytes" not in data:
                 continue
+
+            if not has_received_start:
+                continue
+
+            if not await ensure_gateway_transcription_enabled():
+                for task in [*asr_tasks, *live_asr_tasks]:
+                    task.cancel()
+                await asyncio.gather(*asr_tasks, *live_asr_tasks, return_exceptions=True)
+                return
 
             pcm_bytes = data["bytes"]
 

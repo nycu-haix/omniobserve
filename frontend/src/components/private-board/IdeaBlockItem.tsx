@@ -1,6 +1,7 @@
-import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, Send, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, CircleDashed, CornerDownLeft, Pencil, RotateCcw, Send, Trash2, UserRound, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { DEFAULT_SESSION_PHASE, isGroupPhase, type SessionPhase } from "../../lib/sessionPhase";
+import { isSimilarityCueDisplayPhase } from "../../lib/similarityCueLifecycle";
 import { cn } from "../../lib/utils";
 import type { IdeaBlock } from "../../types";
 import { Badge } from "../ui/Badge";
@@ -13,8 +14,10 @@ interface IdeaBlockItemProps {
 	onToggle: (id: string) => void;
 	onSave: (id: string, values: { summary: string; aiSummary: string; transcript: string; updateTitle?: boolean }) => Promise<void> | void;
 	onDelete?: (id: string) => Promise<void> | void;
+	onRestore?: (id: string) => Promise<void> | void;
 	onJumpToTranscript?: (block: IdeaBlock) => void;
 	onShareToChat?: (block: IdeaBlock) => void;
+	onShareSimilarityReason?: (block: IdeaBlock) => void;
 	canJumpToTranscript?: boolean;
 	canShareToChat?: boolean;
 	currentPhase?: SessionPhase;
@@ -27,8 +30,10 @@ export function IdeaBlockItem({
 	onToggle,
 	onSave,
 	onDelete,
+	onRestore,
 	onJumpToTranscript,
 	onShareToChat,
+	onShareSimilarityReason,
 	canJumpToTranscript = false,
 	canShareToChat = false,
 	currentPhase = DEFAULT_SESSION_PHASE,
@@ -42,6 +47,7 @@ export function IdeaBlockItem({
 	const [isSaving, setIsSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [isDeleting, setIsDeleting] = useState(false);
+	const [isRestoring, setIsRestoring] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 	const itemRootRef = useRef<HTMLDivElement | null>(null);
@@ -57,12 +63,17 @@ export function IdeaBlockItem({
 	const titleTooLong = draftTitle.trim().length > 20;
 	const canSaveTitle = draftTitle.trim().length > 0 && titleChanged && !titleTooLong && !isSaving && !isDeleted;
 	const rowLabel = block.isDraft ? draftAiSummary.trim() || block.summary : savedTitle;
+	const generatingLabel = rowLabel.trim() || "正在生成...";
 	const hasLinkedTranscript = canJumpToTranscript && (!!block.transcriptLineId || (block.sourceTranscriptIds?.length ?? 0) > 0);
-	const canShareCurrentBlock = !!onShareToChat && canShareToChat && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
-	const shouldShowCue = showSimilarityCue && block.hasCue && isGroupPhase(currentPhase);
+	const canShareCurrentBlock = !!onShareToChat && canShareToChat && isGroupPhase(currentPhase) && !isGenerating && !isDeleted && !!(block.aiSummary?.trim() || block.summary.trim());
+	const shareButtonTitle = isGroupPhase(currentPhase) ? "送到聊天室" : "Public Phase 才能送到聊天室";
+	const shareSimilarityReasonTitle = "分享給相似想法對象";
+	const shouldShowCue = showSimilarityCue && block.hasCue && isSimilarityCueDisplayPhase(currentPhase);
 	const shouldShowPublicContext = !!block.publicContextRelevant && !isDeleted && !isGenerating;
 	const hasSameSimilarityReason = block.similarityHasSameReason ?? block.similarityIsSameReason === true;
 	const hasDifferentSimilarityReason = block.similarityHasDifferentReason ?? block.similarityIsSameReason === false;
+	const shouldShowSimilarityReasonShareAction = shouldShowCue && !isGenerating && !isDeleted;
+	const canShareSimilarityReason = shouldShowSimilarityReasonShareAction && !!onShareSimilarityReason && !!(block.aiSummary?.trim() || block.summary.trim());
 	const hasMixedSimilarityReasons = hasSameSimilarityReason && hasDifferentSimilarityReason;
 	const similarityReasonTag =
 		!hasSameSimilarityReason && !hasDifferentSimilarityReason
@@ -176,6 +187,15 @@ export function IdeaBlockItem({
 		onShareToChat?.(block);
 	};
 
+	const shareSimilarityReason = (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!canShareSimilarityReason) {
+			return;
+		}
+		setShowDeleteConfirm(false);
+		onShareSimilarityReason?.(block);
+	};
+
 	const confirmDelete = async () => {
 		if (!onDelete || isDeleting || isDeleted) {
 			return;
@@ -190,6 +210,23 @@ export function IdeaBlockItem({
 			setSaveError(error instanceof Error ? error.message : "Failed to delete idea block");
 		} finally {
 			setIsDeleting(false);
+		}
+	};
+
+	const restoreBlock = async (event: MouseEvent<HTMLButtonElement>) => {
+		event.stopPropagation();
+		if (!onRestore || isRestoring || !isDeleted) {
+			return;
+		}
+
+		setIsRestoring(true);
+		setSaveError(null);
+		try {
+			await onRestore(block.id);
+		} catch (error) {
+			setSaveError(error instanceof Error ? error.message : "Failed to restore idea block");
+		} finally {
+			setIsRestoring(false);
 		}
 	};
 
@@ -248,7 +285,7 @@ export function IdeaBlockItem({
 			role={canToggle ? "button" : undefined}
 			tabIndex={canToggle ? 0 : undefined}
 			className={cn(
-				"relative grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"relative grid min-h-8 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-lg border bg-background px-2.5 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				shouldShowCue && "border-primary bg-accent",
 				shouldShowPublicContext && "border-neutral-900/70 pt-5",
 				similarityReasonTitleColor,
@@ -269,7 +306,7 @@ export function IdeaBlockItem({
 				onToggle(block.id);
 			}}
 		>
-			{block.isUnread && !isDeleted && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
+			{block.isUnread && !isDeleted && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" aria-label="Unread idea block" />}
 			{shouldShowPublicContext && (
 				<span
 					className="pointer-events-none absolute left-3 top-1.5 z-10 rounded-sm border border-neutral-900/70 bg-background px-1.5 py-0.5 text-[10px] font-semibold leading-none text-neutral-900 shadow-sm"
@@ -309,14 +346,15 @@ export function IdeaBlockItem({
 					autoFocus
 				/>
 			) : (
-				<span className="block w-fit min-w-0 max-w-full justify-self-start whitespace-pre-wrap break-words text-sm leading-6">{isGenerating ? "正在生成..." : rowLabel}</span>
+				<span className="block min-w-0 max-w-full justify-self-stretch whitespace-pre-wrap break-words text-sm leading-5">{isGenerating ? generatingLabel : rowLabel}</span>
 			)}
 			{!isGenerating && (
-				<div className="relative flex flex-shrink-0 items-center gap-2">
+				<div className="relative col-start-3 row-start-1 -my-1 flex min-w-0 flex-shrink-0 flex-wrap items-center justify-end gap-1">
 					{isEditingTitle ? (
 						<>
 							<Button
 								aria-label="Cancel title edit"
+								className="h-7 w-7"
 								size="icon"
 								variant="ghost"
 								onClick={event => {
@@ -329,6 +367,7 @@ export function IdeaBlockItem({
 							</Button>
 							<Button
 								aria-label="Save title edit"
+								className="h-7 w-7"
 								size="icon"
 								onClick={event => {
 									event.stopPropagation();
@@ -350,6 +389,7 @@ export function IdeaBlockItem({
 								<>
 									<Button
 										aria-label="Confirm delete idea block"
+										className="h-7 w-7"
 										size="icon"
 										variant="destructive"
 										onClick={event => {
@@ -362,6 +402,7 @@ export function IdeaBlockItem({
 									</Button>
 									<Button
 										aria-label="Cancel delete idea block"
+										className="h-7 w-7"
 										size="icon"
 										variant="ghost"
 										onClick={event => {
@@ -374,18 +415,31 @@ export function IdeaBlockItem({
 								</>
 							) : (
 								<>
+									{isDeleted && (
+										<Button aria-label="Restore idea block" className="h-7 w-7" title="復原 idea block" size="icon" variant="ghost" onClick={restoreBlock} disabled={isRestoring}>
+											<RotateCcw className={cn("h-4 w-4", isRestoring && "animate-spin")} />
+										</Button>
+									)}
 									{!isDeleted && (
-										<Button aria-label="Share idea block to public chat" title="送到聊天室" size="icon" variant="ghost" onClick={shareBlockToChat} disabled={!canShareCurrentBlock}>
+										<Button
+											aria-label="Share idea block to public chat"
+											className="h-7 w-7"
+											title={shareButtonTitle}
+											size="icon"
+											variant="ghost"
+											onClick={shareBlockToChat}
+											disabled={!canShareCurrentBlock}
+										>
 											<Send className="h-4 w-4" />
 										</Button>
 									)}
 									{!isDeleted && !block.isDraft && (
-										<Button aria-label="Edit idea block title" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
+										<Button aria-label="Edit idea block title" className="h-7 w-7" size="icon" variant="ghost" onClick={startTitleEditing} disabled={isSaving}>
 											<Pencil className="h-4 w-4" />
 										</Button>
 									)}
 									{!isDeleted && (
-										<Button aria-label="Delete idea block" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
+										<Button aria-label="Delete idea block" className="h-7 w-7" size="icon" variant="ghost" onClick={deleteBlock} disabled={isDeleting}>
 											<Trash2 className="h-4 w-4" />
 										</Button>
 									)}
@@ -397,7 +451,7 @@ export function IdeaBlockItem({
 					{hasLinkedTranscript && (
 						<Button
 							aria-label="Jump to transcript"
-							className="w-fit gap-2"
+							className="h-7 w-fit gap-2 px-2"
 							variant="ghost"
 							size="sm"
 							onClick={event => {
@@ -427,11 +481,12 @@ export function IdeaBlockItem({
 			)}
 
 			{isEditingTitle && (saveError || titleTooLong) && <p className="ml-7 text-xs font-semibold text-destructive">{saveError || "⚠️ 超過20個字，請將標題刪減至20字以下"}</p>}
+			{isDeleted && saveError && <p className="ml-7 text-xs font-semibold text-destructive">{saveError}</p>}
 
 			{block.expanded && !isGenerating && !isDeleted && (
-				<div className="ml-7 mr-7 grid gap-2 overflow-hidden rounded-lg px-1 py-1">
+				<div className="ml-7 mr-7 grid gap-1.5 overflow-hidden rounded-lg px-0.5 py-0.5">
 					{shouldShowCue && (
-						<div className="flex flex-wrap gap-1.5">
+						<div className="flex flex-wrap items-center gap-1.5">
 							<Badge className="w-fit" variant="secondary">
 								Similarity
 							</Badge>
@@ -440,6 +495,20 @@ export function IdeaBlockItem({
 									{similarityReasonTag.label}
 								</Badge>
 							)}
+							{shouldShowSimilarityReasonShareAction && (
+								<Button
+									aria-label="分享我的理由給相似想法對象"
+									className="h-6 gap-1.5 border-yellow-700/30 px-2 text-xs text-yellow-950 hover:bg-yellow-100"
+									size="sm"
+									title={shareSimilarityReasonTitle}
+									variant="outline"
+									onClick={shareSimilarityReason}
+									disabled={!canShareSimilarityReason}
+								>
+									<UserRound className="h-3.5 w-3.5" />
+									分享我的理由
+								</Button>
+							)}
 						</div>
 					)}
 
@@ -447,13 +516,19 @@ export function IdeaBlockItem({
 						<div className="grid gap-2 rounded-md border border-yellow-700/30 bg-yellow-50 px-3 py-2 text-sm">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge className="w-fit border-yellow-700/30 bg-yellow-100 text-yellow-900" variant="outline">
-									匿名分享的不同理由
+									匿名分享的理由
 								</Badge>
 							</div>
 							{sharedReasons.map(reason => (
 								<div className="grid gap-1 border-t border-yellow-700/20 pt-2 first:border-t-0 first:pt-0" key={reason.id}>
 									<div className="flex flex-wrap items-center gap-2 text-xs text-yellow-900">
 										<span className="font-semibold text-yellow-900/70">相似想法</span>
+										<Badge
+											className={cn("w-fit px-1.5 py-0 text-[10px]", reason.isSameReason ? "border-green-700/30 bg-green-100 text-green-900" : "border-yellow-700/30 bg-yellow-100 text-yellow-900")}
+											variant="outline"
+										>
+											{reason.isSameReason ? "same reason" : "different reason"}
+										</Badge>
 										<span>{reason.title}</span>
 									</div>
 									<p className="whitespace-pre-wrap break-words leading-5 text-yellow-950">{reason.summary}</p>
@@ -465,7 +540,7 @@ export function IdeaBlockItem({
 					<textarea
 						ref={aiSummaryTextareaRef}
 						rows={1}
-						className="min-h-11 w-full resize-none overflow-hidden rounded-md border bg-background px-2.5 py-1.5 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
+						className="min-h-8 w-full resize-none overflow-hidden rounded-md border bg-background px-2 py-1 text-sm leading-5 outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring"
 						value={draftAiSummary}
 						onChange={event => setDraftAiSummary(event.target.value)}
 					/>

@@ -1,6 +1,7 @@
 import type IJitsiMeetExternalApi from "@jitsi/react-sdk/lib/types/IJitsiMeetExternalApi";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getJitsiNoiseSuppressionCommandConfig, getJitsiPublicAudioVolume, getJitsiRemoteParticipantVolumeCommands } from "../lib/jitsiAudio";
 import type { MicMode } from "../types";
 
 interface JitsiRoomProps {
@@ -8,6 +9,8 @@ interface JitsiRoomProps {
 	roomName?: string;
 	displayName?: string;
 	micMode: MicMode;
+	isLocalSpeaking?: boolean;
+	allowInteraction?: boolean;
 	onApiReady?: (api: IJitsiMeetExternalApi) => void;
 	onStatusChange?: (status: JitsiConnectionStatus) => void;
 	onAudioParticipantsChange?: (snapshot: JitsiAudioSnapshot) => void;
@@ -227,10 +230,21 @@ function getParticipantMergeKey(participant: JitsiAudioParticipant) {
 	return displayName && !displayName.startsWith("Participant ") ? `name:${displayName.toLocaleLowerCase()}` : `id:${participant.id}`;
 }
 
-export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve User", micMode, onApiReady, onStatusChange, onAudioParticipantsChange }: JitsiRoomProps) {
+export function JitsiRoom({
+	meetingDomain,
+	roomName,
+	displayName = "OmniObserve User",
+	micMode,
+	isLocalSpeaking = false,
+	allowInteraction = false,
+	onApiReady,
+	onStatusChange,
+	onAudioParticipantsChange
+}: JitsiRoomProps) {
 	const apiRef = useRef<IJitsiMeetExternalApi | null>(null);
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const desiredAudioMutedRef = useRef(micMode !== "public");
+	const desiredRemoteAudioVolumeRef = useRef(getJitsiPublicAudioVolume({ micMode, isLocalSpeaking }));
 	const audioSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
 	const jitsiListenersRef = useRef<{ api: IJitsiMeetExternalApi; listeners: [string, JitsiEventListener][] } | null>(null);
 	const audioParticipantsRef = useRef<Map<string, JitsiParticipantAudioState>>(new Map());
@@ -378,41 +392,77 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		emitAudioSnapshot();
 	}, [emitAudioSnapshot, onAudioParticipantsChange]);
 
-	const syncJitsiAudioMuted = useCallback((reason: string) => {
-		audioSyncQueueRef.current = audioSyncQueueRef.current
-			.catch(() => undefined)
-			.then(async () => {
-				const api = apiRef.current;
-				if (!api) {
-					return;
-				}
+	const syncJitsiNoiseSuppression = useCallback((reason: string) => {
+		const api = apiRef.current;
+		if (!api) {
+			return;
+		}
 
-				try {
-					const targetMuted = desiredAudioMutedRef.current;
-					const currentlyMuted = await api.isAudioMuted();
+		try {
+			api.executeCommand("setNoiseSuppressionEnabled", getJitsiNoiseSuppressionCommandConfig());
+		} catch (error) {
+			console.warn("[jitsi] failed to sync noise suppression", { reason, error });
+		}
+	}, []);
 
-					if (apiRef.current !== api) {
+	const syncJitsiRemoteParticipantVolumes = useCallback((reason: string) => {
+		const api = apiRef.current;
+		if (!api) {
+			return;
+		}
+
+		const targetVolume = desiredRemoteAudioVolumeRef.current;
+		const volumeCommands = getJitsiRemoteParticipantVolumeCommands(audioParticipantsRef.current.values(), targetVolume);
+
+		volumeCommands.forEach(({ participantId, volume }) => {
+			try {
+				api.executeCommand("setParticipantVolume", participantId, volume);
+			} catch (error) {
+				console.warn("[jitsi] failed to sync remote participant volume", { reason, participantId, volume, error });
+			}
+		});
+	}, []);
+
+	const syncJitsiAudioMuted = useCallback(
+		(reason: string) => {
+			audioSyncQueueRef.current = audioSyncQueueRef.current
+				.catch(() => undefined)
+				.then(async () => {
+					const api = apiRef.current;
+					if (!api) {
 						return;
 					}
 
-					if (currentlyMuted !== targetMuted) {
-						console.info("[jitsi] correcting audio mute state", { reason, targetMuted, currentlyMuted });
-						api.executeCommand("toggleAudio");
-						await wait(JITSI_AUDIO_SYNC_RECHECK_DELAY_MS);
-					}
+					try {
+						const targetMuted = desiredAudioMutedRef.current;
+						const currentlyMuted = await api.isAudioMuted();
 
-					const verifiedMuted = await api.isAudioMuted();
-					const latestTargetMuted = desiredAudioMutedRef.current;
+						if (apiRef.current !== api) {
+							return;
+						}
 
-					if (apiRef.current === api && verifiedMuted !== latestTargetMuted) {
-						console.info("[jitsi] retrying audio mute correction", { reason, latestTargetMuted, verifiedMuted });
-						api.executeCommand("toggleAudio");
+						if (currentlyMuted !== targetMuted) {
+							console.info("[jitsi] correcting audio mute state", { reason, targetMuted, currentlyMuted });
+							api.executeCommand("toggleAudio");
+							await wait(JITSI_AUDIO_SYNC_RECHECK_DELAY_MS);
+						}
+
+						const verifiedMuted = await api.isAudioMuted();
+						const latestTargetMuted = desiredAudioMutedRef.current;
+
+						if (apiRef.current === api && verifiedMuted !== latestTargetMuted) {
+							console.info("[jitsi] retrying audio mute correction", { reason, latestTargetMuted, verifiedMuted });
+							api.executeCommand("toggleAudio");
+						}
+
+						syncJitsiNoiseSuppression(reason);
+					} catch (error) {
+						console.warn("[jitsi] failed to sync audio mute state", { reason, error });
 					}
-				} catch (error) {
-					console.warn("[jitsi] failed to sync audio mute state", { reason, error });
-				}
-			});
-	}, []);
+				});
+		},
+		[syncJitsiNoiseSuppression]
+	);
 
 	const detachJitsiListeners = useCallback(() => {
 		const listenerRegistration = jitsiListenersRef.current;
@@ -438,6 +488,11 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		desiredAudioMutedRef.current = micMode !== "public";
 		syncJitsiAudioMuted("micMode");
 	}, [micMode, syncJitsiAudioMuted]);
+
+	useEffect(() => {
+		desiredRemoteAudioVolumeRef.current = getJitsiPublicAudioVolume({ micMode, isLocalSpeaking });
+		syncJitsiRemoteParticipantVolumes("publicAudioAutoDucking");
+	}, [isLocalSpeaking, micMode, syncJitsiRemoteParticipantVolumes]);
 
 	useEffect(() => detachJitsiListeners, [detachJitsiListeners]);
 
@@ -512,8 +567,10 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 							upsertAudioParticipant(event.id, { isMuted: muted });
 						}
 					});
-					void refreshAudioParticipantsFromRooms(api as IJitsiMeetExternalApi);
+					void refreshAudioParticipantsFromRooms(api as IJitsiMeetExternalApi).then(() => syncJitsiRemoteParticipantVolumes("videoConferenceJoined-refresh"));
+					syncJitsiNoiseSuppression("videoConferenceJoined");
 					syncJitsiAudioMuted("videoConferenceJoined");
+					syncJitsiRemoteParticipantVolumes("videoConferenceJoined");
 					window.setTimeout(() => syncJitsiAudioMuted("videoConferenceJoined-recheck"), JITSI_AUDIO_JOIN_RECHECK_DELAY_MS);
 				};
 				const handleAudioMuteStatusChanged = (event: JitsiAudioMuteStatusEvent) => {
@@ -539,6 +596,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 						isMuted: true,
 						isLocal: false
 					});
+					syncJitsiRemoteParticipantVolumes("participantJoined");
 				};
 				const handleParticipantLeft = (event: JitsiParticipantLeftEvent) => {
 					const participantId = event.id?.trim();
@@ -550,6 +608,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 						dominantSpeakerIdRef.current = null;
 					}
 					emitAudioSnapshot();
+					syncJitsiRemoteParticipantVolumes("participantLeft");
 				};
 				const handleDisplayNameChange = (event: JitsiDisplayNameChangeEvent) => {
 					const participantId = resolveAudioParticipantId(event.id);
@@ -623,7 +682,9 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 
 				setReadyMeetingKey(meetingKey);
 				onStatusChange?.("connected");
+				syncJitsiNoiseSuppression("apiReady");
 				syncJitsiAudioMuted("apiReady");
+				syncJitsiRemoteParticipantVolumes("apiReady");
 				onApiReady?.(api);
 			})
 			.catch(error => {
@@ -658,6 +719,8 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 		resetAudioSnapshot,
 		resolveAudioParticipantId,
 		syncJitsiAudioMuted,
+		syncJitsiNoiseSuppression,
+		syncJitsiRemoteParticipantVolumes,
 		upsertAudioParticipant
 	]);
 
@@ -677,8 +740,7 @@ export function JitsiRoom({ meetingDomain, roomName, displayName = "OmniObserve 
 					<Loader2 className="h-6 w-6 animate-spin" />
 				</div>
 			)}
-			{/* Transparent overlay to prevent iframe interaction */}
-			<div className="absolute inset-0 z-20" />
+			{!allowInteraction && <div className="absolute inset-0 z-20" aria-hidden="true" />}
 			<div ref={containerRef} className="h-full w-full" />
 		</div>
 	);

@@ -8,6 +8,8 @@ from .board import (
     IdeaBlockGenerateResponse,
     IdeaBlockUpdateRequest,
     IdeaBlockUpdateResponse,
+    SpreadsheetTaskItemsParseRequest,
+    SpreadsheetTaskItemsParseResponse,
     TaskConfigItemResponse,
     TaskConfigResponse,
     TaskPhaseResponse,
@@ -31,6 +33,7 @@ from .phase_task_item_snapshot import (
     PhaseTaskItemSnapshotItemResponse,
     PhaseTaskItemSnapshotResponse,
 )
+from .participant_role import ParticipantRoleResponse, ParticipantRoleUpdateRequest
 from .poster_idea_block_task_item import (
     PosterIdeaBlockTaskItemResponse,
     PosterIdeaBlockTaskItemsForIdeaBlockResponse,
@@ -42,6 +45,10 @@ from .private_phase_task_item import (
     PrivatePhaseTaskItemUpdate,
 )
 from .ranking_move import RankingMoveResponse
+from .ranking_phase_snapshot import (
+    RankingPhaseSnapshotItemResponse,
+    RankingPhaseSnapshotResponse,
+)
 from .ranking_state import EffectiveRankingStateResponse
 from .similarity import (
     SimilarityCreate,
@@ -80,6 +87,8 @@ __all__ = [
     "EffectiveRankingStateResponse",
     "PhaseTaskItemSnapshotItemResponse",
     "PhaseTaskItemSnapshotResponse",
+    "ParticipantRoleResponse",
+    "ParticipantRoleUpdateRequest",
     "PosterIdeaBlockTaskItemResponse",
     "PosterIdeaBlockTaskItemsForIdeaBlockResponse",
     "PrivatePhaseTaskItemCreate",
@@ -87,9 +96,13 @@ __all__ = [
     "PrivatePhaseTaskItemResponse",
     "PrivatePhaseTaskItemUpdate",
     "RankingMoveResponse",
+    "RankingPhaseSnapshotItemResponse",
+    "RankingPhaseSnapshotResponse",
     "SimilarityCreate",
     "SimilarityResponse",
     "SimilarityUpdate",
+    "SpreadsheetTaskItemsParseRequest",
+    "SpreadsheetTaskItemsParseResponse",
     "StreamContext",
     "StreamTranscript",
     "TaskItemCreate",

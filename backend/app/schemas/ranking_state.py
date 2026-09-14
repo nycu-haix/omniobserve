@@ -13,6 +13,6 @@ class EffectiveRankingStateResponse(BaseModel):
     source: str
     revision: int
     items: list[str]
+    change_count: int | None = None
     ranking_move_id: int | None = None
     updated_at: datetime | None = None
-
