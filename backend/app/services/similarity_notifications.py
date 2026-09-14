@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -6,7 +5,7 @@ from ..config import logger
 from ..db import SessionLocal
 from ..models import IdeaBlock, Similarity
 from .realtime import board_manager, get_session_cue_condition, get_session_phase, is_similarity_cue_enabled
-from .similarity_cue_event_service import record_similarity_cue_delivery
+from .similarity_cue_event_service import record_similarity_cue_delivery, pair_cue_id
 
 SimilarityCueDeliveryStatus = Literal["suppressed", "delivered", "failed"]
 
@@ -87,7 +86,7 @@ async def send_similarity_cue(
     is_same_reason: bool,
     reason: str = "",
 ) -> SimilarityCueDeliveryStatus:
-    cue_id = f"similarity-{similarity_id}-{own_block.id}-{int(time.time() * 1000)}"
+    cue_id = pair_cue_id(own_block.id, other_block.id)
     cue_enabled = is_similarity_cue_enabled(session_name)
     if not cue_enabled:
         await _record_similarity_cue_delivery_event(

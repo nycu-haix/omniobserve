@@ -5,16 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import SimilarityCueEvent
 from .similarity_service import list_scoped_similarities
-from .similarity_cue_event_service import record_similarity_cue_response, _resolve_group_id
+from .similarity_cue_event_service import record_similarity_cue_response, _resolve_group_id, pair_cue_id
 from ..task_config import resolve_task_id
 from ..utils import utc_now
 
 TERMINAL_RESPONSES = {"accepted", "dismissed", "ignored", "shared"}
-
-
-def pair_cue_id(own_id: int, other_id: int) -> str:
-    # Pair row IDs change when detection reruns; block identity does not.
-    return f"pair-{own_id}-{other_id}"
 
 
 def response_for_pair(events, own_id: int, other_id: int) -> str | None:
