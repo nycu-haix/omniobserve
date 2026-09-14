@@ -73,6 +73,7 @@ export function useSimilarityCueQueue({
 	const saveResponse = useCallback(
 		async (cue: SimilarityPairCueData, response: "shown" | "accepted" | "dismissed" | "shared") => {
 			const result = await fetch(`${endpoint}/response`, {
+				signal: AbortSignal.timeout(15000),
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ cueId: cue.cueId || cue.id, response })

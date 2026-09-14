@@ -2249,11 +2249,13 @@ export default function MeetingRoom() {
 		}
 
 		if (isRankingItemsChangedMessage(lastMessage)) {
-			applyUploadedTaskItems(lastMessage.ranking_items);
-			if (isRankingSnapshot(lastMessage.public_ranking)) {
-				applyRankingSnapshot("public", lastMessage.public_ranking);
-			}
-			return;
+			const timer = window.setTimeout(() => {
+				applyUploadedTaskItems(lastMessage.ranking_items);
+				if (isRankingSnapshot(lastMessage.public_ranking)) {
+					applyRankingSnapshot("public", lastMessage.public_ranking);
+				}
+			}, 0);
+			return () => window.clearTimeout(timer);
 		}
 
 		if (isRankingStateMessage(lastMessage)) {
@@ -2267,7 +2269,8 @@ export default function MeetingRoom() {
 				pendingRankingRef.current[scope] = nextRanking;
 				return;
 			}
-			applyRankingSnapshot(scope, nextRanking);
+			const timer = window.setTimeout(() => applyRankingSnapshot(scope, nextRanking), 0);
+			return () => window.clearTimeout(timer);
 		}
 	}, [applyRankingSnapshot, applyUploadedTaskItems, lastMessage]);
 

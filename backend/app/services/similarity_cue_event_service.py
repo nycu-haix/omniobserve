@@ -4,7 +4,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import logger
@@ -14,6 +14,10 @@ from ..utils import utc_now
 
 DELIVERY_STATUSES = {"pending", "delivered", "failed", "suppressed", "unknown"}
 RESPONSE_STATUSES = {"shown", "accepted", "ignored", "dismissed", "shared", "failed", "unknown"}
+
+
+def pair_cue_id(own_id: int, other_id: int) -> str:
+    return f"pair-{own_id}-{other_id}"
 
 
 async def record_similarity_cue_delivery(
@@ -121,6 +125,9 @@ async def upsert_similarity_cue_event(
             other_idea_block_id=other_idea_block_id,
             similarity_id=similarity_id,
         )
+    # The UI can acknowledge display before the delivery logger finishes.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                     {"key": f"{session_name}:{normalized_cue_id}"})
     event = await _get_event_by_cue_id(db, session_name=session_name, cue_id=normalized_cue_id)
     now = utc_now()
     normalized_delivery_status = _normalize_delivery_status(delivery_status)
