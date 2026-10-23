@@ -7,6 +7,35 @@ On 2026-09-13 the new VM `omniobserve-gpu` at `10.0.0.120` reported
 NVIDIA H200-35C, 35840 MiB VRAM, driver 570.172.08, 8 vCPU and 62 GiB usable RAM.
 Image: Ubuntu 24.04-vgpu. No second GPU VM was created.
 
+## Stopped status and search indexing (2026-10-23, GSC-20261023)
+
+The owner confirmed `omniobserve-gpu` was intentionally stopped/retired; there is
+no current live deployment. Evidence on 2026-10-23 (about 09:00 UTC):
+
+- DNS still resolves omni, api, ops, meet and turn `.omni.observe.tw` (DNS-only)
+  to 140.110.146.224; `www.omni.observe.tw` does not exist.
+- HTTP/HTTPS for omni.observe.tw, `/robots.txt`, `/sitemap.xml` and
+  dokploy.observe.tw timed out (no TCP connection) from five hosts: one on NYCU
+  140.113.229.0/24, two on NYCU 140.113.240.0/24, a HiNet home connection and
+  skyhong.tw. ICMP and
+  TCP 22/80/443 also timed out; traceroute stops after NCHC hop 10.249.247.1.
+- The last offsite backup snapshot was 2026-10-04 19:29 UTC. The monitoring
+  tunnel socket on skyhong.tw was last created 2026-10-05 03:22 UTC and now
+  refuses connections. status.skyhong.tw reported 0% 24-hour uptime for all
+  OmniObserve checks. Its `omni-probe` agent data is stale since 2026-09-12.
+
+Search intent: OmniObserve is a research tool and should not be indexed. The
+frontend sends `X-Robots-Tag: noindex, nofollow` on every response, includes a
+robots meta tag, serves an allow-all `robots.txt` so crawlers can read noindex,
+and returns 404 for `/sitemap.xml`. No sitemap is published. This takes effect
+only after a frontend is deployed again; nothing serves it while the VM is off.
+
+Still open, requiring the IIC console and the observe.tw Cloudflare zone owner:
+decide whether to keep the reserved IP. If it is released, remove the
+`*.omni.observe.tw` A/CNAME records first so they cannot point at another
+tenant. An unreachable host or removed DNS is an acceptable retired state; do not
+redirect these hostnames to unrelated sites.
+
 `compose.yml` shares CUDA device 0 between a realtime ASR worker and a dedicated
 complete-file worker. Start the first worker
 and finish model download before starting the second worker. Both use the existing
